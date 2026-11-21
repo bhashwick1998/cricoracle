@@ -7,7 +7,7 @@ Models:
 - 11x6 Pairwise Matchup Matrix with Empirical Bayes shrinkage
 """
 
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 import math
 from .debut_priors import compute_empirical_bayes_shrinkage
 

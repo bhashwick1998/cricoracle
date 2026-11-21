@@ -40,6 +40,8 @@ class IngestionManager:
         self.scheduler = AsyncIOScheduler()
         self.is_active = True
         self.active_cricbuzz_bindings = {
+            "m_nz_ind_2026_test_1": "161285",
+            "m_aus_eng_2026_t20_1": "151338",
             "m_zim_afg_2026_test_2": "172731",
         }
 

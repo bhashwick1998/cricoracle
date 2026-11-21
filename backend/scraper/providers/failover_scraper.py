@@ -916,19 +916,30 @@ class FailoverScraper:
                     st_low = (m.get("status_text") or "").lower()
 
                     # Select active batting team score
-                    if "need" in st_low:
-                        if c1.lower() in st_low or (c1 == "AUS" and "australia" in st_low):
+                    w1 = int(t1_sc.get("wickets") or 0)
+                    w2 = int(t2_sc.get("wickets") or 0)
+                    r1 = t1_sc.get("runs")
+                    r2 = t2_sc.get("runs")
+
+                    if w2 == 10 and w1 < 10:
+                        bat_sc = t1_sc
+                        bat_team = c1
+                    elif w1 == 10 and w2 < 10:
+                        bat_sc = t2_sc
+                        bat_team = c2
+                    elif any(k in st_low for k in ["need", "lead by", "trail by", "target"]):
+                        if (c1.lower() in st_low or (c1 == "IND" and "india" in st_low) or (c1 == "AUS" and "australia" in st_low)):
                             bat_sc = t1_sc
                             bat_team = c1
                         else:
                             bat_sc = t2_sc
                             bat_team = c2
-                    elif t2_sc.get("overs", 0) > 0 and t1_sc.get("wickets", 0) == 10:
+                    elif r2 is not None and r1 is not None:
                         bat_sc = t2_sc
                         bat_team = c2
                     else:
-                        bat_sc = t1_sc
-                        bat_team = c1
+                        bat_sc = t1_sc if r1 is not None else t2_sc
+                        bat_team = c1 if r1 is not None else c2
 
                     score_str = f"{bat_team} {bat_sc.get('runs', 0)}/{bat_sc.get('wickets', 0)} ({bat_sc.get('overs', 0)}.{bat_sc.get('balls', 0)})"
 

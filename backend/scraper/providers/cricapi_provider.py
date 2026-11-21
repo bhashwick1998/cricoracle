@@ -573,18 +573,78 @@ class CricApiSquadProvider:
                     """, (status_text, status_text, mid))
                     updated_matches.append(mid)
                 else:
-                    # Determine active batting team and innings
-                    bat_sc = t2_sc if t2_sc.get("runs") is not None else t1_sc
-                    inn_val = 2 if (t1_sc.get("runs") is not None and t2_sc.get("runs") is not None) else 1
+                    # Determine active batting team and innings accurately
+                    w1 = int(t1_sc.get("wickets") or 0)
+                    w2 = int(t2_sc.get("wickets") or 0)
+                    r1 = t1_sc.get("runs")
+                    r2 = t2_sc.get("runs")
+
+                    # Identify which team is batting in which innings
+                    if r1 is not None and r2 is not None:
+                        inn_val = 2
+                        if w2 == 10 and w1 < 10:
+                            # Team B all out in 1st innings; Team A currently batting in 2nd innings
+                            bat_sc = t1_sc
+                            bat_team = c1
+                            inn_1_team, inn_1_sc = c2, t2_sc
+                            inn_2_team, inn_2_sc = c1, t1_sc
+                        elif w1 == 10 and w2 < 10:
+                            # Team A all out in 1st innings; Team B currently batting in 2nd innings
+                            bat_sc = t2_sc
+                            bat_team = c2
+                            inn_1_team, inn_1_sc = c1, t1_sc
+                            inn_2_team, inn_2_sc = c2, t2_sc
+                        elif any(k in st_low for k in ["lead by", "trail by", "need", "target"]):
+                            if (c1.lower() in st_low or (c1 == "IND" and "india" in st_low) or (c1 == "AUS" and "australia" in st_low)):
+                                bat_sc = t1_sc
+                                bat_team = c1
+                                inn_1_team, inn_1_sc = c2, t2_sc
+                                inn_2_team, inn_2_sc = c1, t1_sc
+                            else:
+                                bat_sc = t2_sc
+                                bat_team = c2
+                                inn_1_team, inn_1_sc = c1, t1_sc
+                                inn_2_team, inn_2_sc = c2, t2_sc
+                        else:
+                            # Default 2nd innings chaser / responder
+                            bat_sc = t2_sc
+                            bat_team = c2
+                            inn_1_team, inn_1_sc = c1, t1_sc
+                            inn_2_team, inn_2_sc = c2, t2_sc
+                    else:
+                        inn_val = 1
+                        bat_sc = t1_sc if r1 is not None else t2_sc
+                        bat_team = c1 if r1 is not None else c2
+                        inn_1_team, inn_1_sc = bat_team, bat_sc
+                        inn_2_team, inn_2_sc = None, None
+
                     runs = bat_sc.get("runs") or db_m.get("current_score") or 0
-                    wkts = bat_sc.get("wickets") or db_m.get("current_wickets") or 0
-                    ovs = bat_sc.get("overs") or db_m.get("current_overs") or 0
+                    wkts = bat_sc.get("wickets") if bat_sc.get("wickets") is not None else (db_m.get("current_wickets") or 0)
+                    ovs = bat_sc.get("overs") if bat_sc.get("overs") is not None else (db_m.get("current_overs") or 0)
                     balls = bat_sc.get("balls") or db_m.get("current_balls") or 0
+
+                    # Anti-score-regression guard
+                    if inn_val == db_m.get("current_innings") and runs < int(db_m.get("current_score") or 0):
+                        runs = int(db_m.get("current_score") or 0)
+                        wkts = int(db_m.get("current_wickets") or 0)
+                        ovs = int(db_m.get("current_overs") or 0)
+                        balls = int(db_m.get("current_balls") or 0)
 
                     is_stumps = 1 if "stumps" in st_low else int(db_m.get("is_stumps") or 0)
                     day_m = re.search(r"day\s*([1-5])", st_low)
                     s_day = int(day_m.group(1)) if day_m else int(db_m.get("stumps_day") or 1)
                     s_lbl = f"🌙 STUMPS • DAY {s_day}" if is_stumps else None
+
+                    # Prepare 1st & 2nd innings values
+                    i1_team = inn_1_team or db_m.get("innings_1_team_id")
+                    i1_runs = inn_1_sc.get("runs") if inn_1_sc else db_m.get("innings_1_score")
+                    i1_wkts = inn_1_sc.get("wickets") if inn_1_sc else db_m.get("innings_1_wickets")
+                    i1_ovs = inn_1_sc.get("overs") if inn_1_sc else db_m.get("innings_1_overs")
+
+                    i2_team = inn_2_team or db_m.get("innings_2_team_id")
+                    i2_runs = inn_2_sc.get("runs") if inn_2_sc else db_m.get("innings_2_score")
+                    i2_wkts = inn_2_sc.get("wickets") if inn_2_sc else db_m.get("innings_2_wickets")
+                    i2_ovs = inn_2_sc.get("overs") if inn_2_sc else db_m.get("innings_2_overs")
 
                     await conn.execute("""
                         UPDATE matches SET
@@ -597,9 +657,22 @@ class CricApiSquadProvider:
                             match_status_text = ?,
                             is_stumps = ?,
                             stumps_day = ?,
-                            stumps_label = ?
+                            stumps_label = ?,
+                            innings_1_team_id = ?,
+                            innings_1_score = ?,
+                            innings_1_wickets = ?,
+                            innings_1_overs = ?,
+                            innings_2_team_id = ?,
+                            innings_2_score = ?,
+                            innings_2_wickets = ?,
+                            innings_2_overs = ?
                         WHERE id = ?
-                    """, (inn_val, runs, wkts, ovs, balls, status_text, is_stumps, s_day, s_lbl, mid))
+                    """, (
+                        inn_val, runs, wkts, ovs, balls, status_text, is_stumps, s_day, s_lbl,
+                        i1_team, i1_runs, i1_wkts, i1_ovs,
+                        i2_team, i2_runs, i2_wkts, i2_ovs,
+                        mid
+                    ))
                     updated_matches.append(mid)
 
         await conn.commit()
