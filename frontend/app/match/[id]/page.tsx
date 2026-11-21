@@ -385,11 +385,19 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
-      const res = await fetch(`/api/matches/${id}?_t=${Date.now()}`, {
+      let res = await fetch(`/api/matches/${id}?_t=${Date.now()}`, {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" },
         signal: controller.signal
       });
+      // Fallback directly to public backend if proxy rewrite returns non-200
+      if (!res.ok) {
+        res = await fetch(`https://cricoracle-backend.onrender.com/api/matches/${id}?_t=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+          signal: controller.signal
+        });
+      }
       if (res.ok) {
         const json = await res.json();
         setData(json);
@@ -423,9 +431,10 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     fetchMatchDetail();
     fetchAccuracy();
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.hostname;
-    const wsUrl = `${protocol}//${host}:8000/ws/matches`;
+    const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    const wsUrl = isLocal
+      ? `ws://${window.location.hostname}:8000/ws/matches`
+      : `wss://cricoracle-backend.onrender.com/ws/matches`;
 
     let socket: WebSocket | null = null;
     let reconnectTimer: any = null;

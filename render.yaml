@@ -35,14 +35,8 @@ services:
       - key: NODE_OPTIONS
         value: --experimental-require-module
       - key: BACKEND_URL
-        fromService:
-          type: web
-          name: cricoracle-backend
-          property: host
+        value: https://cricoracle-backend.onrender.com
       - key: NEXT_PUBLIC_API_URL
-        fromService:
-          type: web
-          name: cricoracle-backend
-          property: host
+        value: https://cricoracle-backend.onrender.com
       - key: NEXT_PUBLIC_SITE_URL
-        sync: false
+        value: https://cricoracle-frontend.onrender.com
