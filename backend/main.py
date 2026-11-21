@@ -282,6 +282,7 @@ class PlayerCompareRequest(BaseModel):
     lens: str = "Balanced"  # Balanced, Explosive, Purist, Clutch
     match_format: str = "T20I"
 
+@app.get("/")
 @app.get("/health")
 @app.get("/api/health")
 async def health_check():
@@ -289,7 +290,13 @@ async def health_check():
         "status": "online",
         "system": "CricOracle Telemetry Platform",
         "environment": "production",
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "endpoints": {
+            "health": "/health",
+            "matches": "/api/matches",
+            "parameters": "/api/parameters/optimized",
+            "docs": "/docs"
+        }
     }
 
 @app.post("/api/admin/recalibrate-parameters")
