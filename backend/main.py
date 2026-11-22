@@ -766,27 +766,6 @@ async def get_matches(state: Optional[str] = None):
                     m["current_overs"] = 54
                     m["current_balls"] = 3
                     m["target_runs"] = 193
-                elif m.get("id") == "m_aus_eng_2026_odi_1":
-                    m["state"] = "COMPLETED"
-                    m["is_completed"] = True
-                    m["winning_team_id"] = "AUS"
-                    m["winning_team_name"] = "Australia"
-                    m["result_description"] = "Australia won by 6 wickets (with 40 balls remaining)"
-                    m["match_status_text"] = "Australia won by 6 wickets (Target 246 reached)"
-                    m["p_team_a"] = 100.0
-                    m["p_team_b"] = 0.0
-                    m["innings_1_team_id"] = "ENG"
-                    m["innings_1_score"] = 245
-                    m["innings_1_wickets"] = 10
-                    m["innings_1_overs"] = 48.4
-                    m["innings_2_team_id"] = "AUS"
-                    m["innings_2_score"] = 248
-                    m["innings_2_wickets"] = 4
-                    m["innings_2_overs"] = 43.2
-                    m["current_score"] = 248
-                    m["current_wickets"] = 4
-                    m["current_overs"] = 43
-                    m["current_balls"] = 2
 
                 if m.get("format") == "TEST":
                     compute_test_overs_and_follow_on(m)
@@ -995,17 +974,14 @@ async def get_matches(state: Optional[str] = None):
                     continue
 
                 if st == "COMPLETED":
-                    # Only show finished matches for 2 days
+                    # Strictly only show finished matches for 2 days (48 hours)
                     if (diff_sec + match_duration) >= -max_past_window:
                         filtered_matches.append(m)
-                elif st == "XI_AND_TOSS_LOCKED":
-                    # Stage 3: Playing 11 and Toss locked from CricketData.org API
-                    # Strictly valid ONLY for upcoming / imminent matches (within match window, not stale past fixtures)
-                    if (diff_sec + match_duration) >= 0 and diff_sec <= 86400:
+                elif st in ("XI_AND_TOSS_LOCKED", "SQUAD_ANNOUNCED", "UPCOMING_NO_SQUAD"):
+                    # Upcoming fixtures (Stage 1 Macro, Stage 2 Squad, Stage 3 XI Locked)
+                    # Strictly valid ONLY for upcoming/future fixtures (not stale past matches)
+                    if (diff_sec + match_duration) >= 0:
                         filtered_matches.append(m)
-                else:
-                    # Stage 1 (Macro) & Stage 2 (Squad) are not shown on homepage
-                    pass
             except Exception:
                 pass
 

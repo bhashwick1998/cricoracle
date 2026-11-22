@@ -468,34 +468,34 @@ async def seed_database():
                 -3.0, 0.0, "Seddon Park true bounce benefits KL Rahul & Rishabh Pant anchor chase; India +4 on DLS Par",
                 0.0, "Rain Interruption (Covers On): India 142/3 (24.0 ov) - Ahead by +4 runs on DLS Par (138)"
             ),
-            # 5. NZ vs IND - 4th ODI (Friday, Nov 13, 2026 - 15:00 NZDT / 02:00 UTC)
+            # 5. NZ vs IND - 4th ODI (Wednesday, Dec 02, 2026 - 15:00 NZDT / 02:00 UTC)
             (
                 "m_nz_ind_2026_odi_4", "India Tour of New Zealand 2026 - 4th ODI", "ODI",
-                "NZ", "IND", "bay_oval", "2026-11-13T02:00:00Z", 1,
-                "UPCOMING_NO_SQUAD", None, None,
+                "NZ", "IND", "bay_oval", "2026-12-02T02:00:00Z", 1,
+                "SQUAD_ANNOUNCED", None, None,
                 1, 0, 0, 0, 0, None,
                 None, None, None,
                 47.5, 52.5, 47.5, 47.5, 47.5,
                 280, 250, 310,
                 0.0, 0.0, "Bay Oval true seam balance aids pacers in opening 10 overs",
-                0.0, "Scheduled Fixture"
+                0.0, "15-Player Squads Declared • Stage 2 Squad Fit Calibrated"
             ),
-            # 6. NZ vs IND - 5th ODI (Sunday, Nov 15, 2026 - 15:00 NZDT / 02:00 UTC)
+            # 6. NZ vs IND - 5th ODI (Saturday, Dec 05, 2026 - 15:00 NZDT / 02:00 UTC)
             (
                 "m_nz_ind_2026_odi_5", "India Tour of New Zealand 2026 - 5th ODI", "ODI",
-                "NZ", "IND", "bay_oval", "2026-11-15T02:00:00Z", 1,
+                "NZ", "IND", "eden_park", "2026-12-05T02:00:00Z", 1,
                 "UPCOMING_NO_SQUAD", None, None,
                 1, 0, 0, 0, 0, None,
                 None, None, None,
                 48.0, 52.0, 48.0, 48.0, 48.0,
                 280, 250, 310,
-                0.0, 0.0, "Series finale at Bay Oval with D/N dew conditions",
-                0.0, "Scheduled Fixture"
+                0.0, 0.0, "Series finale at Eden Park with D/N dew conditions",
+                0.0, "Macro Condition-Adjusted Prediction • Squads TBA"
             ),
-            # 7. AUS vs ENG - 1st ODI (Friday, Nov 13, 2026 - 11:30 Local Perth / 03:30 UTC at Perth Stadium)
+            # 7. AUS vs ENG - 1st ODI (Wednesday, Nov 25, 2026 - 11:30 Local Perth / 03:30 UTC at Perth Stadium)
             (
                 "m_aus_eng_2026_odi_1", "England Tour of Australia 2026 - 1st ODI", "ODI",
-                "AUS", "ENG", "perth", "2026-11-13T03:30:00Z", 1,
+                "AUS", "ENG", "perth", "2026-11-25T03:30:00Z", 1,
                 "SQUAD_ANNOUNCED", None, None,
                 1, 0, 0, 0, 0, None,
                 None, None, None,
@@ -504,10 +504,10 @@ async def seed_database():
                 0.0, 0.0, "Optus Stadium hard drop-in deck creates steep vertical carry; pace attack affinity +12.4%",
                 0.0, "15-Player Squads Declared • Official Playing XI announced at Toss"
             ),
-            # 8. AUS vs ENG - 2nd ODI (Sunday, Nov 15, 2026 at Adelaide Oval)
+            # 8. AUS vs ENG - 2nd ODI (Saturday, Nov 28, 2026 at Adelaide Oval)
             (
                 "m_aus_eng_2026_odi_2", "England Tour of Australia 2026 - 2nd ODI", "ODI",
-                "AUS", "ENG", "adelaide", "2026-11-15T03:30:00Z", 1,
+                "AUS", "ENG", "adelaide", "2026-11-28T03:30:00Z", 1,
                 "SQUAD_ANNOUNCED", None, None,
                 1, 0, 0, 0, 0, None,
                 None, None, None,
@@ -516,17 +516,17 @@ async def seed_database():
                 0.0, 0.0, "Adelaide Oval true batting surface with short square boundaries",
                 0.0, "15-Player Squads Declared • Stage 2 Squad Fit Calibrated"
             ),
-            # 8B. AUS vs ENG - 3rd ODI (Wednesday, Nov 18, 2026 at MCG)
+            # 8B. AUS vs ENG - 3rd ODI (Tuesday, Dec 01, 2026 at MCG)
             (
                 "m_aus_eng_2026_odi_3", "England Tour of Australia 2026 - 3rd ODI", "ODI",
-                "AUS", "ENG", "mcg", "2026-11-18T03:30:00Z", 1,
-                "SQUAD_ANNOUNCED", None, None,
+                "AUS", "ENG", "mcg", "2026-12-01T03:30:00Z", 1,
+                "UPCOMING_NO_SQUAD", None, None,
                 1, 0, 0, 0, 0, None,
                 None, None, None,
                 56.2, 43.8, 56.2, 56.2, 56.2,
                 285, 250, 310,
                 0.0, 0.0, "MCG vast boundary dimensions favor athletic outfield running and tall seamers",
-                0.0, "15-Player Squads Declared • Stage 2 Squad Fit Calibrated"
+                0.0, "Macro Condition-Adjusted Prediction • Squads TBA"
             ),
             # 9. IND vs SA - 1st T20I (Friday, Nov 27, 2026)
             (
@@ -555,7 +555,7 @@ async def seed_database():
             # 10A. AUS vs ENG - 1st T20I (MCG) - Official Senior Men's International (AUS 191/7 in 19.5 ov def ENG 187/9 in 20 ov)
             (
                 "m_aus_eng_2026_t20_1", "England Tour of Australia 2026 - 1st T20I", "T20I",
-                "AUS", "ENG", "mcg", "2026-11-20T08:00:00Z", 1,
+                "AUS", "ENG", "mcg", "2026-11-21T08:00:00Z", 1,
                 "COMPLETED", "AUS", "field",
                 2, 191, 7, 19, 5, 188,
                 None, None, None,
@@ -564,17 +564,17 @@ async def seed_database():
                 0.0, 0.0, "MCG true bounce track - Australia chase 188 with 3 balls to spare",
                 0.0, "Australia won by 3 wkts"
             ),
-            # 10B. AUS vs ENG - 2nd T20I (Sunday, Nov 15, 2026 at SCG) - PURE STAGE 1 MACRO PRIOR (AUS 57.1% vs ENG 42.9%)
+            # 10B. AUS vs ENG - 2nd T20I (Monday, Nov 23, 2026 at SCG) - STAGE 3 CONFIRMED PLAYING 11 & TOSS LOCKED
             (
                 "m_aus_eng_2026_t20_2", "England Tour of Australia 2026 - 2nd T20I", "T20I",
-                "AUS", "ENG", "scg", "2026-11-15T08:00:00Z", 1,
-                "UPCOMING_NO_SQUAD", None, None,
+                "AUS", "ENG", "scg", "2026-11-23T08:00:00Z", 1,
+                "XI_AND_TOSS_LOCKED", "AUS", "bat",
                 1, 0, 0, 0, 0, None,
-                None, None, None,
+                "t_head_aus", "m_marsh_aus", "j_archer_eng",
                 57.1, 42.9, 57.1, 57.1, 57.1,
                 166, 148, 184,
-                0.0, 0.0, "SCG pitch conditions with spin ratio 0.48 and home advantage give Australia 57.1% Macro Elo edge",
-                0.0, "Stage 1 Macro Prediction (AUS 57.1% vs ENG 42.9%) • Sydney Cricket Ground • Squads TBA"
+                0.0, 0.0, "SCG pitch conditions with spin ratio 0.48 and home advantage give Australia 57.1% edge; Australia won toss & elected to bat",
+                0.0, "Stage 3 Confirmed: Australia won toss and elected to bat • Playing XI Confirmed"
             ),
             # 11. NZ vs IND - 1st ODI (Wednesday, Nov 4, 2026 - COMPLETED)
             (

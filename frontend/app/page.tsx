@@ -230,8 +230,12 @@ export default function HomePage() {
           // Toss locked is strictly for upcoming matches, cannot be a stale past fixture
           return false;
         }
+        if ((m.state === "UPCOMING_NO_SQUAD" || m.state === "SQUAD_ANNOUNCED") && matchEndMs < Date.now()) {
+          // Upcoming fixtures cannot be stale past fixtures
+          return false;
+        }
 
-        // State Filter (Stage 1 & 2 removed; only Stage 3, Stage 4 and Completed <= 2 days)
+        // State Filter
         if (activeTab === "LIVE") {
           if (m.state !== "LIVE_BALL_BY_BALL" || m.is_completed) return false;
         } else if (activeTab === "COMPLETED") {
@@ -239,7 +243,7 @@ export default function HomePage() {
         } else if (activeTab === "XI_LOCKED") {
           if (m.state !== "XI_AND_TOSS_LOCKED") return false;
         }
-        // "ALL" shows all verified matches (Stage 3, Stage 4, Completed <= 2 days)
+        // "ALL" shows all verified matches (Live in-play, Stage 3 XI Locked, Stage 2 Squad, Stage 1 Macro, and Completed <= 2 days)
 
         // Format Filter
         if (formatFilter !== "ALL" && m.format !== formatFilter) {
