@@ -38,7 +38,12 @@ class IngestionManager:
         self.entity_resolver = EntityResolver()
         self.cricbuzz_api = CricbuzzScoreApi()
         self.replay_sim = ReplaySimulator(broadcast_callback=self.broadcast_func)
-        self.scheduler = AsyncIOScheduler()
+        job_defaults = {
+            "coalesce": True,
+            "max_instances": 1,
+            "misfire_grace_time": 60,
+        }
+        self.scheduler = AsyncIOScheduler(job_defaults=job_defaults)
         self.is_active = True
         self.active_cricbuzz_bindings = {
             "m_nz_ind_2026_test_1": "161285",
@@ -49,18 +54,18 @@ class IngestionManager:
     async def start(self):
         """Starts background scheduled polling."""
         # Cadence 1: Sync upcoming fixtures
-        self.scheduler.add_job(self.sync_upcoming_fixtures, "interval", hours=6, id="sync_fixtures")
+        self.scheduler.add_job(self.sync_upcoming_fixtures, "interval", hours=6, id="sync_fixtures", misfire_grace_time=300, coalesce=True)
         # Cadence 2: Check squads for matches in 72h
-        self.scheduler.add_job(self.poll_squads_cadence, "interval", hours=1, id="poll_squads")
+        self.scheduler.add_job(self.poll_squads_cadence, "interval", hours=1, id="poll_squads", misfire_grace_time=120, coalesce=True)
         # Cadence 3: Poll toss & Playing XI (every 3 minutes)
-        self.scheduler.add_job(self.poll_toss_and_xi_cadence, "interval", minutes=3, id="poll_toss_xi")
-        # Cadence 4: Live In-Play Ball-by-Ball Auto Stream (every 15 seconds for LIVE_BALL_BY_BALL matches)
-        self.scheduler.add_job(self.poll_live_matches_cadence, "interval", seconds=15, id="poll_live_matches", max_instances=2)
+        self.scheduler.add_job(self.poll_toss_and_xi_cadence, "interval", minutes=3, id="poll_toss_xi", misfire_grace_time=60, coalesce=True)
+        # Cadence 4: Live In-Play Ball-by-Ball Auto Stream (every 20 seconds for LIVE_BALL_BY_BALL matches)
+        self.scheduler.add_job(self.poll_live_matches_cadence, "interval", seconds=20, id="poll_live_matches", max_instances=1, misfire_grace_time=60, coalesce=True)
         # Cadence 5: Dynamic Auto-Discovery of Live Matches across Top Feeds (every 60 seconds)
-        self.scheduler.add_job(self.auto_discover_and_sync_live_matches, "interval", seconds=60, id="auto_discover_live", max_instances=1)
+        self.scheduler.add_job(self.auto_discover_and_sync_live_matches, "interval", seconds=60, id="auto_discover_live", max_instances=1, misfire_grace_time=60, coalesce=True)
         # Cadence 6: Periodic Cricsheet match ingestion & parameter recalibration (every 24 hours)
         from ..engine.cricsheet_auto_updater import trigger_cricsheet_parameter_recalibration
-        self.scheduler.add_job(trigger_cricsheet_parameter_recalibration, "interval", hours=24, id="cricsheet_recalibration")
+        self.scheduler.add_job(trigger_cricsheet_parameter_recalibration, "interval", hours=24, id="cricsheet_recalibration", misfire_grace_time=3600, coalesce=True)
         self.scheduler.start()
         logger.info("IngestionManager background scheduler started with live in-play worker, auto-discovery, and Cricsheet parameter optimizer.")
 
@@ -309,18 +314,26 @@ class IngestionManager:
         try:
             # 1. Fetch active live matches from database
             async with conn.execute(
-                "SELECT id FROM matches WHERE state IN ('LIVE_BALL_BY_BALL', 'IN_PLAY')"
+                "SELECT id, is_stumps FROM matches WHERE state IN ('LIVE_BALL_BY_BALL', 'IN_PLAY')"
             ) as c:
                 live_rows = await c.fetchall()
-                active_ids = [r["id"] for r in live_rows]
+                active_ids = []
+                for r in live_rows:
+                    # If match is at Day Stumps (Close of Play), throttle checks to once every 5 minutes
+                    if bool(r["is_stumps"]):
+                        last_stumps_poll = getattr(self, f"_last_stumps_poll_{r['id']}", 0.0)
+                        if time.time() - last_stumps_poll < 300.0:
+                            continue
+                        setattr(self, f"_last_stumps_poll_{r['id']}", time.time())
+                    active_ids.append(r["id"])
 
             # 2. Ingest live ball-by-ball updates for active matches concurrently via cascading Top Scraper
             async def sync_single_match(mid: str):
                 cb_id = self.active_cricbuzz_bindings.get(mid)
                 try:
-                    await asyncio.wait_for(self.scrape_and_apply_cricbuzz(mid, cb_id), timeout=12.0)
+                    await asyncio.wait_for(self.scrape_and_apply_cricbuzz(mid, cb_id), timeout=10.0)
                 except asyncio.TimeoutError:
-                    logger.debug(f"Live scrape cycle timed out after 12s for {mid}")
+                    logger.debug(f"Live scrape cycle timed out after 10s for {mid}")
                 except Exception as m_err:
                     logger.warning(f"Error updating live match {mid} via Top Scraper: {m_err}")
 
