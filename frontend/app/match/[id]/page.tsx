@@ -1022,9 +1022,16 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     Official ICC Match Result Concluded
                   </div>
                   <div className="text-xs font-medium text-slate-400 mt-1 font-mono-numbers">
-                    {match.innings_1_score && match.innings_2_score ? (
-                      <span>{metaB.short} {match.innings_1_score}/{match.innings_1_wickets || 10} • {metaA.short} {match.innings_2_score}/{match.innings_2_wickets || 10}</span>
-                    ) : (
+                    {match.innings_1_score && match.innings_2_score ? (() => {
+                      const inn1Team = (match as any).innings_1_team_id === match.team_b_id ? metaB : metaA;
+                      const inn2Team = inn1Team === metaA ? metaB : metaA;
+                      return (
+                        <span>
+                          {inn1Team.short} {match.innings_1_score}/{match.innings_1_wickets || 10} • {inn2Team.short} {match.innings_2_score}/{match.innings_2_wickets || 10}
+                          {match.format === "TEST" && (match as any).innings_3_score ? ` • ${inn1Team.short} ${(match as any).innings_3_score}/${(match as any).innings_3_wickets ?? 2}` : ""}
+                        </span>
+                      );
+                    })() : (
                       <span>Final Score: {match.current_score}/{match.current_wickets} ({match.current_overs} ov)</span>
                     )}
                   </div>
@@ -4201,72 +4208,81 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
 
                 {/* Team or Test Innings Selector Tabs */}
                 <div className="flex items-center gap-2 pt-2 border-t border-slate-800 overflow-x-auto">
-                  {isTest ? (
-                    <>
-                      <button
-                        onClick={() => setSelectedInningsTab("innings_1")}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 border whitespace-nowrap ${
-                          selectedInningsTab === "innings_1"
-                            ? "bg-slate-700 text-white border-slate-500 shadow-md"
-                            : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
-                        }`}
-                      >
-                        <span>{metaA.flag}</span>
-                        <span>PAK 1st Inn (Closed 434/9d)</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">
-                          {testProjs.innings_1?.projected_team_total || 434}r
-                        </span>
-                      </button>
+                  {isTest ? (() => {
+                    const inn1Team = (match as any).innings_1_team_id === match.team_b_id ? metaB : metaA;
+                      const inn2Team = inn1Team === metaA ? metaB : metaA;
+                      const s1 = (match as any).innings_1_score || testProjs.innings_1?.projected_team_total || 368;
+                      const s2 = (match as any).innings_2_score || testProjs.innings_2?.projected_team_total || 720;
+                      const s3 = (match as any).innings_3_score || match.current_score || 119;
+                      const s3Wkts = (match as any).innings_3_wickets ?? match.current_wickets ?? 2;
+                      const deficit = s2 - (s1 + s3);
+                      return (
+                        <>
+                          <button
+                            onClick={() => setSelectedInningsTab("innings_1")}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 border whitespace-nowrap ${
+                              selectedInningsTab === "innings_1"
+                                ? "bg-slate-700 text-white border-slate-500 shadow-md"
+                                : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
+                            }`}
+                          >
+                            <span>{inn1Team.flag}</span>
+                            <span>{inn1Team.short} 1st Inn (Closed {s1}/{(match as any).innings_1_wickets || 10})</span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+                              {s1}r
+                            </span>
+                          </button>
 
-                      <button
-                        onClick={() => setSelectedInningsTab("innings_2")}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 border whitespace-nowrap ${
-                          selectedInningsTab === "innings_2"
-                            ? "bg-amber-600 text-white border-amber-400 shadow-md"
-                            : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
-                        }`}
-                      >
-                        <span>{metaB.flag}</span>
-                        <span>SL 1st Inn (Closed 446)</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950 text-amber-200 border border-amber-700 font-mono">
-                          {testProjs.innings_2?.projected_team_total || 446}r • Led by 12r
-                        </span>
-                      </button>
+                          <button
+                            onClick={() => setSelectedInningsTab("innings_2")}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 border whitespace-nowrap ${
+                              selectedInningsTab === "innings_2"
+                                ? "bg-amber-600 text-white border-amber-400 shadow-md"
+                                : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
+                            }`}
+                          >
+                            <span>{inn2Team.flag}</span>
+                            <span>{inn2Team.short} 1st Inn (Closed {s2}/{(match as any).innings_2_wickets || 9}d)</span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950 text-amber-200 border border-amber-700 font-mono">
+                              {s2}r • Led by {s2 - s1}r
+                            </span>
+                          </button>
 
-                      <button
-                        onClick={() => setSelectedInningsTab("innings_3")}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 border whitespace-nowrap ${
-                          selectedInningsTab === "innings_3"
-                            ? "bg-cyan-600 text-white border-cyan-400 shadow-md"
-                            : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
-                        }`}
-                      >
-                        <span>{metaA.flag}</span>
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                          PAK 2nd Inn (Live In-Play 57/1)
-                        </span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-200 border border-cyan-700 font-mono">
-                          ~{testProjs.innings_3?.projected_team_total || 265}r • Lead 45r
-                        </span>
-                      </button>
+                          <button
+                            onClick={() => setSelectedInningsTab("innings_3")}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 border whitespace-nowrap ${
+                              selectedInningsTab === "innings_3"
+                                ? "bg-cyan-600 text-white border-cyan-400 shadow-md"
+                                : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
+                            }`}
+                          >
+                            <span>{inn1Team.flag}</span>
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                              {inn1Team.short} 2nd Inn (Live In-Play {s3}/{s3Wkts})
+                            </span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-200 border border-cyan-700 font-mono">
+                              {deficit > 0 ? `Trail by ${deficit}r` : `Lead by ${Math.abs(deficit)}r`}
+                            </span>
+                          </button>
 
-                      <button
-                        onClick={() => setSelectedInningsTab("innings_4")}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 border whitespace-nowrap ${
-                          selectedInningsTab === "innings_4"
-                            ? "bg-emerald-600 text-white border-emerald-400 shadow-md"
-                            : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
-                        }`}
-                      >
-                        <span>{metaB.flag}</span>
-                        <span>SL 2nd Inn (Projected 4th Inn Chase)</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-200 border border-emerald-700 font-mono">
-                          Target {testProjs.innings_4?.target_to_win || 254}
-                        </span>
-                      </button>
-                    </>
-                  ) : (
+                          <button
+                            onClick={() => setSelectedInningsTab("innings_4")}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 border whitespace-nowrap ${
+                              selectedInningsTab === "innings_4"
+                                ? "bg-emerald-600 text-white border-emerald-400 shadow-md"
+                                : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
+                            }`}
+                          >
+                            <span>{inn2Team.flag}</span>
+                            <span>{inn2Team.short} 2nd Inn (Projected 4th Inn Chase)</span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-200 border border-emerald-700 font-mono">
+                              Target {testProjs.innings_4?.target_to_win || 254}
+                            </span>
+                          </button>
+                        </>
+                      );
+                    })() : (
                     <>
                       <button
                         onClick={() => setSelectedSquadTab("team_a")}

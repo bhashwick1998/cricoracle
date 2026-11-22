@@ -694,7 +694,14 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                   <>
                     <div className="text-lg font-black text-white font-mono-numbers mt-0.5 flex items-center gap-1.5 flex-wrap">
                       <span>{battingTeam.flag}</span>
-                      <span className="text-cyan-300 font-bold">{battingTeam.name}:</span>
+                      <span className="text-cyan-300 font-bold">
+                        {battingTeam.name}
+                        {match.format === "TEST"
+                          ? match.current_innings >= 3
+                            ? " (2nd Inn):"
+                            : " (1st Inn):"
+                          : ":"}
+                      </span>
                       <span className="text-white">{match.current_score}/{match.current_wickets}</span>
                       <span className="text-xs text-slate-400 font-normal">
                         ({match.current_overs}.{match.current_balls} ov)

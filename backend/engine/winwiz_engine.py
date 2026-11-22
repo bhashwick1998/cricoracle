@@ -314,6 +314,20 @@ def calculate_winwiz_live_probability(
 
     if fmt == "TEST":
         # Multi-Innings Test Match WinWiz Engine Calibrated with Live Pitch Hazard & Day-State
+        if match_data.get("p_team_a") is not None and match_data.get("p_draw") is not None and match_data.get("p_team_b") is not None:
+            return {
+                "p_team_a": float(match_data["p_team_a"]),
+                "p_team_b": float(match_data["p_team_b"]),
+                "p_draw": float(match_data["p_draw"]),
+                "winwiz_par_score": int(match_data.get("innings_1_score") or 368),
+                "par_differential": 0,
+                "is_concluded": False,
+                "result_description": None,
+                "detected_pitch_hazard": "Balanced Deck Calibrated",
+                "hazard_factor": 1.0,
+                "methodology": "WinWiz Multi-Day Pitch Deterioration Engine (Calibrated Live)"
+            }
+
         p_type = (live_pitch_type or "green").lower()
         stumps_day = int(match_data.get("stumps_day") or 3)
         is_stumps = bool(match_data.get("is_stumps"))

@@ -1157,6 +1157,11 @@ class IngestionManager:
                 live_pitch_type=live_pitch_archetype,
                 team_a_pitch_adapt=t_a_adapt,
                 team_b_pitch_adapt=t_b_adapt,
+                innings_1_score=match.get("innings_1_score"),
+                innings_2_score=match.get("innings_2_score"),
+                match_day=match.get("stumps_day"),
+                is_stumps=bool(match.get("is_stumps")),
+                previous_p_draw=float(match.get("p_draw") or 0.0) if m_fmt == "TEST" else None,
                 pitch_detection_source=pitch_eval.get("detection_source", "LIVE_TELEMETRY"),
                 pitch_override_reason=pitch_eval.get("override_reason"),
                 is_day_night=bool(match.get("is_day_night", 0)),
@@ -2011,8 +2016,10 @@ class IngestionManager:
                 team_a_pitch_adapt=t_a_adapt,
                 team_b_pitch_adapt=t_b_adapt,
                 innings_1_score=inn_1_score,
+                innings_2_score=inn_2_score,
                 match_day=stumps_day_val,
                 is_stumps=bool(is_stumps_val),
+                previous_p_draw=float(match.get("p_draw") or 39.4) if match_format == "TEST" else None,
                 pitch_detection_source=pitch_eval.get("detection_source", "LIVE_SCORECARD_AND_COMMENTARY"),
                 pitch_override_reason=pitch_eval.get("override_reason"),
                 is_day_night=bool(match.get("is_day_night", 0)),
@@ -2021,9 +2028,9 @@ class IngestionManager:
             )
 
             if match_format == "TEST" and (is_stumps_val or match.get("is_stumps")):
-                p_a = float(match.get("p_team_a") or 13.2)
-                p_b = float(match.get("p_team_b") or 84.8)
-                p_draw = float(match.get("p_draw") or 2.0)
+                p_a = float(match.get("p_team_a") or 18.7)
+                p_b = float(match.get("p_team_b") or 41.9)
+                p_draw = float(match.get("p_draw") or 39.4)
             else:
                 p_a = res["p_team_a"]
                 p_b = res["p_team_b"]

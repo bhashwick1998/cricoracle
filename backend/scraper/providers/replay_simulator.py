@@ -627,6 +627,7 @@ class ReplaySimulator:
             team_a_batting=team_a_batting,
             p0_pre_match=p0,
             previous_p_team_a=prev_p,
+            previous_p_draw=float(match.get("p_draw") or 0.0) if is_test else None,
             dugout_players=dugout_players,
             bowlers_list=bowlers_list,
             pitch_spin_ratio=match.get("spin_wicket_ratio", 0.62),
@@ -634,6 +635,10 @@ class ReplaySimulator:
             live_pitch_type=match.get("active_pitch_type") or match.get("pitch_type", "flat"),
             is_day_night=bool(match.get("is_day_night", 0)),
             dew_factor=float(match.get("dew_factor") or 0.35),
+            innings_1_score=match.get("innings_1_score"),
+            innings_2_score=match.get("innings_2_score"),
+            match_day=match.get("stumps_day"),
+            is_stumps=bool(match.get("is_stumps")),
             recent_momentum_shift=recent_momentum_shift,
             leverage_shift=leverage_shift,
             historical_venue_par=float(match.get("first_innings_par_score") or 195.0)
@@ -662,7 +667,11 @@ class ReplaySimulator:
         else:
             new_p_a = res["p_team_a"]
 
-        new_p_b = round(100.0 - new_p_a, 1)
+        new_p_draw = res.get("p_draw", 0.0) if is_test else 0.0
+        if is_test:
+            new_p_b = round(max(0.0, 100.0 - new_p_a - new_p_draw), 1)
+        else:
+            new_p_b = round(100.0 - new_p_a, 1)
         wpa = round(new_p_a - prev_p, 1)
 
         # Mark queued delivery as played if from curated replay
@@ -720,6 +729,7 @@ class ReplaySimulator:
                 current_bowler_id = ?,
                 p_team_a = ?,
                 p_team_b = ?,
+                p_draw = ?,
                 last_wpa_swing = ?,
                 last_event_description = ?,
                 batting_tank_pct = ?,
@@ -732,7 +742,7 @@ class ReplaySimulator:
         """, (
             new_state, inn, new_score, new_wickets, overs, balls, target,
             striker_id, non_striker_id, bowler_id,
-            new_p_a, new_p_b, wpa, last_desc,
+            new_p_a, new_p_b, new_p_draw, wpa, last_desc,
             res.get("batting_tank_pct", 100.0), res.get("bowling_tank_pct", 100.0),
             res.get("par_score_projected", 200), res.get("par_score_min", 180), res.get("par_score_max", 220),
             status_text,
