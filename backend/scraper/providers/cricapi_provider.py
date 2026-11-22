@@ -485,10 +485,10 @@ class CricApiSquadProvider:
                         })
             return live_matches
 
-        # Check in-memory cache TTL (90 seconds)
+        # Check in-memory cache TTL (600 seconds / 10 minutes to protect daily quota)
         if not force and getattr(self, "_cached_live_scores", None):
             cached_t = getattr(self, "_cached_live_scores_time", 0.0)
-            if (now - cached_t) < 90.0:
+            if (now - cached_t) < 600.0:
                 return self._cached_live_scores
 
         if not self._check_and_increment_quota():

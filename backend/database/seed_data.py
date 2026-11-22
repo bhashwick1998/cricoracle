@@ -687,19 +687,9 @@ async def seed_database():
             WHERE id = 'm_ban_wi_2026_live'
         """)
 
-        # India vs New Zealand 3rd ODI - Live Rain Interruption (Covers On)
+        # India vs New Zealand 1st ODI - Match Abandoned without a ball bowled (No Result - Rain)
         await conn.execute("""
             UPDATE matches SET
-                state = 'LIVE_BALL_BY_BALL',
-                current_innings = 2,
-                current_score = 142,
-                current_wickets = 3,
-                current_overs = 24,
-                current_balls = 0,
-                target_runs = 286,
-                dls_target = 245,
-                dls_par_score = 138,
-                overs_lost = 5.0,
                 state = 'COMPLETED',
                 current_score = 0,
                 current_wickets = 0,
@@ -724,6 +714,29 @@ async def seed_database():
                 p_draw = 0.0,
                 match_status_text = 'Match abandoned without a ball bowled (No Result - Rain)',
                 last_event_description = 'Match abandoned without a ball bowled due to persistent rain and wet outfield at Seddon Park, Hamilton'
+            WHERE id = 'm_nz_ind_2026_odi_1'
+        """)
+
+        # India vs New Zealand 3rd ODI - Stage 3 Confirmed Playing 11 & Toss Locked
+        await conn.execute("""
+            UPDATE matches SET
+                state = 'XI_AND_TOSS_LOCKED',
+                toss_winner_id = 'IND',
+                toss_decision = 'bowl',
+                pitch_report = 'Pitch is dry with expanding cracks. Spinners will thrive.',
+                current_innings = 1,
+                current_score = 0,
+                current_wickets = 0,
+                current_overs = 0,
+                current_balls = 0,
+                target_runs = NULL,
+                dls_target = NULL,
+                dls_par_score = NULL,
+                p_team_a = 48.0,
+                p_team_b = 52.0,
+                par_score_projected = 275,
+                match_status_text = 'Playing XI & Toss Locked • Stage 3 Pre-Match Intelligence Active',
+                last_event_description = 'Toss: India won the toss and elected to bowl. Pitch is dry with expanding cracks.'
             WHERE id = 'm_nz_ind_2026_odi_3'
         """)
 
@@ -753,6 +766,40 @@ async def seed_database():
                 last_event_description = 'Australia won by 3 wkts (Target 188 reached in 19.5 ov)'
             WHERE id = 'm_aus_eng_2026_t20_1'
         """)
+
+        # 6. Seed Official 15-Man Match Squads for all fixtures
+        async with conn.execute("SELECT id, team_id, role FROM players ORDER BY id") as p_cur:
+            all_players = [dict(r) for r in await p_cur.fetchall()]
+
+        players_by_team = {}
+        for p in all_players:
+            players_by_team.setdefault(p["team_id"], []).append(p)
+
+        async with conn.execute("SELECT id, team_a_id, team_b_id, state FROM matches") as m_cur:
+            all_matches = [dict(r) for r in await m_cur.fetchall()]
+
+        squad_inserts = []
+        for m in all_matches:
+            mid = m["id"]
+            m_state = m["state"]
+            for tid in [m["team_a_id"], m["team_b_id"]]:
+                t_roster = players_by_team.get(tid, [])
+                for idx, p in enumerate(t_roster[:15]):
+                    pid = p["id"]
+                    is_xi = 1 if (m_state in ("XI_AND_TOSS_LOCKED", "LIVE_BALL_BY_BALL", "COMPLETED") and idx < 11) else 0
+                    is_prob = 1 if idx < 11 else 0
+                    sub_st = "CONFIRMED_XI" if is_xi else ("PROBABLE_XI" if is_prob else "BENCH_RESERVE")
+                    b_order = (idx + 1) if idx < 11 else 99
+                    squad_inserts.append((mid, tid, pid, 1, is_prob, is_xi, b_order, sub_st))
+
+        await conn.executemany("""
+            INSERT INTO match_squads (match_id, team_id, player_id, is_in_squad, is_probable_xi, is_confirmed_xi, batting_order, sub_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, squad_inserts)
+
+        # 7. Propagate Bilateral Series Squads
+        from backend.engine.series_squad_propagator import propagate_series_squads_async
+        await propagate_series_squads_async(conn)
 
         await conn.commit()
     finally:

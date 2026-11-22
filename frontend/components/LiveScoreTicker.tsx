@@ -47,7 +47,7 @@ export default function LiveScoreTicker({ matches }: LiveScoreTickerProps) {
       <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-[#0a0f1d] to-transparent z-10 pointer-events-none" />
 
       {/* Scrolling Strip */}
-      <div className="flex animate-ticker pl-28 sm:pl-36 gap-3">
+      <div className="flex animate-ticker pl-12 sm:pl-36 gap-3">
         {displayMatches.map((m, idx) => {
           const metaA = getTeamMeta(m.team_a_short || m.team_a_id, m.team_a_name);
           const metaB = getTeamMeta(m.team_b_short || m.team_b_id, m.team_b_name);

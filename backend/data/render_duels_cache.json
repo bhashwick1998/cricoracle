@@ -1468,5 +1468,61 @@
     "batter_power_rating": 10.0,
     "bowler_power_rating": 67.7,
     "tactical_edge": "BOWLER"
+  },
+  "df5a6881_0a67aec0_TEST": {
+    "batter_id": "df5a6881",
+    "bowler_id": "0a67aec0",
+    "batter_name": "DP Conway",
+    "bowler_name": "Akash Deep",
+    "expected_runs_per_over": 4.9,
+    "wicket_risk_pct": 25.9,
+    "dot_pct": 63.0,
+    "boundary_pct": 12.3,
+    "rotation_pct": 19.8,
+    "batter_power_rating": 53.0,
+    "bowler_power_rating": 60.0,
+    "tactical_edge": "BOWLER"
+  },
+  "03521fd3_0a67aec0_TEST": {
+    "batter_id": "03521fd3",
+    "bowler_id": "0a67aec0",
+    "batter_name": "HM Nicholls",
+    "bowler_name": "Akash Deep",
+    "expected_runs_per_over": 6.3,
+    "wicket_risk_pct": 34.8,
+    "dot_pct": 47.0,
+    "boundary_pct": 13.6,
+    "rotation_pct": 32.5,
+    "batter_power_rating": 51.4,
+    "bowler_power_rating": 60.0,
+    "tactical_edge": "BOWLER"
+  },
+  "df5a6881_fcc21ace_TEST": {
+    "batter_id": "df5a6881",
+    "bowler_id": "fcc21ace",
+    "batter_name": "DP Conway",
+    "bowler_name": "A Kamboj",
+    "expected_runs_per_over": 7.0,
+    "wicket_risk_pct": 29.2,
+    "dot_pct": 44.2,
+    "boundary_pct": 15.8,
+    "rotation_pct": 34.4,
+    "batter_power_rating": 53.0,
+    "bowler_power_rating": 53.6,
+    "tactical_edge": "NEUTRAL"
+  },
+  "03521fd3_fcc21ace_TEST": {
+    "batter_id": "03521fd3",
+    "bowler_id": "fcc21ace",
+    "batter_name": "HM Nicholls",
+    "bowler_name": "A Kamboj",
+    "expected_runs_per_over": 6.9,
+    "wicket_risk_pct": 30.4,
+    "dot_pct": 44.8,
+    "boundary_pct": 15.4,
+    "rotation_pct": 34.0,
+    "batter_power_rating": 51.4,
+    "bowler_power_rating": 53.6,
+    "tactical_edge": "NEUTRAL"
   }
 }

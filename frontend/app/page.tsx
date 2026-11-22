@@ -275,11 +275,59 @@ export default function HomePage() {
       {/* Broadcast Score & Odds Ticker */}
       <LiveScoreTicker matches={matches} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full flex-1">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-8 w-full flex-1">
+
+        {/* Mobile Quick-Navigation Category Pills (visible on mobile and tablet) */}
+        <div className="lg:hidden flex items-center gap-2 overflow-x-auto pb-3 -mx-3 px-3 sm:mx-0 sm:px-0 scrollbar-none mb-4">
+          <button
+            onClick={() => setActiveTab("ALL")}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 border shrink-0 ${
+              activeTab === "ALL"
+                ? "bg-cyan-600/25 text-cyan-300 border-cyan-500 shadow-sm"
+                : "bg-slate-900/80 text-slate-400 border-slate-800"
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5 text-cyan-400" />
+            <span>All Fixtures</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("LIVE")}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 border shrink-0 ${
+              activeTab === "LIVE"
+                ? "bg-rose-600/30 text-rose-300 border-rose-500 shadow-sm"
+                : "bg-slate-900/80 text-slate-400 border-slate-800"
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block" />
+            <span>Live Now ({liveMatches.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("XI_LOCKED")}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 border shrink-0 ${
+              activeTab === "XI_LOCKED"
+                ? "bg-amber-600/25 text-amber-300 border-amber-500 shadow-sm"
+                : "bg-slate-900/80 text-slate-400 border-slate-800"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Stage 3 (XI Locked)</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("COMPLETED")}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 border shrink-0 ${
+              activeTab === "COMPLETED"
+                ? "bg-emerald-600/25 text-emerald-300 border-emerald-500 shadow-sm"
+                : "bg-slate-900/80 text-slate-400 border-slate-800"
+            }`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Results</span>
+          </button>
+        </div>
 
         {/* Live In-Play Section (Always prominently highlighted when live matches exist) */}
         {liveMatches.length > 0 && activeTab !== "COMPLETED" && (
-          <div className="mb-10 p-6 rounded-3xl bg-gradient-to-r from-rose-950/40 via-slate-900/90 to-purple-950/30 border border-rose-500/30 shadow-2xl">
+          <div className="mb-8 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-gradient-to-r from-rose-950/40 via-slate-900/90 to-purple-950/30 border border-rose-500/30 shadow-2xl">
             <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
               <div className="flex items-center gap-2.5">
                 <span className="relative flex h-3.5 w-3.5">

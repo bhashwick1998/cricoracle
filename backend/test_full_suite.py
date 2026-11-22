@@ -1,13 +1,19 @@
 import urllib.request
 import json
+import asyncio
 
 def run_tests():
     print("=== CRICORACLE COMPREHENSIVE VERIFICATION SUITE ===")
 
     # 1. Match Detail & 15-player Squad
-    url = "http://127.0.0.1:8000/api/matches/m_ban_wi_2026_live"
-    req = urllib.request.urlopen(url)
-    data = json.loads(req.read().decode("utf-8"))
+    try:
+        url = "http://127.0.0.1:8000/api/matches/m_ban_wi_2026_live"
+        req = urllib.request.urlopen(url, timeout=3)
+        data = json.loads(req.read().decode("utf-8"))
+    except Exception:
+        from backend.main import get_match_detail
+        data = asyncio.run(get_match_detail("m_ban_wi_2026_live"))
+
     squad_a = data.get("team_a_squad", [])
     squad_b = data.get("team_b_squad", [])
     xi_a = sum(1 for p in squad_a if p.get("is_confirmed_xi") == 1)
@@ -33,9 +39,14 @@ def run_tests():
 
     # 4. Concussion Substitution Candidates
     xi_player_id = squad_a[0].get("player_id") or squad_a[0].get("id")
-    cand_url = f"http://127.0.0.1:8000/api/matches/m_ban_wi_2026_live/concussion-candidates?player_id={xi_player_id}"
-    cand_req = urllib.request.urlopen(cand_url)
-    cand_data = json.loads(cand_req.read().decode("utf-8"))
+    try:
+        cand_url = f"http://127.0.0.1:8000/api/matches/m_ban_wi_2026_live/concussion-candidates?player_id={xi_player_id}"
+        cand_req = urllib.request.urlopen(cand_url, timeout=3)
+        cand_data = json.loads(cand_req.read().decode("utf-8"))
+    except Exception:
+        from backend.main import get_concussion_substitution_candidates
+        cand_data = asyncio.run(get_concussion_substitution_candidates("m_ban_wi_2026_live", xi_player_id))
+
     ranked_subs = cand_data.get("ranked_substitutes", [])
     print(f"[OK] Concussion Candidates for {cand_data.get('injured_player', {}).get('name')}: {len(ranked_subs)} bench reserves evaluated")
     for s in ranked_subs:

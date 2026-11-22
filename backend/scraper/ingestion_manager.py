@@ -7,6 +7,7 @@ and triggers state transition recalculations.
 
 import asyncio
 import re
+import time
 import logging
 import aiosqlite
 from typing import Dict, Any, List, Optional
@@ -326,15 +327,19 @@ class IngestionManager:
             if active_ids:
                 await asyncio.gather(*(sync_single_match(mid) for mid in active_ids), return_exceptions=True)
 
-            # 3. Synchronize with CricAPI senior matches schedule/live scores (cached 90s, max 100 hits/day)
-            from .providers.cricapi_provider import cricapi_provider
-            updated_ids = await cricapi_provider.sync_live_senior_mens_matches(conn)
-            if updated_ids and self.broadcast_func:
-                for mid in updated_ids:
-                    async with conn.execute("SELECT * FROM matches WHERE id = ?", (mid,)) as c:
-                        row = await c.fetchone()
-                        if row:
-                            await self.broadcast_func(mid, {"type": "LIVE_TELEMETRY_SYNCED", "match": dict(row)})
+            # 3. Synchronize with CricAPI senior matches as quota-friendly fallback (10-minute cadence, max 100 hits/day)
+            now_ts = time.time()
+            last_cricapi_sync = getattr(self, "_last_cricapi_live_sync", 0.0)
+            if (now_ts - last_cricapi_sync) >= 600.0 or not active_ids:
+                self._last_cricapi_live_sync = now_ts
+                from .providers.cricapi_provider import cricapi_provider
+                updated_ids = await cricapi_provider.sync_live_senior_mens_matches(conn)
+                if updated_ids and self.broadcast_func:
+                    for mid in updated_ids:
+                        async with conn.execute("SELECT * FROM matches WHERE id = ?", (mid,)) as c:
+                            row = await c.fetchone()
+                            if row:
+                                await self.broadcast_func(mid, {"type": "LIVE_TELEMETRY_SYNCED", "match": dict(row)})
         except Exception as e:
             logger.error(f"Error in poll_live_matches_cadence (Top Scraper): {e}")
         finally:
@@ -576,16 +581,20 @@ class IngestionManager:
                 eval_res = evaluate_match_completion(lm)
                 if eval_res.get("is_completed"):
                     logger.info(f"Auto-completing elapsed/concluded match {lm['id']}: {eval_res.get('result_description')}")
+                    res_desc = eval_res.get("result_description") or "Match Completed"
+                    p_a_fin = 100.0 if eval_res.get("winning_team_id") == lm.get("team_a_id") else (0.0 if eval_res.get("winning_team_id") else 33.3)
+                    p_b_fin = 100.0 if eval_res.get("winning_team_id") == lm.get("team_b_id") else (0.0 if eval_res.get("winning_team_id") else 33.3)
                     await conn.execute("""
                         UPDATE matches SET
                             state = 'COMPLETED',
                             is_stumps = 0,
                             stumps_label = NULL,
-                            result_description = ?,
-                            winning_team_id = ?,
-                            winning_team_name = ?
+                            match_status_text = ?,
+                            last_event_description = ?,
+                            p_team_a = ?,
+                            p_team_b = ?
                         WHERE id = ?
-                    """, (eval_res.get("result_description"), eval_res.get("winning_team_id"), eval_res.get("winning_team_name"), lm["id"]))
+                    """, (res_desc, res_desc, p_a_fin, p_b_fin, lm["id"]))
                     updated_match_ids.append(lm["id"])
 
             await conn.commit()
@@ -2038,7 +2047,7 @@ class IngestionManager:
                     p_a, p_b, p_draw = 0.0, 0.0, 100.0
             elif is_stumps_val:
                 new_state = "LIVE_BALL_BY_BALL"
-            elif len(all_inn) == 0 and runs == 0 and overs == 0 and balls == 0:
+            elif len(all_innings) == 0 and runs == 0 and overs == 0 and balls == 0:
                 new_state = "SQUAD_ANNOUNCED"
             else:
                 new_state = "LIVE_BALL_BY_BALL"

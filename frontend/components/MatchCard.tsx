@@ -304,11 +304,11 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
   return (
     <div className="rounded-3xl glass-card overflow-hidden hover:border-cyan-500/40 transition-all duration-300 flex flex-col justify-between shadow-2xl relative group border border-slate-800 bg-[#0c1222]/90">
       {/* Top Banner: State Badge & Scheduled Time */}
-      <div className="p-5 pb-3">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2">
+      <div className="p-4 sm:p-5 pb-3">
+        <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase border ${badge.bg}`}
+              className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase border ${badge.bg}`}
             >
               <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`}></span>
               {badge.pill}
@@ -357,7 +357,7 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
             )}
           </div>
 
-          <div className="text-right">
+          <div className="text-right shrink-0">
             <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1 justify-end">
               <MapPin className="w-3.5 h-3.5 text-cyan-400" />
               {match.venue_city || match.venue_name}
@@ -375,37 +375,37 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
         </div>
 
         {/* Head to Head Matchup Scoreboard Box */}
-        <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800/80 mb-3.5 shadow-inner">
-          <div className="grid grid-cols-2 gap-3 items-center">
+        <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800/80 mb-3.5 shadow-inner">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 items-center">
             {/* Team A */}
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2 sm:gap-2.5">
               <div
-                className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl shadow-md border ${metaA.borderGlow} bg-gradient-to-br ${metaA.gradient}`}
+                className={`w-9 h-9 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-lg sm:text-xl shadow-md border ${metaA.borderGlow} bg-gradient-to-br ${metaA.gradient} shrink-0`}
               >
                 {metaA.flag}
               </div>
               <div className="overflow-hidden">
-                <div className="text-sm font-black text-white truncate leading-tight">
+                <div className="text-xs sm:text-sm font-black text-white truncate leading-tight">
                   {metaA.name}
                 </div>
-                <div className="text-lg font-black text-cyan-400 font-mono-numbers mt-0.5">
+                <div className="text-base sm:text-lg font-black text-cyan-400 font-mono-numbers mt-0.5">
                   {effective.pA}%
                 </div>
               </div>
             </div>
 
             {/* Team B */}
-            <div className="flex items-center gap-2.5 justify-end text-right">
+            <div className="flex items-center gap-2 sm:gap-2.5 justify-end text-right">
               <div className="overflow-hidden">
-                <div className="text-sm font-black text-white truncate leading-tight">
+                <div className="text-xs sm:text-sm font-black text-white truncate leading-tight">
                   {metaB.name}
                 </div>
-                <div className="text-lg font-black text-amber-400 font-mono-numbers mt-0.5">
+                <div className="text-base sm:text-lg font-black text-amber-400 font-mono-numbers mt-0.5">
                   {effective.pB}%
                 </div>
               </div>
               <div
-                className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl shadow-md border ${metaB.borderGlow} bg-gradient-to-br ${metaB.gradient}`}
+                className={`w-9 h-9 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-lg sm:text-xl shadow-md border ${metaB.borderGlow} bg-gradient-to-br ${metaB.gradient} shrink-0`}
               >
                 {metaB.flag}
               </div>

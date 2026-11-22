@@ -687,7 +687,7 @@ async def get_matches(state: Optional[str] = None):
                     m["current_balls"] = 0
                     m["dls_par_score"] = 109
                     m["dls_target"] = 135
-                elif m.get("id") == "m_nz_ind_2026_odi_3":
+                elif m.get("id") == "m_nz_ind_2026_odi_1":
                     m["state"] = "COMPLETED"
                     m["is_completed"] = True
                     m["is_stopped"] = False
@@ -1783,7 +1783,7 @@ async def get_match_detail(match_id: str):
             match_data["current_balls"] = 0
             match_data["dls_par_score"] = 109
             match_data["dls_target"] = 135
-        elif match_id == "m_nz_ind_2026_odi_3":
+        elif match_id == "m_nz_ind_2026_odi_1":
             match_data["state"] = "COMPLETED"
             match_data["is_completed"] = True
             match_data["is_stopped"] = False
