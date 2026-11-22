@@ -448,42 +448,48 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
 
         {/* Stage 3 (XI & Toss Locked P₀) and Stage 4 (Live In-Play / Final Result) Probabilities Only */}
         <div className="grid grid-cols-2 gap-2 p-2 rounded-xl bg-slate-950/70 border border-slate-800/80 mb-3 text-center font-mono-numbers">
-          <div className="p-2 rounded-lg bg-slate-900/80 border border-emerald-900/40" title="Stage 3: XI & Toss Locked Pre-Match Anchor (P₀)">
-            <span className="text-[9px] text-emerald-400 font-bold block uppercase tracking-wider">Stage 3 Locked (P₀)</span>
-            <span className="text-xs sm:text-sm font-black text-white">
-              <span className="text-cyan-400 font-bold mr-1">{metaA.short}</span>
-              {match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a}%
-              <span className="text-[10px] text-slate-400 font-normal mx-1">vs</span>
-              {Math.round((100 - (match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a)) * 10) / 10}%
-              <span className="text-amber-400 font-bold ml-1">{metaB.short}</span>
+          <div className="p-2 rounded-lg bg-slate-900/80 border border-emerald-900/40 min-w-0 overflow-hidden flex flex-col justify-between" title="Stage 3: XI & Toss Locked Pre-Match Anchor (P₀)">
+            <span className="text-[9px] text-emerald-400 font-bold block uppercase tracking-wider truncate mb-0.5">
+              Stage 3 Locked (P₀)
             </span>
-            <span className="text-[9px] text-slate-400 block mt-0.5 truncate">
+            <div className="flex items-center justify-center gap-1 text-[11px] sm:text-xs font-black text-white flex-wrap leading-tight my-0.5">
+              <span className="text-cyan-400 font-bold">{metaA.short} {match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a}%</span>
+              <span className="text-[10px] text-slate-500 font-normal">vs</span>
+              <span className="text-amber-400 font-bold">{Math.round((100 - (match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a)) * 10) / 10}% {metaB.short}</span>
+            </div>
+            <span className="text-[9px] text-slate-400 block truncate mt-0.5">
               Toss Shift: {match.delta_toss_shift ? (match.delta_toss_shift > 0 ? `+${match.delta_toss_shift}%` : `${match.delta_toss_shift}%`) : "0%"}
             </span>
           </div>
-          <div className={`p-2 rounded-lg border ${
+
+          <div className={`p-2 rounded-lg border min-w-0 overflow-hidden flex flex-col justify-between ${
             match.state === "LIVE_BALL_BY_BALL"
-              ? "bg-rose-950/30 border-rose-800/60"
+              ? "bg-rose-950/30 border-rose-800/60 shadow-inner"
               : match.state === "COMPLETED"
               ? "bg-emerald-950/30 border-emerald-800/60"
               : "bg-slate-900/80 border-slate-800/60"
           }`} title="Stage 4: Live Ball-by-Ball Dynamic Win Probability">
-            <span className={`text-[9px] font-bold block uppercase tracking-wider ${
+            <span className={`text-[9px] font-bold block uppercase tracking-wider truncate flex items-center justify-center gap-1 mb-0.5 ${
               match.state === "LIVE_BALL_BY_BALL" ? "text-rose-400" : match.state === "COMPLETED" ? "text-emerald-400" : "text-cyan-400"
             }`}>
-              {match.state === "COMPLETED" ? "Stage 4 Result" : match.state === "LIVE_BALL_BY_BALL" ? "Stage 4 Live" : "Stage 4 In-Play"}
-            </span>
-            <span className="text-xs sm:text-sm font-black text-white">
-              <span className="text-cyan-400 font-bold mr-1">{metaA.short}</span>
-              {match.p_team_a}%
-              <span className="text-[10px] text-slate-400 font-normal mx-1">vs</span>
-              {match.p_team_b}%
-              <span className="text-amber-400 font-bold ml-1">{metaB.short}</span>
-              {match.format === "TEST" && (match.p_draw || 0) > 0 && (
-                <span className="text-[10px] text-slate-400 font-normal ml-1">({match.p_draw}% D)</span>
+              {match.state === "LIVE_BALL_BY_BALL" && (
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping shrink-0 inline-block" />
               )}
+              <span className="truncate">
+                {match.state === "COMPLETED" ? "Stage 4 Result" : match.state === "LIVE_BALL_BY_BALL" ? "Stage 4 Live" : "Stage 4 In-Play"}
+              </span>
             </span>
-            <span className="text-[9px] text-slate-400 block mt-0.5 truncate">
+            <div className="flex items-center justify-center gap-1 text-[11px] sm:text-xs font-black text-white flex-wrap leading-tight my-0.5">
+              <span className="text-cyan-400 font-bold">{metaA.short} {match.p_team_a}%</span>
+              <span className="text-[10px] text-slate-500 font-normal">vs</span>
+              <span className="text-amber-400 font-bold">{match.p_team_b}% {metaB.short}</span>
+            </div>
+            {match.format === "TEST" && (match.p_draw || 0) > 0 && (
+              <div className="text-[10px] font-bold text-slate-300 leading-tight">
+                Draw <span className="text-slate-200 font-mono-numbers">{match.p_draw}%</span>
+              </div>
+            )}
+            <span className="text-[9px] text-slate-400 block truncate mt-0.5">
               {match.state === "COMPLETED" ? "Match Finalized" : match.state === "LIVE_BALL_BY_BALL" ? "Telemetry In-Play" : "Pre-Match Standby"}
             </span>
           </div>
@@ -1179,67 +1185,16 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                 </div>
               )}
 
-              {/* Background Live Win Probability Worm (Active In-Play Telemetry) */}
+              {/* Live Telemetry Notice */}
               {match.worm_points && match.worm_points.length > 1 && (
-                <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800/80 space-y-1.5 text-[11px]">
-                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-1">
-                    <span className="text-cyan-400 font-bold flex items-center gap-1.5 uppercase tracking-wider text-[10px]">
-                      <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-                      Live Win Probability Worm
-                    </span>
-                    <span className="font-mono text-[9px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50">
-                      {match.worm_points.length} Deliveries Logged
-                    </span>
-                  </div>
-
-                  {/* Sparkline Canvas */}
-                  <div className="relative w-full h-14 bg-slate-950/80 rounded-lg p-1 overflow-hidden border border-slate-800/60">
-                    {/* 50% Equilibrium Line */}
-                    <div className="absolute left-0 right-0 top-1/2 border-b border-dashed border-slate-800 pointer-events-none" />
-
-                    <svg className="w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 50">
-                      <defs>
-                        <linearGradient id={`worm-grad-${match.id}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.4" />
-                          <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.0" />
-                        </linearGradient>
-                      </defs>
-
-                      {(() => {
-                        const pts = match.worm_points || [];
-                        const n = pts.length;
-                        if (n < 2) return null;
-
-                        const coords = pts.map((pt, idx) => {
-                          const x = (idx / (n - 1)) * 100;
-                          const pA = Number(pt.p_team_a ?? 50);
-                          const y = 50 - (Math.max(0, Math.min(100, pA)) / 100) * 50;
-                          return { x, y, pt };
-                        });
-
-                        const pathStr = coords.reduce((acc, c, i) => `${acc} ${i === 0 ? "M" : "L"} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`, "");
-                        const areaStr = `${pathStr} L 100 50 L 0 50 Z`;
-                        const lastCoord = coords[coords.length - 1];
-
-                        return (
-                          <>
-                            <path d={areaStr} fill={`url(#worm-grad-${match.id})`} />
-                            <path d={pathStr} fill="none" stroke="#22d3ee" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                            <circle cx={lastCoord.x} cy={lastCoord.y} r="2.5" fill="#38bdf8" className="animate-ping" />
-                            <circle cx={lastCoord.x} cy={lastCoord.y} r="2" fill="#ffffff" />
-                          </>
-                        );
-                      })()}
-                    </svg>
-                  </div>
-
-                  <div className="flex justify-between items-center text-[9px] font-mono text-slate-400">
-                    <span>P₀ Prior</span>
-                    <span className="text-cyan-300 font-bold">
-                      {metaA.short} {Math.round(match.p_team_a ?? 50)}% • {metaB.short} {Math.round(match.p_team_b ?? 50)}%
-                    </span>
-                    <span>Latest Ball</span>
-                  </div>
+                <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900/60 border border-slate-800 text-[10px] text-slate-400 font-mono">
+                  <span className="flex items-center gap-1.5 text-cyan-400 font-bold">
+                    <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                    <span>{match.worm_points.length} Live Deliveries Logged</span>
+                  </span>
+                  <span className="text-cyan-400 font-semibold flex items-center gap-1">
+                    Telemetry Center <ChevronRight className="w-3 h-3" />
+                  </span>
                 </div>
               )}
             </div>
