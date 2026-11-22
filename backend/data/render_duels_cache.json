@@ -1524,5 +1524,61 @@
     "batter_power_rating": 51.4,
     "bowler_power_rating": 53.6,
     "tactical_edge": "NEUTRAL"
+  },
+  "df5a6881_85e0cf10_TEST": {
+    "batter_id": "df5a6881",
+    "bowler_id": "85e0cf10",
+    "batter_name": "DP Conway",
+    "bowler_name": "M Prasidh Krishna",
+    "expected_runs_per_over": 6.1,
+    "wicket_risk_pct": 35.9,
+    "dot_pct": 47.6,
+    "boundary_pct": 13.1,
+    "rotation_pct": 32.1,
+    "batter_power_rating": 53.0,
+    "bowler_power_rating": 63.3,
+    "tactical_edge": "BOWLER"
+  },
+  "03521fd3_85e0cf10_TEST": {
+    "batter_id": "03521fd3",
+    "bowler_id": "85e0cf10",
+    "batter_name": "HM Nicholls",
+    "bowler_name": "M Prasidh Krishna",
+    "expected_runs_per_over": 6.0,
+    "wicket_risk_pct": 37.0,
+    "dot_pct": 48.2,
+    "boundary_pct": 12.7,
+    "rotation_pct": 31.8,
+    "batter_power_rating": 51.4,
+    "bowler_power_rating": 63.3,
+    "tactical_edge": "BOWLER"
+  },
+  "ba5e1069_85e0cf10_TEST": {
+    "batter_id": "ba5e1069",
+    "bowler_id": "85e0cf10",
+    "batter_name": "R Ravindra",
+    "bowler_name": "M Prasidh Krishna",
+    "expected_runs_per_over": 6.4,
+    "wicket_risk_pct": 33.9,
+    "dot_pct": 46.6,
+    "boundary_pct": 13.9,
+    "rotation_pct": 32.8,
+    "batter_power_rating": 56.0,
+    "bowler_power_rating": 63.3,
+    "tactical_edge": "BOWLER"
+  },
+  "ba5e1069_fcc21ace_TEST": {
+    "batter_id": "ba5e1069",
+    "bowler_id": "fcc21ace",
+    "batter_name": "R Ravindra",
+    "bowler_name": "A Kamboj",
+    "expected_runs_per_over": 7.3,
+    "wicket_risk_pct": 27.1,
+    "dot_pct": 43.2,
+    "boundary_pct": 16.7,
+    "rotation_pct": 35.0,
+    "batter_power_rating": 56.0,
+    "bowler_power_rating": 53.6,
+    "tactical_edge": "NEUTRAL"
   }
 }

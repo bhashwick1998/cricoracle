@@ -2761,30 +2761,34 @@ def compute_match_scenario_score_projections(
                     "current_innings_number": 4,
                     "innings_1": {
                         "team_id": team_1st_bat,
+                        "innings_name": f"{team_1st_bat} 1st Innings",
                         "status": "COMPLETED",
                         "current_score": f"{s1}/{match_data.get('innings_1_wickets') or 10}",
                         "current_overs": f"{match_data.get('innings_1_overs') or '112.4'} ov",
                         "live_projected_total": s1,
-                        "status_label": f"1st Innings Closed ({s1} runs)"
+                        "status_label": f"{team_1st_bat} 1st Innings Closed ({s1} runs)"
                     },
                     "innings_2": {
                         "team_id": team_2nd_bat,
+                        "innings_name": f"{team_2nd_bat} 1st Innings",
                         "status": "COMPLETED",
                         "current_score": f"{s2}/{match_data.get('innings_2_wickets') or 10}",
                         "current_overs": f"{match_data.get('innings_2_overs') or '124.2'} ov",
                         "live_projected_total": s2,
-                        "status_label": f"1st Innings Closed ({s2} runs • {team_2nd_bat} led by {s2 - s1} runs)" if s2 > s1 else f"1st Innings Closed ({s2} runs)"
+                        "status_label": f"{team_2nd_bat} 1st Innings Closed ({s2} runs • {team_2nd_bat} led by {s2 - s1} runs)" if s2 > s1 else f"{team_2nd_bat} 1st Innings Closed ({s2} runs)"
                     },
                     "innings_3": {
                         "team_id": team_1st_bat,
+                        "innings_name": f"{team_1st_bat} 2nd Innings",
                         "status": "COMPLETED (DECLARED)" if (match_data.get('innings_3_wickets') or 6) < 10 else "COMPLETED",
                         "current_score": f"{s3}/{match_data.get('innings_3_wickets') or 6}d",
                         "current_overs": f"{match_data.get('innings_3_overs') or '102.0'} ov",
                         "live_projected_total": s3,
-                        "status_label": f"2nd Innings Declared ({s3} runs • Target: {target_4})"
+                        "status_label": f"{team_1st_bat} 2nd Innings Declared ({s3} runs • Target: {target_4})"
                     },
                     "innings_4": {
                         "team_id": team_2nd_bat,
+                        "innings_name": f"{team_2nd_bat} 2nd Innings",
                         "status": "ACTIVE_CHASE",
                         "current_score": f"{curr_score}/{curr_wkts}",
                         "current_overs": f"{int(curr_overs)}.{curr_balls} ov",
@@ -2793,7 +2797,7 @@ def compute_match_scenario_score_projections(
                         "wickets_in_hand": wkts_in_hand,
                         "overs_remaining_today": round(overs_left_today, 1),
                         "required_run_rate": req_rr_display,
-                        "status_label": f"4th Innings Live Chase ({lead_str})"
+                        "status_label": f"{team_2nd_bat} 2nd Innings Live Chase ({lead_str})"
                     }
                 }
                 
@@ -2943,39 +2947,43 @@ def compute_match_scenario_score_projections(
                     "current_innings_number": 3,
                     "innings_1": {
                         "team_id": team_1st_bat,
+                        "innings_name": f"{team_1st_bat} 1st Innings",
                         "status": "COMPLETED",
                         "current_score": f"{s1}/{inn_1_w}",
-                        "current_overs": f"{inn_1_o or '97.4'} ov",
+                        "current_overs": f"{inn_1_o or '108.2'} ov",
                         "live_projected_total": s1,
-                        "status_label": f"1st Innings Closed ({s1} runs)"
+                        "status_label": f"{team_1st_bat} 1st Innings Closed ({s1} runs)"
                     },
                     "innings_2": {
                         "team_id": team_2nd_bat,
+                        "innings_name": f"{team_2nd_bat} 1st Innings",
                         "status": "COMPLETED",
                         "current_score": f"{s2}/{inn_2_w}",
-                        "current_overs": f"{inn_2_o or '108.2'} ov",
+                        "current_overs": f"{inn_2_o or '97.4'} ov",
                         "live_projected_total": s2,
-                        "status_label": f"1st Innings Closed ({s2} runs • {team_2nd_bat} lead by {s2 - s1} runs)" if s2 > s1 else f"1st Innings Closed ({s2} runs)"
+                        "status_label": f"{team_2nd_bat} 1st Innings Closed ({s2} runs • {team_2nd_bat} lead by {s2 - s1} runs)" if s2 > s1 else f"{team_2nd_bat} 1st Innings Closed ({s2} runs • {team_2nd_bat} trail by {s1 - s2} runs)"
                     },
                     "innings_3": {
                         "team_id": team_1st_bat,
+                        "innings_name": f"{team_1st_bat} 2nd Innings",
                         "status": "ACTIVE_IN_PLAY",
                         "current_score": f"{curr_score}/{curr_wkts}",
                         "current_overs": f"{int(curr_overs)}.{curr_balls} ov",
                         "live_projected_total": proj_3rd_total,
                         "range": f"{proj_low} - {proj_high}",
-                        "status_label": f"3rd Innings In-Play ({lead_str})",
+                        "status_label": f"{team_1st_bat} 2nd Innings In-Play ({lead_str})",
                         "overall_match_deficit": max(0, overall_deficit),
                         "overall_match_lead": max(0, -overall_deficit)
                     },
                     "innings_4": {
                         "team_id": team_2nd_bat,
-                        "status": "PROJECTED",
+                        "innings_name": f"{team_2nd_bat} 2nd Innings",
+                        "status": "PROJECTED" if overall_deficit <= 0 else "CONTINGENT",
                         "target_set": inn4_target,
                         "chase_expectancy": feasible_chase_exp,
                         "chase_win_equity_pct": chase_win_equity,
                         "defend_win_equity_pct": defend_win_equity,
-                        "status_label": f"Projected 4th Innings Target (~{inn4_target} runs to win)"
+                        "status_label": f"{team_2nd_bat} 2nd Innings Target (~{inn4_target} runs to win)" if overall_deficit <= 0 else f"{team_2nd_bat} 2nd Innings (Target if required • {team_1st_bat} trail by {overall_deficit} runs)"
                     }
                 }
 
@@ -3081,20 +3089,22 @@ def compute_match_scenario_score_projections(
                     "current_innings_number": curr_innings,
                     "innings_1": {
                         "team_id": team_1st_bat,
+                        "innings_name": f"{team_1st_bat} 1st Innings",
                         "status": "COMPLETED",
                         "current_score": f"{s1}/{inn_1_w}",
                         "current_overs": f"{inn_1_o or '144.3'} ov",
                         "live_projected_total": s1,
-                        "status_label": f"1st Innings Closed ({s1} runs)"
+                        "status_label": f"{team_1st_bat} 1st Innings Closed ({s1} runs)"
                     },
                     "innings_2": {
                         "team_id": team_2nd_bat,
+                        "innings_name": f"{team_2nd_bat} 1st Innings",
                         "status": "ACTIVE_IN_PLAY",
                         "current_score": f"{curr_score}/{curr_wkts}",
                         "current_overs": f"{int(curr_overs)}.{curr_balls} ov",
                         "live_projected_total": proj_final,
                         "range": f"{proj_low} - {proj_high}",
-                        "status_label": f"2nd Innings In-Play ({lead_str})",
+                        "status_label": f"{team_2nd_bat} 1st Innings In-Play ({lead_str})",
                         "follow_on_target": follow_on_target,
                         "follow_on_deficit": follow_on_deficit,
                         "follow_on_avoided": follow_on_avoided,
@@ -3103,6 +3113,7 @@ def compute_match_scenario_score_projections(
                     },
                     "innings_3": {
                         "team_id": team_2nd_bat if follow_on_enforced_proj else team_1st_bat,
+                        "innings_name": f"{team_2nd_bat if follow_on_enforced_proj else team_1st_bat} 2nd Innings",
                         "status": "PROJECTED (FOLLOW-ON)" if follow_on_enforced_proj else "PROJECTED",
                         "par_score": round(inn2_par * 0.78) if follow_on_enforced_proj else inn3_par,
                         "range": f"{round(inn2_par * 0.78) - 30} - {round(inn2_par * 0.78) + 35}" if follow_on_enforced_proj else f"{inn3_low} - {inn3_high}",
@@ -3110,6 +3121,7 @@ def compute_match_scenario_score_projections(
                     },
                     "innings_4": {
                         "team_id": team_1st_bat if follow_on_enforced_proj else team_2nd_bat,
+                        "innings_name": f"{team_1st_bat if follow_on_enforced_proj else team_2nd_bat} 2nd Innings",
                         "status": "CONTINGENT" if follow_on_enforced_proj else "PROJECTED",
                         "target_set": inn4_target if not follow_on_enforced_proj else None,
                         "chase_expectancy": inn4_chase_exp if not follow_on_enforced_proj else None,
@@ -3185,35 +3197,39 @@ def compute_match_scenario_score_projections(
                     },
                     "innings_1": {
                         "team_id": team_1st_bat,
+                        "innings_name": f"{team_1st_bat} 1st Innings",
                         "status": "ACTIVE_IN_PLAY",
                         "current_score": f"{curr_score}/{curr_wkts}",
                         "current_overs": f"{int(curr_overs)}.{curr_balls} ov",
                         "live_projected_total": proj_final,
                         "range": f"{proj_low} - {proj_high}",
-                        "status_label": "1st Innings In-Play"
+                        "status_label": f"{team_1st_bat} 1st Innings In-Play"
                     },
                     "innings_2": {
                         "team_id": team_2nd_bat,
+                        "innings_name": f"{team_2nd_bat} 1st Innings",
                         "status": "UPCOMING",
                         "par_score": inn2_par,
                         "range": f"{inn2_par - 38} - {inn2_par + 42}",
-                        "status_label": "Upcoming 1st Innings Response"
+                        "status_label": f"{team_2nd_bat} 1st Innings Response (Upcoming)"
                     },
                     "innings_3": {
                         "team_id": team_1st_bat,
+                        "innings_name": f"{team_1st_bat} 2nd Innings",
                         "status": "PROJECTED",
                         "par_score": inn3_par,
                         "range": f"{inn3_par - 35} - {inn3_par + 40}",
-                        "status_label": "Projected 2nd Innings (Day 4 Wear)"
+                        "status_label": f"{team_1st_bat} 2nd Innings Projected (Day 4 Wear)"
                     },
                     "innings_4": {
                         "team_id": team_2nd_bat,
+                        "innings_name": f"{team_2nd_bat} 2nd Innings",
                         "status": "PROJECTED",
                         "target_set": inn4_target,
                         "chase_expectancy": inn4_chase_exp,
                         "chase_win_equity_pct": chase_win_equity,
                         "defend_win_equity_pct": round(100.0 - chase_win_equity, 1),
-                        "status_label": "Projected 4th Innings Target"
+                        "status_label": f"{team_2nd_bat} 2nd Innings Target (Projected)"
                     }
                 }
                 live_status = f"Innings 1 Live • Projected Total: ~{proj_final} runs"

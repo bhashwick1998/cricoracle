@@ -1436,6 +1436,12 @@ class IngestionManager:
                 if not t3:
                     t3 = t1
 
+                # Match integrity guard: preserve locked innings_1_team_id
+                locked_i1 = match.get("innings_1_team_id")
+                if locked_i1 and t2 == locked_i1 and t1 != locked_i1:
+                    inn_1, inn_2 = inn_2, inn_1
+                    t1, t2 = t2, t1
+
                 inn_1_team_id = t1
                 inn_1_score = inn_1["runs"]
                 inn_1_wickets = inn_1["wickets"]
@@ -1467,7 +1473,7 @@ class IngestionManager:
                     lead_txt = f"{t1} lead by {deficit} runs ({t2} trail by {deficit} runs)" if deficit > 0 else f"{t2} lead by {abs(deficit)} runs"
                 else:
                     lead_val = ((inn_1_score or 0) + (inn_3_score or 0)) - (inn_2_score or 0)
-                    lead_txt = f"{t1} lead by {lead_val} runs" if lead_val >= 0 else f"{t2} lead by {abs(lead_val)} runs"
+                    lead_txt = f"{t1} lead by {lead_val} runs" if lead_val >= 0 else f"{t2} lead by {abs(lead_val)} runs ({t1} trail by {abs(lead_val)} runs)"
                 if not st_text or st_text == "In Progress" or not any(k in st_low for k in ["lead", "trail", "stumps"]):
                     st_text = lead_txt
             elif len(all_innings) == 2:

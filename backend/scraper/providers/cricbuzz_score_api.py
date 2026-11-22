@@ -260,31 +260,17 @@ class CricbuzzScoreApi:
                                                         singles_after.append(s_item)
 
                                             cands = []
-                                            is_follow_on = (len(singles_before) > 0 and (singles_before[0]["runs"] - int(r1)) >= 200)
-                                            if is_follow_on:
-                                                # Valid ICC follow-on (deficit >= 200): opponent batted 1st, tm_c batted 2nd & 3rd
-                                                for s in singles_before:
-                                                    s["innings_index"] = len(cands) + 1
-                                                    cands.append(s)
-                                                cands.append({
-                                                    "team": tm_c,
-                                                    "runs": int(r1),
-                                                    "wickets": int(w1) if w1 is not None else 10,
-                                                    "overs": None,
-                                                    "innings_index": len(cands) + 1
-                                                })
-                                            else:
-                                                # Normal ICC Test alternation: tm_c batted 1st, opponent batted 2nd, tm_c batted 3rd
-                                                cands.append({
-                                                    "team": tm_c,
-                                                    "runs": int(r1),
-                                                    "wickets": int(w1) if w1 is not None else 10,
-                                                    "overs": None,
-                                                    "innings_index": len(cands) + 1
-                                                })
-                                                for s in singles_before:
-                                                    s["innings_index"] = len(cands) + 1
-                                                    cands.append(s)
+                                            # Under normal ICC Test alternation: tm_c batted 1st (r1), opponent batted 2nd (singles_before), tm_c batted 3rd (r2)
+                                            cands.append({
+                                                "team": tm_c,
+                                                "runs": int(r1),
+                                                "wickets": int(w1) if w1 is not None else 10,
+                                                "overs": None,
+                                                "innings_index": 1
+                                            })
+                                            for s in singles_before:
+                                                s["innings_index"] = len(cands) + 1
+                                                cands.append(s)
 
                                             for s in singles_after:
                                                 s["innings_index"] = len(cands) + 1

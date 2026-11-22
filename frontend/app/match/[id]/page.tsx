@@ -1976,13 +1976,14 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                   {(() => {
                     const inn1 = score_projections.live_test_innings_progression.innings_1;
                     const isClosed = inn1.status === "COMPLETED";
+                    const team1Name = inn1.team_id === metaA.short ? metaA.name : metaB.name;
                     return (
                       <div className={`p-3.5 rounded-2xl bg-slate-900/90 border ${isClosed ? "border-slate-800" : "border-emerald-800/80"} shadow-md flex flex-col justify-between`}>
                         <div>
                           <div className="flex items-center justify-between text-xs mb-1.5">
                             <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded ${isClosed ? "bg-slate-800 text-slate-300 border border-slate-700" : "bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1"}`}>
                               {!isClosed && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>}
-                              {isClosed ? "1ST INNINGS • CLOSED" : "1ST INNINGS • ACTIVE"}
+                              {inn1.team_id} 1ST INNINGS • {isClosed ? "CLOSED" : "ACTIVE"}
                             </span>
                             <span className="font-bold text-white text-xs">
                               {inn1.team_id === metaA.short ? metaA.flag : metaB.flag} {inn1.team_id}
@@ -1993,7 +1994,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                             <span className="text-xs font-normal text-slate-400 ml-2">({inn1.current_overs})</span>
                           </div>
                           <div className="mt-2 pt-2 border-t border-slate-800/80 font-mono">
-                            <span className="text-[10px] text-slate-400 block font-sans">{isClosed ? "Official 1st Innings Total" : "Live Projected Final"}</span>
+                            <span className="text-[10px] text-slate-400 block font-sans">{isClosed ? `${team1Name} 1st Innings Total` : "Live Projected Final"}</span>
                             <span className={`text-lg font-black ${isClosed ? "text-slate-200" : "text-emerald-400"}`}>
                               {isClosed ? `${inn1.live_projected_total} runs` : `~${inn1.live_projected_total}`}
                               {!isClosed && inn1.range && <span className="text-xs font-normal text-slate-400 ml-1.5">({inn1.range})</span>}
@@ -2001,7 +2002,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                           </div>
                         </div>
                         <div className="text-[10px] text-slate-400 italic pt-2 mt-2 border-t border-slate-800/80">
-                          {isClosed ? `${inn1.team_id} 1st innings concluded.` : `${inn1.team_id} building 1st innings total on ${score_projections.ground_pitch_archetype} deck.`}
+                          {inn1.status_label || (isClosed ? `${inn1.team_id} 1st innings concluded.` : `${inn1.team_id} building 1st innings total.`)}
                         </div>
                       </div>
                     );
@@ -2012,13 +2013,14 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     const inn2 = score_projections.live_test_innings_progression.innings_2;
                     const isClosed2 = inn2.status === "COMPLETED";
                     const isActive = inn2.status === "ACTIVE_IN_PLAY";
+                    const team2Name = inn2.team_id === metaA.short ? metaA.name : metaB.name;
                     return (
                       <div className={`p-3.5 rounded-2xl bg-slate-900/90 border ${isClosed2 ? "border-slate-800" : isActive ? "border-cyan-500/80 ring-1 ring-cyan-500/30" : "border-cyan-900/60"} shadow-md flex flex-col justify-between`}>
                         <div>
                           <div className="flex items-center justify-between text-xs mb-1.5">
                             <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded ${isClosed2 ? "bg-slate-800 text-slate-300 border border-slate-700" : isActive ? "bg-cyan-950 text-cyan-300 border border-cyan-800 flex items-center gap-1" : "bg-cyan-950/60 text-cyan-400/80 border border-cyan-900"}`}>
                               {isActive && <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse"></span>}
-                              {isClosed2 ? "2ND INNINGS • CLOSED" : isActive ? "2ND INNINGS • ACTIVE" : "2ND INNINGS • UPCOMING"}
+                              {inn2.team_id} 1ST INNINGS • {isClosed2 ? "CLOSED" : isActive ? "ACTIVE" : "UPCOMING"}
                             </span>
                             <span className="font-bold text-white text-xs">
                               {inn2.team_id === metaA.short ? metaA.flag : metaB.flag} {inn2.team_id}
@@ -2031,7 +2033,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                                 {inn2.current_overs && <span className="text-xs font-normal text-slate-400 ml-2">({inn2.current_overs})</span>}
                               </div>
                               <div className="mt-2 pt-2 border-t border-slate-800/80 font-mono">
-                                <span className="text-[10px] text-slate-400 block font-sans">Official 1st Innings Total</span>
+                                <span className="text-[10px] text-slate-400 block font-sans">{team2Name} 1st Innings Total</span>
                                 <span className="text-lg font-black text-slate-200">
                                   {inn2.live_projected_total || inn2.current_score} runs
                                 </span>
@@ -2060,7 +2062,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                             </>
                           ) : (
                             <>
-                              <div className="text-sm font-bold text-slate-300 mt-1">1st Innings Par Response</div>
+                              <div className="text-sm font-bold text-slate-300 mt-1">{team2Name} 1st Innings Response</div>
                               <div className="mt-2 pt-2 border-t border-slate-800/80 font-mono">
                                 <span className="text-[10px] text-slate-400 block font-sans">Projected Par Score</span>
                                 <span className="text-lg font-black text-cyan-300">
@@ -2072,7 +2074,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                           )}
                         </div>
                         <div className="text-[10px] text-slate-400 italic pt-2 mt-2 border-t border-slate-800/80">
-                          {inn2.status_label || "Day 2/3 deck will show increasing turn and spin hazard."}
+                          {inn2.status_label || `${inn2.team_id} 1st innings.`}
                         </div>
                       </div>
                     );
@@ -2083,13 +2085,15 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     const inn3 = score_projections.live_test_innings_progression.innings_3;
                     const isActive3 = inn3.status === "ACTIVE_IN_PLAY";
                     const isFollowOn = String(inn3.status || "").includes("FOLLOW-ON");
+                    const isClosed3 = inn3.status === "COMPLETED" || String(inn3.status || "").includes("DECLARED");
+                    const team3Name = inn3.team_id === metaA.short ? metaA.name : metaB.name;
                     return (
                       <div className={`p-3.5 rounded-2xl bg-slate-900/90 border ${isActive3 ? "border-amber-500/80 ring-1 ring-amber-500/30" : isFollowOn ? "border-amber-600/80 bg-amber-950/10" : "border-amber-900/60"} shadow-md flex flex-col justify-between`}>
                         <div>
                           <div className="flex items-center justify-between text-xs mb-1.5">
                             <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded ${isActive3 ? "bg-amber-950 text-amber-300 border border-amber-800 flex items-center gap-1" : "bg-amber-950/60 text-amber-300/80 border border-amber-900"}`}>
                               {isActive3 && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse"></span>}
-                              {isActive3 ? "3RD INNINGS • ACTIVE" : isFollowOn ? "3RD INNINGS • FOLLOW-ON" : "3RD INNINGS • PROJECTED"}
+                              {inn3.team_id} 2ND INNINGS • {isActive3 ? "ACTIVE" : isClosed3 ? "CLOSED" : isFollowOn ? "FOLLOW-ON" : "PROJECTED"}
                             </span>
                             <span className="font-bold text-white text-xs">
                               {inn3.team_id === metaA.short ? metaA.flag : metaB.flag} {inn3.team_id}
@@ -2111,9 +2115,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                             </>
                           ) : (
                             <>
-                              <div className="text-sm font-bold text-slate-300 mt-1">{isFollowOn ? "Follow-On 2nd Innings Par" : "2nd Innings Par (Day 4)"}</div>
+                              <div className="text-sm font-bold text-slate-300 mt-1">{team3Name} 2nd Innings Par (Day 4)</div>
                               <div className="mt-2 pt-2 border-t border-slate-800/80 font-mono">
-                                <span className="text-[10px] text-slate-400 block font-sans">Projected 3rd Innings</span>
+                                <span className="text-[10px] text-slate-400 block font-sans">Projected 2nd Innings</span>
                                 <span className="text-lg font-black text-amber-300">
                                   ~{inn3.par_score}
                                   {inn3.range && <span className="text-xs font-normal text-slate-400 ml-1.5">({inn3.range})</span>}
@@ -2123,7 +2127,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                           )}
                         </div>
                         <div className="text-[10px] text-amber-300/90 font-medium pt-2 mt-2 border-t border-slate-800/80">
-                          {inn3.status_label || "Accounting for natural pitch deterioration (-26% run rate)."}
+                          {inn3.status_label || `${inn3.team_id} 2nd innings in-play.`}
                         </div>
                       </div>
                     );
@@ -2133,12 +2137,13 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                   {(() => {
                     const inn4 = score_projections.live_test_innings_progression.innings_4;
                     const isContingent = inn4.status === "CONTINGENT";
+                    const team4Name = inn4.team_id === metaA.short ? metaA.name : metaB.name;
                     return (
                       <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-purple-900/60 shadow-md flex flex-col justify-between">
                         <div>
                           <div className="flex items-center justify-between text-xs mb-1.5">
                             <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
-                              {isContingent ? "4TH INNINGS • CONTINGENT" : "4TH INNINGS • TARGET"}
+                              {inn4.team_id} 2ND INNINGS • {isContingent ? "CONTINGENT" : "TARGET"}
                             </span>
                             <span className="font-bold text-white text-xs">
                               {inn4.team_id === metaA.short ? metaA.flag : metaB.flag} {inn4.team_id}
@@ -2146,7 +2151,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                           </div>
                           {isContingent ? (
                             <div className="text-xs text-purple-300/80 italic mt-3 font-mono">
-                              Only required if 2nd batting team clears the follow-on deficit in 3rd innings.
+                              {team4Name} 2nd innings will only be required if the deficit is cleared in the 3rd innings.
                             </div>
                           ) : (
                             <>
@@ -2171,7 +2176,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                           )}
                         </div>
                         <div className="text-[10px] text-slate-400 italic pt-2 mt-2 border-t border-slate-800/80">
-                          {inn4.status_label || "Subcontinent 4th innings chase requires handling deep Day 5 rough."}
+                          {inn4.status_label || `${inn4.team_id} 2nd innings chase.`}
                         </div>
                       </div>
                     );
@@ -2321,7 +2326,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                             <div className="p-3 rounded-xl bg-slate-950/80 border border-cyan-900/60 flex flex-col justify-between">
                               <div>
                                 <span className="text-[9px] text-cyan-400 font-bold uppercase block mb-1">
-                                  1st Innings • {metaA.short}
+                                  {metaA.short} 1st Innings
                                 </span>
                                 <span className="text-xl font-black text-cyan-300">
                                   {fProj.innings_1.team_a_par} runs
@@ -2339,7 +2344,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                             <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-900/60 flex flex-col justify-between">
                               <div>
                                 <span className="text-[9px] text-amber-400 font-bold uppercase block mb-1">
-                                  2nd Innings • {metaB.short} (Response)
+                                  {metaB.short} 1st Innings (Response)
                                 </span>
                                 <span className="text-xl font-black text-amber-300">
                                   {fProj.innings_2.team_b_par} runs
@@ -2357,7 +2362,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                             <div className="p-3 rounded-xl bg-slate-950/80 border border-cyan-800/60 flex flex-col justify-between">
                               <div>
                                 <span className="text-[9px] text-cyan-300 font-bold uppercase block mb-1">
-                                  3rd Innings • {metaA.short} (Wear)
+                                  {metaA.short} 2nd Innings (Wear)
                                 </span>
                                 <span className="text-xl font-black text-cyan-200">
                                   {fProj.innings_3.team_a_par} runs
@@ -2375,7 +2380,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                             <div className="p-3 rounded-xl bg-slate-950/80 border border-purple-900/60 flex flex-col justify-between">
                               <div>
                                 <span className="text-[9px] text-purple-400 font-bold uppercase block mb-1">
-                                  4th Innings • {metaB.short} (Chase)
+                                  {metaB.short} 2nd Innings (Target & Chase)
                                 </span>
                                 <span className="text-xl font-black text-purple-300">
                                   Target ~{fProj.scenario_a_team_1_bats_first.inn4_target}

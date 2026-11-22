@@ -767,6 +767,40 @@ async def seed_database():
             WHERE id = 'm_aus_eng_2026_t20_1'
         """)
 
+        # NZ vs IND 1st Test (Basin Reserve) - Day 4 Live
+        await conn.execute("""
+            UPDATE matches SET
+                state = 'LIVE_BALL_BY_BALL',
+                toss_winner_id = 'IND',
+                toss_decision = 'bowl',
+                current_innings = 3,
+                current_score = 56,
+                current_wickets = 1,
+                current_overs = 18,
+                current_balls = 4,
+                innings_1_team_id = 'NZ',
+                innings_1_score = 368,
+                innings_1_wickets = 10,
+                innings_1_overs = 108.2,
+                innings_2_team_id = 'IND',
+                innings_2_score = 720,
+                innings_2_wickets = 9,
+                innings_2_overs = 97.4,
+                innings_2_declared = 1,
+                innings_3_team_id = 'NZ',
+                innings_3_score = 56,
+                innings_3_wickets = 1,
+                innings_3_overs = 18.4,
+                batting_tank_pct = 76.0,
+                bowling_tank_pct = 72.0,
+                p_team_a = 6.0,
+                p_team_b = 82.0,
+                p_draw = 12.0,
+                match_status_text = 'Day 4: 3rd Session - New Zealand 56/1 (18.4 ov) • Trail by 296 runs',
+                last_event_description = 'NZ 2nd Innings: Nicholls 31*, Conway 29* • Trail India (720/9d) by 296 runs'
+            WHERE id = 'm_nz_ind_2026_test_1'
+        """)
+
         # 6. Seed Official 15-Man Match Squads for all fixtures
         async with conn.execute("SELECT id, team_id, role FROM players ORDER BY id") as p_cur:
             all_players = [dict(r) for r in await p_cur.fetchall()]

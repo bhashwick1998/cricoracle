@@ -559,25 +559,25 @@ class FailoverScraper:
 
             all_innings = []
 
-            # Check if side 2 has 2 scores (Follow-on: Team 2 batted in Innings 2 & 3)
-            # In ESPN RSS: "Bangladesh 100/5 & 400/10" -> 100/5 is active Inn 3, 400/10 is Inn 2
+            # Check if side 2 has 2 scores (e.g. side 2 batted in Innings 1 & 3: "IND 720/9d v NZ 60/1 & 368")
             if len(side2_tokens) >= 2:
                 t_act = parse_single_token(side2_tokens[0])
                 t_prev = parse_single_token(side2_tokens[1])
                 inn1_data = parse_single_token(side1_tokens[0])
 
-                all_innings.append({
-                    "team": s1_team,
-                    "runs": inn1_data["runs"],
-                    "wickets": inn1_data["wickets"],
-                    "overs": inn1_data["overs"],
-                    "innings_index": 1
-                })
+                # Under natural Test sequence: side 2 batted 1st (t_prev), side 1 batted 2nd (inn1_data), side 2 batted 3rd (t_act)
                 all_innings.append({
                     "team": s2_team,
                     "runs": t_prev["runs"],
                     "wickets": t_prev["wickets"],
                     "overs": t_prev["overs"],
+                    "innings_index": 1
+                })
+                all_innings.append({
+                    "team": s1_team,
+                    "runs": inn1_data["runs"],
+                    "wickets": inn1_data["wickets"],
+                    "overs": inn1_data["overs"],
                     "innings_index": 2
                 })
                 all_innings.append({
@@ -586,7 +586,7 @@ class FailoverScraper:
                     "wickets": t_act["wickets"],
                     "overs": t_act["overs"],
                     "innings_index": 3,
-                    "is_follow_on": True
+                    "is_follow_on": False
                 })
             elif len(side1_tokens) >= 2:
                 # Normal alternation: Team 1 batted in Innings 1 & 3
