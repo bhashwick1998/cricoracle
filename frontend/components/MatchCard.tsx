@@ -451,8 +451,11 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
           <div className="p-2 rounded-lg bg-slate-900/80 border border-emerald-900/40" title="Stage 3: XI & Toss Locked Pre-Match Anchor (P₀)">
             <span className="text-[9px] text-emerald-400 font-bold block uppercase tracking-wider">Stage 3 Locked (P₀)</span>
             <span className="text-xs sm:text-sm font-black text-white">
+              <span className="text-cyan-400 font-bold mr-1">{metaA.short}</span>
               {match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a}%
-              <span className="text-[10px] text-slate-400 font-normal ml-1">vs {Math.round((100 - (match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a)) * 10) / 10}%</span>
+              <span className="text-[10px] text-slate-400 font-normal mx-1">vs</span>
+              {Math.round((100 - (match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a)) * 10) / 10}%
+              <span className="text-amber-400 font-bold ml-1">{metaB.short}</span>
             </span>
             <span className="text-[9px] text-slate-400 block mt-0.5 truncate">
               Toss Shift: {match.delta_toss_shift ? (match.delta_toss_shift > 0 ? `+${match.delta_toss_shift}%` : `${match.delta_toss_shift}%`) : "0%"}
@@ -471,8 +474,14 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
               {match.state === "COMPLETED" ? "Stage 4 Result" : match.state === "LIVE_BALL_BY_BALL" ? "Stage 4 Live" : "Stage 4 In-Play"}
             </span>
             <span className="text-xs sm:text-sm font-black text-white">
+              <span className="text-cyan-400 font-bold mr-1">{metaA.short}</span>
               {match.p_team_a}%
-              <span className="text-[10px] text-slate-400 font-normal ml-1">vs {match.p_team_b}%</span>
+              <span className="text-[10px] text-slate-400 font-normal mx-1">vs</span>
+              {match.p_team_b}%
+              <span className="text-amber-400 font-bold ml-1">{metaB.short}</span>
+              {match.format === "TEST" && (match.p_draw || 0) > 0 && (
+                <span className="text-[10px] text-slate-400 font-normal ml-1">({match.p_draw}% D)</span>
+              )}
             </span>
             <span className="text-[9px] text-slate-400 block mt-0.5 truncate">
               {match.state === "COMPLETED" ? "Match Finalized" : match.state === "LIVE_BALL_BY_BALL" ? "Telemetry In-Play" : "Pre-Match Standby"}

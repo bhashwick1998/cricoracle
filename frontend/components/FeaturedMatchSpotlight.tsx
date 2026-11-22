@@ -162,6 +162,12 @@ export default function FeaturedMatchSpotlight({ match }: FeaturedMatchSpotlight
                   className="h-full bg-gradient-to-r from-blue-600 via-cyan-500 to-sky-400 rounded-l-full transition-all duration-700 ease-out relative group"
                   style={{ width: `${match.p_team_a}%` }}
                 />
+                {match.format === "TEST" && (match.p_draw || 0) > 0 && (
+                  <div
+                    className="h-full bg-slate-500 transition-all duration-700 ease-out"
+                    style={{ width: `${match.p_draw}%` }}
+                  />
+                )}
                 <div
                   className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 rounded-r-full transition-all duration-700 ease-out relative group"
                   style={{ width: `${match.p_team_b}%` }}
@@ -174,7 +180,13 @@ export default function FeaturedMatchSpotlight({ match }: FeaturedMatchSpotlight
                   <span className="text-white font-black">{match.p_team_a}%</span>
                 </span>
                 <span className="text-[10px] text-slate-400 font-sans uppercase tracking-wider font-semibold">
-                  Calibrated WinViz Anchor (P₀)
+                  {match.format === "TEST" && (match.p_draw || 0) > 0
+                    ? `Draw: ${match.p_draw}% • Live WinViz`
+                    : match.state === "LIVE_BALL_BY_BALL"
+                    ? "Stage 4 Live WinViz"
+                    : match.state === "COMPLETED"
+                    ? "Official Final Result"
+                    : "Calibrated WinViz Anchor (P₀)"}
                 </span>
                 <span className="text-amber-400 flex items-center gap-1">
                   <span className="text-white font-black">{match.p_team_b}%</span>

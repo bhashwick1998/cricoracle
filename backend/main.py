@@ -286,9 +286,9 @@ class PlayerCompareRequest(BaseModel):
     lens: str = "Balanced"  # Balanced, Explosive, Purist, Clutch
     match_format: str = "T20I"
 
-@app.get("/")
-@app.get("/health")
-@app.get("/api/health")
+@app.api_route("/", methods=["GET", "HEAD", "POST", "OPTIONS"])
+@app.api_route("/health", methods=["GET", "HEAD", "POST", "OPTIONS"])
+@app.api_route("/api/health", methods=["GET", "HEAD", "POST", "OPTIONS"])
 async def health_check():
     return {
         "status": "online",

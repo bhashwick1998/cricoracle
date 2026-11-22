@@ -651,7 +651,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
       score: d.score_after,
       wickets: d.wickets_after,
       p_team_a: pTeamAVal,
-      p_team_b: Math.round((100.0 - pTeamAVal) * 10) / 10,
+      p_team_b: match.format === "TEST" && match.p_team_b !== undefined
+        ? Number(match.p_team_b)
+        : Math.round((100.0 - (match.format === "TEST" ? Number(match.p_draw || 0) : 0) - pTeamAVal) * 10) / 10,
       wpa: d.wpa,
       isWicket: d.is_wicket === 1,
       commentary: d.commentary
@@ -661,7 +663,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   // Ensure latest delivery point precisely matches the upper box live win probability
   if (wormData.length > 0 && match.p_team_a !== undefined) {
     wormData[wormData.length - 1].p_team_a = Number(match.p_team_a);
-    wormData[wormData.length - 1].p_team_b = Math.round((100.0 - Number(match.p_team_a)) * 10) / 10;
+    wormData[wormData.length - 1].p_team_b = match.p_team_b !== undefined
+      ? Number(match.p_team_b)
+      : Math.round((100.0 - (match.format === "TEST" ? Number(match.p_draw || 0) : 0) - Number(match.p_team_a)) * 10) / 10;
   }
 
   const initialDataPoint = {
@@ -672,7 +676,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     score: 0,
     wickets: 0,
     p_team_a: match.p0_pre_match || match.p_team_a || 50.0,
-    p_team_b: Math.round((100.0 - (match.p0_pre_match || match.p_team_a || 50.0)) * 10) / 10,
+    p_team_b: match.p_team_b !== undefined && match.state === "LIVE_BALL_BY_BALL"
+      ? Number(match.p_team_b)
+      : Math.round((100.0 - (match.p0_pre_match || match.p_team_a || 50.0)) * 10) / 10,
     wpa: 0,
     isWicket: false,
     commentary: "Pre-Match P₀ Prior Locked"
