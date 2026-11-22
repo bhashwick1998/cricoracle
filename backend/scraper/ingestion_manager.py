@@ -1728,36 +1728,41 @@ class IngestionManager:
             scraped_bowlers = []
             scraped_batters = []
             try:
-                # 2. Ingest genuine Cricbuzz match squads
-                squads_feed = await self.cricbuzz_api.get_match_squads(cricbuzz_query)
-                team_a_sq = squads_feed.get("team_a_squad", [])
-                team_b_sq = squads_feed.get("team_b_squad", [])
-                if team_a_sq or team_b_sq:
-                    # Reset Playing XI status for all squad players in this match
-                    # Only players confirmed by Cricbuzz squad or scorecard will have is_confirmed_xi = 1
-                    await conn.execute("UPDATE match_squads SET is_confirmed_xi = 0 WHERE match_id = ?", (match_id,))
-                for sq_key, tm_id in [("team_a_squad", match["team_a_id"]), ("team_b_squad", match["team_b_id"])]:
-                    for p_entry in squads_feed.get(sq_key, []):
-                        p_name = p_entry.get("name")
-                        if not p_name:
-                            continue
-                        is_xi = bool(p_entry.get("is_playing_xi"))
-                        res_p = await self.entity_resolver.resolve_player(p_name, tm_id, all_players=all_players)
-                        pid = res_p["id"]
-                        p_role = res_p.get("role") or p_entry.get("role", "batter")
-                        p_hand = res_p.get("batting_hand", "right")
-                        p_bstyle = res_p.get("bowling_style", "NONE")
-                        await conn.execute("""
-                            INSERT OR IGNORE INTO players (id, name, team_id, role, batting_hand, bowling_style, league_experience_tier)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, (pid, res_p["name"], tm_id, p_role, p_hand, p_bstyle, "tier_1_ipl"))
-                        await conn.execute("""
-                            INSERT INTO match_squads (match_id, player_id, team_id, is_confirmed_xi, sub_status)
-                            VALUES (?, ?, ?, ?, ?)
-                            ON CONFLICT(match_id, player_id) DO UPDATE SET
-                                is_confirmed_xi = excluded.is_confirmed_xi,
-                                sub_status = excluded.sub_status
-                        """, (match_id, pid, tm_id, 1 if is_xi else 0, "CONFIRMED_XI" if is_xi else "BENCH_RESERVE"))
+                # 2. Ingest genuine Cricbuzz match squads (only if not already populated for this match)
+                async with conn.execute("SELECT COUNT(*) FROM match_squads WHERE match_id = ?", (match_id,)) as count_cursor:
+                    squad_count_row = await count_cursor.fetchone()
+                    existing_squad_count = squad_count_row[0] if squad_count_row else 0
+
+                if existing_squad_count < 22:
+                    squads_feed = await self.cricbuzz_api.get_match_squads(cricbuzz_query)
+                    team_a_sq = squads_feed.get("team_a_squad", [])
+                    team_b_sq = squads_feed.get("team_b_squad", [])
+                    if team_a_sq or team_b_sq:
+                        # Reset Playing XI status for all squad players in this match
+                        # Only players confirmed by Cricbuzz squad or scorecard will have is_confirmed_xi = 1
+                        await conn.execute("UPDATE match_squads SET is_confirmed_xi = 0 WHERE match_id = ?", (match_id,))
+                    for sq_key, tm_id in [("team_a_squad", match["team_a_id"]), ("team_b_squad", match["team_b_id"])]:
+                        for p_entry in squads_feed.get(sq_key, []):
+                            p_name = p_entry.get("name")
+                            if not p_name:
+                                continue
+                            is_xi = bool(p_entry.get("is_playing_xi"))
+                            res_p = await self.entity_resolver.resolve_player(p_name, tm_id, all_players=all_players)
+                            pid = res_p["id"]
+                            p_role = res_p.get("role") or p_entry.get("role", "batter")
+                            p_hand = res_p.get("batting_hand", "right")
+                            p_bstyle = res_p.get("bowling_style", "NONE")
+                            await conn.execute("""
+                                INSERT OR IGNORE INTO players (id, name, team_id, role, batting_hand, bowling_style, league_experience_tier)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (pid, res_p["name"], tm_id, p_role, p_hand, p_bstyle, "tier_1_ipl"))
+                            await conn.execute("""
+                                INSERT INTO match_squads (match_id, player_id, team_id, is_confirmed_xi, sub_status)
+                                VALUES (?, ?, ?, ?, ?)
+                                ON CONFLICT(match_id, player_id) DO UPDATE SET
+                                    is_confirmed_xi = excluded.is_confirmed_xi,
+                                    sub_status = excluded.sub_status
+                            """, (match_id, pid, tm_id, 1 if is_xi else 0, "CONFIRMED_XI" if is_xi else "BENCH_RESERVE"))
 
                 # 3. Synchronize live scorecard
                 scorecard = await self.cricbuzz_api.get_live_scorecard(cricbuzz_query)

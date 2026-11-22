@@ -213,11 +213,15 @@ async def lifespan(app: FastAPI):
     except Exception as prop_err:
         logger.error(f"Error during startup squad propagation: {prop_err}")
     await ingestion_manager.start()
-    try:
-        discovered = await ingestion_manager.auto_discover_and_sync_live_matches()
-        logger.info(f"Startup live match auto-discovery completed: {len(discovered)} matches updated.")
-    except Exception as disc_err:
-        logger.error(f"Error during startup live match auto-discovery: {disc_err}")
+    # Run initial live match auto-discovery in background so port opens immediately for Render health checks
+    async def bg_initial_discovery():
+        try:
+            discovered = await ingestion_manager.auto_discover_and_sync_live_matches()
+            logger.info(f"Startup live match auto-discovery completed: {len(discovered)} matches updated.")
+        except Exception as disc_err:
+            logger.error(f"Error during startup live match auto-discovery: {disc_err}")
+
+    asyncio.create_task(bg_initial_discovery())
     yield
     # Shutdown
     await ingestion_manager.stop()
