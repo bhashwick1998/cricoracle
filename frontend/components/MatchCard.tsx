@@ -448,50 +448,77 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
 
         {/* Stage 3 (XI & Toss Locked P₀) and Stage 4 (Live In-Play / Final Result) Probabilities Only */}
         <div className="grid grid-cols-2 gap-2 p-2 rounded-xl bg-slate-950/70 border border-slate-800/80 mb-3 text-center font-mono-numbers">
-          <div className="p-2 rounded-lg bg-slate-900/80 border border-emerald-900/40 min-w-0 overflow-hidden flex flex-col justify-between" title="Stage 3: XI & Toss Locked Pre-Match Anchor (P₀)">
-            <span className="text-[9px] text-emerald-400 font-bold block uppercase tracking-wider truncate mb-0.5">
-              Stage 3 Locked (P₀)
-            </span>
-            <div className="flex items-center justify-center gap-1 text-[11px] sm:text-xs font-black text-white flex-wrap leading-tight my-0.5">
-              <span className="text-cyan-400 font-bold">{metaA.short} {match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a}%</span>
-              <span className="text-[10px] text-slate-500 font-normal">vs</span>
-              <span className="text-amber-400 font-bold">{Math.round((100 - (match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a)) * 10) / 10}% {metaB.short}</span>
+          {/* Stage 3 (XI & Toss Locked P₀) */}
+          <div className="p-2 sm:p-2.5 rounded-lg bg-slate-900/80 border border-emerald-900/40 min-w-0 flex flex-col justify-between overflow-hidden relative" title="Stage 3: XI & Toss Locked Pre-Match Anchor (P₀)">
+            <div className="flex items-center justify-center gap-1 w-full min-w-0 mb-1">
+              <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider truncate">
+                Stage 3 Locked (P₀)
+              </span>
             </div>
-            <span className="text-[9px] text-slate-400 block truncate mt-0.5">
-              Toss Shift: {match.delta_toss_shift ? (match.delta_toss_shift > 0 ? `+${match.delta_toss_shift}%` : `${match.delta_toss_shift}%`) : "0%"}
-            </span>
+            <div className="w-full min-w-0 flex flex-col items-center justify-center my-auto py-0.5">
+              <div className="flex items-center justify-center gap-1 text-[10px] sm:text-[11px] font-black text-white w-full min-w-0 px-0.5">
+                <span className="text-cyan-400 font-bold truncate shrink-1">
+                  {metaA.short} {match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a}%
+                </span>
+                <span className="text-[8px] text-slate-500 font-normal shrink-0">vs</span>
+                <span className="text-amber-400 font-bold truncate shrink-1">
+                  {Math.round((100 - (match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a)) * 10) / 10}% {metaB.short}
+                </span>
+              </div>
+              {match.format === "TEST" && (match.p_draw || 0) > 0 && (
+                <div className="flex items-center justify-center gap-1 text-[9px] font-bold text-slate-400 mt-0.5">
+                  <span className="text-[8px] text-slate-500 uppercase font-semibold">Prior</span>
+                  <span className="text-slate-300 font-mono-numbers bg-slate-950/80 px-1 py-0.2 rounded border border-slate-800 leading-none">
+                    Anchor P₀
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="w-full min-w-0 mt-1 pt-0.5 border-t border-slate-800/60">
+              <span className="text-[8.5px] sm:text-[9px] text-slate-400 block truncate text-center leading-tight">
+                Toss Shift: {match.delta_toss_shift ? (match.delta_toss_shift > 0 ? `+${match.delta_toss_shift}%` : `${match.delta_toss_shift}%`) : "0%"}
+              </span>
+            </div>
           </div>
 
-          <div className={`p-2 rounded-lg border min-w-0 overflow-hidden flex flex-col justify-between ${
+          {/* Stage 4 (Live In-Play / Final Result) */}
+          <div className={`p-2 sm:p-2.5 rounded-lg border min-w-0 flex flex-col justify-between overflow-hidden relative ${
             match.state === "LIVE_BALL_BY_BALL"
-              ? "bg-rose-950/30 border-rose-800/60 shadow-inner"
+              ? "bg-rose-950/40 border-rose-800/80 shadow-inner ring-1 ring-rose-500/20"
               : match.state === "COMPLETED"
               ? "bg-emerald-950/30 border-emerald-800/60"
               : "bg-slate-900/80 border-slate-800/60"
           }`} title="Stage 4: Live Ball-by-Ball Dynamic Win Probability">
-            <span className={`text-[9px] font-bold block uppercase tracking-wider truncate flex items-center justify-center gap-1 mb-0.5 ${
-              match.state === "LIVE_BALL_BY_BALL" ? "text-rose-400" : match.state === "COMPLETED" ? "text-emerald-400" : "text-cyan-400"
-            }`}>
+            <div className="flex items-center justify-center gap-1 w-full min-w-0 mb-1">
               {match.state === "LIVE_BALL_BY_BALL" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping shrink-0 inline-block" />
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping shrink-0" />
               )}
-              <span className="truncate">
+              <span className={`text-[9px] font-bold uppercase tracking-wider truncate ${
+                match.state === "LIVE_BALL_BY_BALL" ? "text-rose-400" : match.state === "COMPLETED" ? "text-emerald-400" : "text-cyan-400"
+              }`}>
                 {match.state === "COMPLETED" ? "Stage 4 Result" : match.state === "LIVE_BALL_BY_BALL" ? "Stage 4 Live" : "Stage 4 In-Play"}
               </span>
-            </span>
-            <div className="flex items-center justify-center gap-1 text-[11px] sm:text-xs font-black text-white flex-wrap leading-tight my-0.5">
-              <span className="text-cyan-400 font-bold">{metaA.short} {match.p_team_a}%</span>
-              <span className="text-[10px] text-slate-500 font-normal">vs</span>
-              <span className="text-amber-400 font-bold">{match.p_team_b}% {metaB.short}</span>
             </div>
-            {match.format === "TEST" && (match.p_draw || 0) > 0 && (
-              <div className="text-[10px] font-bold text-slate-300 leading-tight">
-                Draw <span className="text-slate-200 font-mono-numbers">{match.p_draw}%</span>
+            <div className="w-full min-w-0 flex flex-col items-center justify-center my-auto py-0.5">
+              <div className="flex items-center justify-center gap-1 text-[10px] sm:text-[11px] font-black text-white w-full min-w-0 px-0.5">
+                <span className="text-cyan-400 font-bold truncate shrink-1">{metaA.short} {match.p_team_a}%</span>
+                <span className="text-[8px] text-slate-500 font-normal shrink-0">vs</span>
+                <span className="text-amber-400 font-bold truncate shrink-1">{match.p_team_b}% {metaB.short}</span>
               </div>
-            )}
-            <span className="text-[9px] text-slate-400 block truncate mt-0.5">
-              {match.state === "COMPLETED" ? "Match Finalized" : match.state === "LIVE_BALL_BY_BALL" ? "Telemetry In-Play" : "Pre-Match Standby"}
-            </span>
+              {match.format === "TEST" && (match.p_draw || 0) > 0 && (
+                <div className="flex items-center justify-center gap-1 text-[9px] font-bold text-slate-300 mt-0.5">
+                  <span className="text-[8px] text-slate-400 uppercase font-semibold">Draw</span>
+                  <span className="text-slate-100 font-mono-numbers bg-slate-900/90 px-1 py-0.2 rounded border border-slate-700/60 leading-none">
+                    {match.p_draw}%
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="w-full min-w-0 mt-1 pt-0.5 border-t border-rose-900/30">
+              <span className="text-[8.5px] sm:text-[9px] text-slate-400 block truncate text-center leading-tight">
+                {match.state === "COMPLETED" ? "Match Finalized" : match.state === "LIVE_BALL_BY_BALL" ? "Telemetry In-Play" : "Pre-Match Standby"}
+              </span>
+            </div>
           </div>
         </div>
 
