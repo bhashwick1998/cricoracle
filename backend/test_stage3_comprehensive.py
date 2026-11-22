@@ -198,19 +198,46 @@ class TestStage3ComprehensiveEngine(unittest.TestCase):
     def test_08_api_match_detail_integration(self):
         """Confirm that get_match_detail exposes all Stage 3 pillars for an XI_AND_TOSS_LOCKED fixture."""
         async def run_check():
-            detail = await get_match_detail("m_nz_ind_2026_odi_3")
-            m = detail.get("match", {})
-            self.assertEqual(m.get("state"), "XI_AND_TOSS_LOCKED")
-            self.assertEqual(m.get("predictive_power_pct"), 98.0)
-            self.assertEqual(m.get("predictive_power_badge"), "98.0% Predictive Power (12-Pillar Calibrated)")
-            self.assertEqual(m.get("active_pitch_type"), "dusty")
-            self.assertTrue(m.get("is_pitch_override"))
-            self.assertIn("positional_comparisons", m)
-            self.assertEqual(len(m.get("positional_comparisons", [])), 11)
-            self.assertIn("bowling_vulnerabilities", m)
-            self.assertIn("duel_simulations", m)
-            self.assertIn("team_a_22_attributes", m)
-            self.assertIn("team_b_22_attributes", m)
+            from backend.database.db import get_db
+            conn = await get_db()
+            try:
+                await conn.execute("""
+                    UPDATE matches SET
+                        state = 'XI_AND_TOSS_LOCKED',
+                        toss_winner_id = 'IND',
+                        toss_decision = 'bowl',
+                        pitch_report = 'Pitch is dry with expanding cracks. Spinners will thrive.',
+                        match_status_text = 'Playing XI & Toss Locked • Stage 3 Pre-Match Intelligence Active',
+                        last_event_description = 'Toss: India won the toss and elected to bowl. Pitch is dry with expanding cracks.',
+                        p_team_a = 48.0,
+                        p_team_b = 52.0,
+                        par_score_projected = 275
+                    WHERE id = 'm_nz_ind_2026_odi_3'
+                """)
+                await conn.commit()
+                detail = await get_match_detail("m_nz_ind_2026_odi_3")
+                m = detail.get("match", {})
+                self.assertEqual(m.get("state"), "XI_AND_TOSS_LOCKED")
+                self.assertEqual(m.get("predictive_power_pct"), 98.0)
+                self.assertEqual(m.get("predictive_power_badge"), "98.0% Predictive Power (12-Pillar Calibrated)")
+                self.assertEqual(m.get("active_pitch_type"), "dusty")
+                self.assertTrue(m.get("is_pitch_override"))
+                self.assertIn("positional_comparisons", m)
+                self.assertEqual(len(m.get("positional_comparisons", [])), 11)
+                self.assertIn("bowling_vulnerabilities", m)
+                self.assertIn("duel_simulations", m)
+                self.assertIn("team_a_22_attributes", m)
+                self.assertIn("team_b_22_attributes", m)
+            finally:
+                await conn.execute("""
+                    UPDATE matches SET
+                        state = 'COMPLETED',
+                        match_status_text = 'India won by 4 runs (DLS Method)',
+                        last_event_description = 'Match called due to rain: India 142/3 (24.0 ov) won by 4 runs on DLS Par (138)'
+                    WHERE id = 'm_nz_ind_2026_odi_3'
+                """)
+                await conn.commit()
+                await conn.close()
 
         asyncio.run(run_check())
 

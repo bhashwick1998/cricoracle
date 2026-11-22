@@ -204,10 +204,10 @@ export default function HomePage() {
     }
   };
 
-  // Marquee featured match (Stage 3 Confirmed Playing 11 & Toss Locked or Live)
+  // Marquee featured match (Live in-play matches first, then Stage 3 Confirmed Playing 11 & Toss Locked)
   const featuredMatch =
+    matches.find((m) => m.state === "LIVE_BALL_BY_BALL" && !m.is_completed) ||
     matches.find((m) => m.state === "XI_AND_TOSS_LOCKED") ||
-    matches.find((m) => m.state === "LIVE_BALL_BY_BALL") ||
     matches[0];
 
   // Live in-play matches (strictly active matches, excluding completed fixtures)
@@ -217,7 +217,7 @@ export default function HomePage() {
   const filteredMatches = useMemo(() => {
     return matches
       .filter((m) => {
-        // State Filter (Stage 1 & 2 removed; only Stage 3, Stage 4 and Completed <= 3 days)
+        // State Filter (Stage 1 & 2 removed; only Stage 3, Stage 4 and Completed <= 2 days)
         if (activeTab === "LIVE") {
           if (m.state !== "LIVE_BALL_BY_BALL" || m.is_completed) return false;
         } else if (activeTab === "COMPLETED") {
@@ -225,7 +225,7 @@ export default function HomePage() {
         } else if (activeTab === "XI_LOCKED") {
           if (m.state !== "XI_AND_TOSS_LOCKED") return false;
         }
-        // "ALL" shows all verified matches (Stage 3, Stage 4, Completed <= 3 days)
+        // "ALL" shows all verified matches (Stage 3, Stage 4, Completed <= 2 days)
 
         // Format Filter
         if (formatFilter !== "ALL" && m.format !== formatFilter) {
@@ -376,7 +376,7 @@ export default function HomePage() {
                   {activeTab === "LIVE"
                     ? "Live In-Play & Stumps Matches"
                     : activeTab === "COMPLETED"
-                    ? "Official Match Results (Past 3 Days)"
+                    ? "Official Match Results (Past 2 Days)"
                     : activeTab === "XI_LOCKED"
                     ? "Stage 3: Confirmed Playing 11 & Toss Locked"
                     : "Official Senior International Fixtures & Odds"}

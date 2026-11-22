@@ -113,7 +113,7 @@ export default function Navbar({
               }`}
             >
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              Match Results (3 Days)
+              Match Results (2 Days)
             </button>
           </nav>
 
@@ -233,7 +233,7 @@ export default function Navbar({
             >
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>Match Results (Past 3 Days)</span>
+                <span>Match Results (Past 2 Days)</span>
               </div>
               {activeTab === "COMPLETED" && (
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />

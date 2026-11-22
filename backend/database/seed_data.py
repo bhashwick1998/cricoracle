@@ -717,26 +717,33 @@ async def seed_database():
             WHERE id = 'm_nz_ind_2026_odi_1'
         """)
 
-        # India vs New Zealand 3rd ODI - Stage 3 Confirmed Playing 11 & Toss Locked
+        # NZ vs IND 3rd ODI (Seddon Park, Hamilton) - Completed on Nov 10
         await conn.execute("""
             UPDATE matches SET
-                state = 'XI_AND_TOSS_LOCKED',
+                state = 'COMPLETED',
+                format = 'ODI',
                 toss_winner_id = 'IND',
                 toss_decision = 'bowl',
-                pitch_report = 'Pitch is dry with expanding cracks. Spinners will thrive.',
-                current_innings = 1,
-                current_score = 0,
-                current_wickets = 0,
-                current_overs = 0,
+                current_innings = 2,
+                current_score = 142,
+                current_wickets = 3,
+                current_overs = 24,
                 current_balls = 0,
-                target_runs = NULL,
-                dls_target = NULL,
-                dls_par_score = NULL,
-                p_team_a = 48.0,
-                p_team_b = 52.0,
-                par_score_projected = 275,
-                match_status_text = 'Playing XI & Toss Locked • Stage 3 Pre-Match Intelligence Active',
-                last_event_description = 'Toss: India won the toss and elected to bowl. Pitch is dry with expanding cracks.'
+                target_runs = 286,
+                innings_1_team_id = 'NZ',
+                innings_1_score = 286,
+                innings_1_wickets = 10,
+                innings_1_overs = 50.0,
+                innings_2_team_id = 'IND',
+                innings_2_score = 142,
+                innings_2_wickets = 3,
+                innings_2_overs = 24.0,
+                p_team_a = 0.0,
+                p_team_b = 100.0,
+                p_draw = 0.0,
+                predictive_power_pct = 100.0,
+                match_status_text = 'India won by 4 runs (DLS Method)',
+                last_event_description = 'Match called due to rain: India 142/3 (24.0 ov) won by 4 runs on DLS Par (138)'
             WHERE id = 'm_nz_ind_2026_odi_3'
         """)
 

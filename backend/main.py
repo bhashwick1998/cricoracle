@@ -949,10 +949,6 @@ async def get_matches(state: Optional[str] = None):
             else:
                 m["is_cricdata_sourced"] = False
             st = str(m.get("state") or "").upper()
-            # 1. LIVE matches are ALWAYS kept (Stage 4)
-            if st == "LIVE_BALL_BY_BALL" or bool(m.get("is_stumps")):
-                filtered_matches.append(m)
-                continue
 
             sch_iso = m.get("scheduled_start")
             if not sch_iso:
@@ -964,20 +960,37 @@ async def get_matches(state: Optional[str] = None):
                     start_dt = start_dt.replace(tzinfo=timezone.utc)
                 diff_sec = (start_dt - now_utc).total_seconds()
 
+                # Dynamic match duration by format: Test = 5 days, ODI = 8 hours, T20 = 4 hours
+                m_fmt = str(m.get("format") or "T20I").upper()
+                if m_fmt == "TEST":
+                    match_duration = 5 * 86400
+                elif m_fmt == "ODI":
+                    match_duration = 8 * 3600
+                else:
+                    match_duration = 4 * 3600
+
+                # User Rule: Strictly only show finished matches for 2 days (48 hours)
+                # The 48-hour window is counted after the match concludes
+                max_past_window = 2 * 86400
+
+                # 1. LIVE matches are kept if actively underway or stumps
+                # Exclude stale "live" records whose match duration has already passed by more than 24 hours
+                if st == "LIVE_BALL_BY_BALL" or bool(m.get("is_stumps")):
+                    if (diff_sec + match_duration) >= -86400:
+                        filtered_matches.append(m)
+                    continue
+
                 if st == "COMPLETED":
-                    # User rule: Strictly only keep past matches in the site for three days (72 hours)
-                    # For Test matches (5-day duration), the 72-hour window starts after the match concludes
-                    max_past_window = 3 * 86400
-                    match_duration = (5 * 86400) if m.get("format") == "TEST" else 86400
+                    # Only show finished matches for 2 days
                     if (diff_sec + match_duration) >= -max_past_window:
                         filtered_matches.append(m)
                 elif st == "XI_AND_TOSS_LOCKED":
                     # Stage 3: Playing 11 and Toss locked from CricketData.org API
-                    # Automatically show match schedules when 11 players and toss result are visible
-                    filtered_matches.append(m)
+                    # Strictly valid ONLY for upcoming / imminent matches (within match window, not stale past fixtures)
+                    if (diff_sec + match_duration) >= 0 and diff_sec <= 86400:
+                        filtered_matches.append(m)
                 else:
-                    # Stage 1 (Macro) & Stage 2 (Squad) are REMOVED!
-                    # Do not show match schedules by other methods until Playing 11 and toss are confirmed on CricketData.org
+                    # Stage 1 (Macro) & Stage 2 (Squad) are not shown on homepage
                     pass
             except Exception:
                 pass

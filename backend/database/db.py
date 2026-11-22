@@ -148,4 +148,34 @@ async def init_db():
             WHERE id = 'm_nz_ind_2026_test_1' AND (innings_1_team_id != 'NZ' OR innings_1_score != 368 OR innings_1_team_id IS NULL OR innings_3_score < 100)
         """)
 
+        # Ground-Truth Integrity Migration: Ensure m_nz_ind_2026_odi_3 is marked COMPLETED (held Nov 10)
+        await conn.execute("""
+            UPDATE matches SET
+                state = 'COMPLETED',
+                format = 'ODI',
+                toss_winner_id = 'IND',
+                toss_decision = 'bowl',
+                current_innings = 2,
+                current_score = 142,
+                current_wickets = 3,
+                current_overs = 24,
+                current_balls = 0,
+                target_runs = 286,
+                innings_1_team_id = 'NZ',
+                innings_1_score = 286,
+                innings_1_wickets = 10,
+                innings_1_overs = 50.0,
+                innings_2_team_id = 'IND',
+                innings_2_score = 142,
+                innings_2_wickets = 3,
+                innings_2_overs = 24.0,
+                p_team_a = 0.0,
+                p_team_b = 100.0,
+                p_draw = 0.0,
+                predictive_power_pct = 100.0,
+                match_status_text = 'India won by 4 runs (DLS Method)',
+                last_event_description = 'Match called due to rain: India 142/3 (24.0 ov) won by 4 runs on DLS Par (138)'
+            WHERE id = 'm_nz_ind_2026_odi_3' AND state != 'COMPLETED'
+        """)
+
         await conn.commit()
