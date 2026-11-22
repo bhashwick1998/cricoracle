@@ -1,0 +1,35 @@
+name: Render Keep-Alive Pinger
+
+on:
+  schedule:
+    # Runs every 12 minutes (Render free tier spins down after 15 minutes of inactivity)
+    - cron: "*/12 * * * *"
+  workflow_dispatch: # Allows running manually anytime from the GitHub Actions tab
+
+jobs:
+  ping:
+    name: Ping Render Instances
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep-Alive Ping Services
+        run: |
+          echo "=========================================="
+          echo "Sending keep-alive pings to Render instances..."
+          echo "Time: $(date -u)"
+          echo "=========================================="
+
+          echo "1. Pinging CricOracle Backend..."
+          BACKEND_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://cricoracle-backend.onrender.com/ || echo "TIMEOUT")
+          echo "   Backend Response Status: $BACKEND_CODE"
+
+          echo "2. Pinging CricOracle Frontend..."
+          FRONTEND_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://cricoracle-frontend.onrender.com/ || echo "TIMEOUT")
+          echo "   Frontend Response Status: $FRONTEND_CODE"
+
+          echo "3. Pinging Upstream Cricket Analytics Engine..."
+          ANALYTICS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://cricket-analytics-ghpv.onrender.com/ || echo "TIMEOUT")
+          echo "   Analytics Response Status: $ANALYTICS_CODE"
+
+          echo "=========================================="
+          echo "Keep-alive ping cycle completed successfully!"
+          echo "=========================================="
