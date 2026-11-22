@@ -564,6 +564,13 @@ async def get_matches(state: Optional[str] = None):
                     live_pitch_type=detected_pitch
                 )
 
+                if m_fmt == "TEST" and m.get("scenario_score_projections"):
+                    test_win_p = m["scenario_score_projections"].get("live_test_innings_progression", {}).get("win_probabilities")
+                    if test_win_p and test_win_p.get("p_team_a") is not None:
+                        m["p_team_a"] = float(test_win_p["p_team_a"])
+                        m["p_team_b"] = float(test_win_p["p_team_b"])
+                        m["p_draw"] = float(test_win_p.get("p_draw", 0.0))
+
                 m["format_specific_variables"] = compute_format_specific_prediction_variables(
                     match_format=m_fmt,
                     team_a={"id": m.get("team_a_id")},
@@ -1605,6 +1612,13 @@ async def get_match_detail(match_id: str):
             live_pitch_type=detected_pitch
         )
         match_data["scenario_score_projections"] = score_projections
+
+        if match_data.get("format") == "TEST" and score_projections.get("live_test_innings_progression"):
+            test_win_p = score_projections["live_test_innings_progression"].get("win_probabilities")
+            if test_win_p and test_win_p.get("p_team_a") is not None:
+                match_data["p_team_a"] = float(test_win_p["p_team_a"])
+                match_data["p_team_b"] = float(test_win_p["p_team_b"])
+                match_data["p_draw"] = float(test_win_p.get("p_draw", 0.0))
 
         # Player Expected Runs & Wickets Projections (Top Batter & Top Bowler identification)
         player_projections = compute_player_runs_and_wickets_projections(

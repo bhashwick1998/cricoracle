@@ -140,13 +140,95 @@ async def init_db():
                 current_wickets = 2,
                 current_overs = 45,
                 current_balls = 0,
+                p_team_a = 18.7,
+                p_team_b = 41.9,
+                p_draw = 39.4,
                 is_stumps = 1,
                 stumps_day = 4,
                 stumps_label = '🌙 STUMPS • DAY 4 CLOSE OF PLAY',
                 match_status_text = 'Day 4: Stumps - New Zealand 119/2 (45.0 ov) • Trail by 233 runs',
-                last_event_description = 'Stumps Day 4: New Zealand 119/2 (Conway 55*, Nicholls 48*) • Trail India (720/9d) by 233 runs'
-            WHERE id = 'm_nz_ind_2026_test_1' AND (innings_1_team_id != 'NZ' OR innings_1_score != 368 OR innings_1_team_id IS NULL OR innings_3_score < 100)
+                last_event_description = "44.6Jasprit Bumrah to Devon Conway, no run, it's the short ball but it's leg-side and DC easily sits under it. Dies on the way to the keeper"
+            WHERE id = 'm_nz_ind_2026_test_1'
         """)
+
+        # Ensure deliveries for m_nz_ind_2026_test_1 are complete up to over 44.6
+        async with conn.execute(
+            "SELECT id, over, ball, commentary FROM match_deliveries WHERE match_id = 'm_nz_ind_2026_test_1' ORDER BY id DESC LIMIT 1"
+        ) as cur:
+            last_d = await cur.fetchone()
+            if not last_d or last_d[1] < 44 or "Dies on the way" not in (last_d[3] or ""):
+                await conn.execute("DELETE FROM match_deliveries WHERE match_id = 'm_nz_ind_2026_test_1'")
+                delivs_seed = []
+                cum_s = 0
+                cum_w = 0
+                striker_p = "t_latham_nz"
+                non_striker_p = "d_conway_nz"
+                bowlers_list = [
+                    ("jbumrah_ind", "Jasprit Bumrah"),
+                    ("msiraj_ind", "Mohammed Siraj"),
+                    ("uncapped_prasidh_krishna", "Prasidh Krishna"),
+                    ("r_jadeja_ind", "Ravindra Jadeja"),
+                    ("wsundar_ind", "Washington Sundar"),
+                ]
+                for ov_idx in range(45):
+                    bw_tuple = bowlers_list[ov_idx % len(bowlers_list)]
+                    if ov_idx == 44:
+                        bw_tuple = ("jbumrah_ind", "Jasprit Bumrah")
+                    elif ov_idx == 26:
+                        bw_tuple = ("uncapped_prasidh_krishna", "Prasidh Krishna")
+                    elif ov_idx == 7:
+                        bw_tuple = ("jbumrah_ind", "Jasprit Bumrah")
+                    b_id, b_name = bw_tuple
+
+                    for b_idx in range(1, 7):
+                        is_w = 0
+                        w_type = "none"
+                        d_player = None
+                        r_b = 0
+                        if ov_idx == 7 and b_idx == 4:
+                            is_w = 1
+                            w_type = "caught"
+                            d_player = "t_latham_nz"
+                            cum_w = 1
+                            striker_p = "k_williamson_nz"
+                            comm = f"7.4 {b_name} to Tom Latham, OUT, edged and taken! Splendid outswinger, Latham pushes with hard hands, thick edge to second slip where KL Rahul pouches it cleanly! Latham c Rahul b Bumrah 14 (28b 2x4)"
+                        elif ov_idx == 26 and b_idx == 4:
+                            is_w = 1
+                            w_type = "caught"
+                            d_player = "k_williamson_nz"
+                            cum_w = 2
+                            striker_p = "r_ravindra_nz"
+                            comm = f"26.4 {b_name} to Kane Williamson, OUT, caught behind! Extra bounce from Prasidh, Williamson tries to drop his wrists but gloves it through to the keeper! Williamson c †Pant b Prasidh Krishna 28 (64b 3x4)"
+                        elif ov_idx == 44 and b_idx == 6:
+                            r_b = 0
+                            comm = "44.6Jasprit Bumrah to Devon Conway, no run, it's the short ball but it's leg-side and DC easily sits under it. Dies on the way to the keeper"
+                        else:
+                            if cum_s < 119 and ov_idx < 44:
+                                r_b = 1 if (ov_idx + b_idx) % 3 == 0 else (2 if (ov_idx + b_idx) % 7 == 0 else (4 if (ov_idx * 6 + b_idx) % 23 == 0 else 0))
+                                comm = f"{ov_idx}.{b_idx} {b_name} to {striker_p.replace('_nz','').replace('_',' ').title()}, {r_b} run{'s' if r_b != 1 else '' if r_b > 0 else ', no run'}, defended solidly"
+                            else:
+                                r_b = 0
+                                comm = f"{ov_idx}.{b_idx} {b_name} to {striker_p.replace('_nz','').replace('_',' ').title()}, no run, left alone outside off"
+                        cum_s = min(119, cum_s + r_b)
+                        if ov_idx == 44 and b_idx == 6:
+                            cum_s = 119
+                        wpa_val = 13.6 if (ov_idx == 26 and b_idx == 4) else (11.2 if is_w else 0.0)
+                        delivs_seed.append((
+                            'm_nz_ind_2026_test_1', 3, ov_idx, b_idx, striker_p, non_striker_p, b_id,
+                            r_b, 0, "none", is_w, w_type, d_player,
+                            cum_s, cum_w, 18.7, wpa_val, comm
+                        ))
+                        if r_b % 2 == 1:
+                            striker_p, non_striker_p = non_striker_p, striker_p
+                    striker_p, non_striker_p = non_striker_p, striker_p
+
+                await conn.executemany("""
+                    INSERT INTO match_deliveries (
+                        match_id, innings, over, ball, striker_id, non_striker_id, bowler_id,
+                        runs_batter, extras, extra_type, is_wicket, wicket_type, dismissed_player_id,
+                        score_after, wickets_after, p_team_a_after, wpa, commentary
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, delivs_seed)
 
         # Ground-Truth Integrity Migration: Ensure m_nz_ind_2026_odi_3 is marked COMPLETED (held Nov 10)
         await conn.execute("""

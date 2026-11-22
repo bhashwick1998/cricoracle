@@ -805,11 +805,11 @@ async def seed_database():
                 innings_4_score = NULL,
                 batting_tank_pct = 76.0,
                 bowling_tank_pct = 72.0,
-                p_team_a = 5.0,
-                p_team_b = 83.0,
-                p_draw = 12.0,
+                p_team_a = 18.7,
+                p_team_b = 41.9,
+                p_draw = 39.4,
                 match_status_text = 'Day 4: Stumps - New Zealand 119/2 (45.0 ov) • Trail by 233 runs',
-                last_event_description = 'Stumps Day 4: New Zealand 119/2 (Conway 55*, Nicholls 48*) • Trail India (720/9d) by 233 runs'
+                last_event_description = "44.6Jasprit Bumrah to Devon Conway, no run, it's the short ball but it's leg-side and DC easily sits under it. Dies on the way to the keeper"
             WHERE id = 'm_nz_ind_2026_test_1'
         """)
 
