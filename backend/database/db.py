@@ -116,4 +116,36 @@ async def init_db():
         await add_col("match_squads", "wickets_taken", "INTEGER DEFAULT 0")
         await add_col("match_squads", "bowling_economy", "REAL DEFAULT 0.0")
 
+        # Ground-Truth Innings Integrity Migration for NZ vs IND 1st Test:
+        # NZ 1st Innings (368), IND 1st Innings (720/9d), NZ 2nd Innings (119/2, Stumps Day 4), IND 2nd Innings yet to play.
+        await conn.execute("""
+            UPDATE matches SET
+                innings_1_team_id = 'NZ',
+                innings_1_score = 368,
+                innings_1_wickets = 10,
+                innings_1_overs = 121.0,
+                innings_2_team_id = 'IND',
+                innings_2_score = 720,
+                innings_2_wickets = 9,
+                innings_2_overs = 166.0,
+                innings_2_declared = 1,
+                innings_3_team_id = 'NZ',
+                innings_3_score = 119,
+                innings_3_wickets = 2,
+                innings_3_overs = 45.0,
+                innings_4_team_id = 'IND',
+                innings_4_score = NULL,
+                current_innings = 3,
+                current_score = 119,
+                current_wickets = 2,
+                current_overs = 45,
+                current_balls = 0,
+                is_stumps = 1,
+                stumps_day = 4,
+                stumps_label = '🌙 STUMPS • DAY 4 CLOSE OF PLAY',
+                match_status_text = 'Day 4: Stumps - New Zealand 119/2 (45.0 ov) • Trail by 233 runs',
+                last_event_description = 'Stumps Day 4: New Zealand 119/2 (Conway 55*, Nicholls 48*) • Trail India (720/9d) by 233 runs'
+            WHERE id = 'm_nz_ind_2026_test_1' AND (innings_1_team_id != 'NZ' OR innings_1_score != 368 OR innings_1_team_id IS NULL OR innings_3_score < 100)
+        """)
+
         await conn.commit()

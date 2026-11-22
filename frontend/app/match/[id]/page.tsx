@@ -1117,6 +1117,11 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     <div className="text-[11px] text-slate-400 font-mono mt-1">
                       vs {bowlingTeam.flag} <span className="text-slate-300 font-bold">{bowlingTeam.name}</span> Bowling
                     </div>
+                    {match.format === "TEST" && match.current_innings === 3 && (
+                      <div className="text-[11px] text-purple-300/90 font-mono mt-0.5">
+                        {bowlingTeam.flag} <span className="font-bold">{bowlingTeam.name} 2nd Innings:</span> Yet to Play
+                      </div>
+                    )}
                     {match.format === "TEST" ? (
                       <div className="text-xs font-semibold text-amber-300 mt-1 font-mono-numbers">
                         {(match as any).match_status_text || `Innings ${match.current_innings} • Par: ~${match.par_score_projected || 252}`}
@@ -2138,12 +2143,13 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     const inn4 = score_projections.live_test_innings_progression.innings_4;
                     const isContingent = inn4.status === "CONTINGENT";
                     const team4Name = inn4.team_id === metaA.short ? metaA.name : metaB.name;
+                    const inn3Team = inn4.team_id === metaA.short ? metaB : metaA;
                     return (
                       <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-purple-900/60 shadow-md flex flex-col justify-between">
                         <div>
                           <div className="flex items-center justify-between text-xs mb-1.5">
                             <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
-                              {inn4.team_id} 2ND INNINGS • {isContingent ? "CONTINGENT" : "TARGET"}
+                              {inn4.team_id} 2ND INNINGS • {isContingent ? "YET TO PLAY" : "TARGET"}
                             </span>
                             <span className="font-bold text-white text-xs">
                               {inn4.team_id === metaA.short ? metaA.flag : metaB.flag} {inn4.team_id}
@@ -2151,7 +2157,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                           </div>
                           {isContingent ? (
                             <div className="text-xs text-purple-300/80 italic mt-3 font-mono">
-                              {team4Name} 2nd innings will only be required if the deficit is cleared in the 3rd innings.
+                              {team4Name} 2nd innings yet to play. Only required if {inn3Team.name} clears the 1st innings deficit in their 2nd innings.
                             </div>
                           ) : (
                             <>

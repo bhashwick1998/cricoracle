@@ -767,37 +767,42 @@ async def seed_database():
             WHERE id = 'm_aus_eng_2026_t20_1'
         """)
 
-        # NZ vs IND 1st Test (Basin Reserve) - Day 4 Live
+        # NZ vs IND 1st Test (Basin Reserve) - Day 4 Stumps
         await conn.execute("""
             UPDATE matches SET
                 state = 'LIVE_BALL_BY_BALL',
                 toss_winner_id = 'IND',
                 toss_decision = 'bowl',
                 current_innings = 3,
-                current_score = 56,
-                current_wickets = 1,
-                current_overs = 18,
-                current_balls = 4,
+                current_score = 119,
+                current_wickets = 2,
+                current_overs = 45,
+                current_balls = 0,
+                is_stumps = 1,
+                stumps_day = 4,
+                stumps_label = '🌙 STUMPS • DAY 4 CLOSE OF PLAY',
                 innings_1_team_id = 'NZ',
                 innings_1_score = 368,
                 innings_1_wickets = 10,
-                innings_1_overs = 108.2,
+                innings_1_overs = 121.0,
                 innings_2_team_id = 'IND',
                 innings_2_score = 720,
                 innings_2_wickets = 9,
-                innings_2_overs = 97.4,
+                innings_2_overs = 166.0,
                 innings_2_declared = 1,
                 innings_3_team_id = 'NZ',
-                innings_3_score = 56,
-                innings_3_wickets = 1,
-                innings_3_overs = 18.4,
+                innings_3_score = 119,
+                innings_3_wickets = 2,
+                innings_3_overs = 45.0,
+                innings_4_team_id = 'IND',
+                innings_4_score = NULL,
                 batting_tank_pct = 76.0,
                 bowling_tank_pct = 72.0,
-                p_team_a = 6.0,
-                p_team_b = 82.0,
+                p_team_a = 5.0,
+                p_team_b = 83.0,
                 p_draw = 12.0,
-                match_status_text = 'Day 4: 3rd Session - New Zealand 56/1 (18.4 ov) • Trail by 296 runs',
-                last_event_description = 'NZ 2nd Innings: Nicholls 31*, Conway 29* • Trail India (720/9d) by 296 runs'
+                match_status_text = 'Day 4: Stumps - New Zealand 119/2 (45.0 ov) • Trail by 233 runs',
+                last_event_description = 'Stumps Day 4: New Zealand 119/2 (Conway 55*, Nicholls 48*) • Trail India (720/9d) by 233 runs'
             WHERE id = 'm_nz_ind_2026_test_1'
         """)
 

@@ -1580,5 +1580,47 @@
     "batter_power_rating": 56.0,
     "bowler_power_rating": 53.6,
     "tactical_edge": "NEUTRAL"
+  },
+  "df5a6881_f19ccfad_TEST": {
+    "batter_id": "df5a6881",
+    "bowler_id": "f19ccfad",
+    "batter_name": "DP Conway",
+    "bowler_name": "Washington Sundar",
+    "expected_runs_per_over": 4.2,
+    "wicket_risk_pct": 23.5,
+    "dot_pct": 60.3,
+    "boundary_pct": 7.4,
+    "rotation_pct": 28.0,
+    "batter_power_rating": 53.0,
+    "bowler_power_rating": 59.6,
+    "tactical_edge": "BOWLER"
+  },
+  "ba5e1069_f19ccfad_TEST": {
+    "batter_id": "ba5e1069",
+    "bowler_id": "f19ccfad",
+    "batter_name": "R Ravindra",
+    "bowler_name": "Washington Sundar",
+    "expected_runs_per_over": 4.0,
+    "wicket_risk_pct": 41.9,
+    "dot_pct": 55.4,
+    "boundary_pct": 6.0,
+    "rotation_pct": 30.0,
+    "batter_power_rating": 56.0,
+    "bowler_power_rating": 59.6,
+    "tactical_edge": "BOWLER"
+  },
+  "ba5e1069_0a67aec0_TEST": {
+    "batter_id": "ba5e1069",
+    "bowler_id": "0a67aec0",
+    "batter_name": "R Ravindra",
+    "bowler_name": "Akash Deep",
+    "expected_runs_per_over": 7.6,
+    "wicket_risk_pct": 16.6,
+    "dot_pct": 51.0,
+    "boundary_pct": 20.1,
+    "rotation_pct": 25.9,
+    "batter_power_rating": 56.0,
+    "bowler_power_rating": 60.0,
+    "tactical_edge": "NEUTRAL"
   }
 }

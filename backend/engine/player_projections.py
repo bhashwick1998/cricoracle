@@ -2958,8 +2958,8 @@ def compute_match_scenario_score_projections(
                         "team_id": team_2nd_bat,
                         "innings_name": f"{team_2nd_bat} 1st Innings",
                         "status": "COMPLETED",
-                        "current_score": f"{s2}/{inn_2_w}",
-                        "current_overs": f"{inn_2_o or '97.4'} ov",
+                        "current_score": f"{s2}/{inn_2_w}" if not match_data.get("innings_2_declared") else f"{s2}/{inn_2_w}d",
+                        "current_overs": f"{inn_2_o or '166.0'} ov",
                         "live_projected_total": s2,
                         "status_label": f"{team_2nd_bat} 1st Innings Closed ({s2} runs • {team_2nd_bat} lead by {s2 - s1} runs)" if s2 > s1 else f"{team_2nd_bat} 1st Innings Closed ({s2} runs • {team_2nd_bat} trail by {s1 - s2} runs)"
                     },
@@ -2979,11 +2979,11 @@ def compute_match_scenario_score_projections(
                         "team_id": team_2nd_bat,
                         "innings_name": f"{team_2nd_bat} 2nd Innings",
                         "status": "PROJECTED" if overall_deficit <= 0 else "CONTINGENT",
-                        "target_set": inn4_target,
-                        "chase_expectancy": feasible_chase_exp,
-                        "chase_win_equity_pct": chase_win_equity,
-                        "defend_win_equity_pct": defend_win_equity,
-                        "status_label": f"{team_2nd_bat} 2nd Innings Target (~{inn4_target} runs to win)" if overall_deficit <= 0 else f"{team_2nd_bat} 2nd Innings (Target if required • {team_1st_bat} trail by {overall_deficit} runs)"
+                        "target_set": inn4_target if overall_deficit <= 0 else None,
+                        "chase_expectancy": feasible_chase_exp if overall_deficit <= 0 else None,
+                        "chase_win_equity_pct": chase_win_equity if overall_deficit <= 0 else 0.0,
+                        "defend_win_equity_pct": defend_win_equity if overall_deficit <= 0 else 100.0,
+                        "status_label": f"{team_2nd_bat} 2nd Innings Target (~{inn4_target} runs to win)" if overall_deficit <= 0 else f"{team_2nd_bat} 2nd Innings (Yet to play • Target required only if {team_1st_bat} clears {overall_deficit} runs)"
                     }
                 }
 

@@ -902,7 +902,12 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                         <div className="text-[9px] text-slate-400 mt-0.5">
                           {match.format === "TEST" ? (
                             match.current_innings === 3 ? (
-                              <span>Lead by {inn3Prog?.overall_match_lead || 45} runs • Setting 4th Innings Target (~{testProg?.innings_4?.target_set || 254})</span>
+                              <span>
+                                {battingTeam.short} 2nd Inn: {match.current_score}/{match.current_wickets} •{" "}
+                                {Number(inn3Prog?.overall_match_deficit || 0) > 0 || (match.match_status_text || "").toLowerCase().includes("trail")
+                                  ? `Trail by ${inn3Prog?.overall_match_deficit || 233} runs • ${bowlingTeam.short} yet to play`
+                                  : `Lead by ${inn3Prog?.overall_match_lead || 45} runs • Setting Target`}
+                              </span>
                             ) : match.current_innings === 2 && (match as any).innings_1_score ? (() => {
                               const curBat = (match as any).batting_team_id === match.team_b_id ? metaB : metaA;
                               const inn1Team = (match as any).innings_1_team_id === match.team_b_id ? metaB : metaA;
