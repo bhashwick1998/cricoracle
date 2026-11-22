@@ -2902,46 +2902,58 @@ def compute_match_scenario_score_projections(
                 inn4_overs_left = max(1.0, overs_avail - inn3_overs_needed)
 
                 # 2. Continuous Wicket-Time Bottleneck Index (rho) for Draw Probability:
-                # Average Test wicket falls every 8.0 overs (48 balls)
-                # Total remaining wickets across all active & upcoming innings to achieve a decisive win
-                rem_wkts = (10 - curr_wkts) + 10
-                rho = (8.0 * rem_wkts) / overs_avail
-                excess_bottleneck = max(0.0, rho - 1.0)
+                if match_data.get("p_draw") is not None and match_data.get("p_team_a") is not None and match_data.get("p_team_b") is not None:
+                    # Invariance: Respect authoritative database / live calibration
+                    draw_pct = float(match_data["p_draw"])
+                    p_a_calc = float(match_data["p_team_a"])
+                    p_b_calc = float(match_data["p_team_b"])
+                    decisive_pct = round(100.0 - draw_pct, 1)
+                else:
+                    if overall_deficit > 0:
+                        # Trailing in 3rd innings: bowling team needs only (10 - curr_wkts) to win (by innings or small chase)
+                        lead_potential = max(0.0, float(proj_3rd_total - overall_deficit))
+                        p_fourth_inn_wkt_demand = min(1.0, max(0.0, lead_potential / 180.0))
+                        rem_wkts = (10 - curr_wkts) + (10 * p_fourth_inn_wkt_demand)
+                    else:
+                        rem_wkts = (10 - curr_wkts) + 10
 
-                base_draw = min(30.0, max(8.0, 18.2 + (overs_lost / 15.0) * 8.0))
-                draw_pct = round(min(62.0, max(6.0, (base_draw + excess_bottleneck * 63.5) * pitch_draw_mod)), 1)
-                decisive_pct = round(100.0 - draw_pct, 1)
+                    rho = (8.0 * rem_wkts) / overs_avail
+                    excess_bottleneck = max(0.0, rho - 1.0)
 
-                # 3. Continuous Time-Bottlenecked Chase Expectancy:
-                # Unconstrained ability on Day 5 pitch:
-                unconstrained_chase_exp = round(inn2_par * day5_wear_factor)
-                # Maximum runs physically achievable in available overs at normal Test chase pace (3.4 RPO):
-                time_capacity_runs = inn4_overs_left * 3.4
-                feasible_chase_exp = round(min(float(unconstrained_chase_exp), time_capacity_runs))
+                    base_draw = min(40.0, max(8.0, 18.2 + (overs_lost / 15.0) * 8.0))
+                    draw_pct = round(min(62.0, max(6.0, (base_draw + excess_bottleneck * 63.5) * pitch_draw_mod)), 1)
+                    decisive_pct = round(100.0 - draw_pct, 1)
 
-                # 4. Continuous Required Run Rate (RRR) Bottleneck on Chase Win Equity:
-                # Extended Old Formula: 50.0 - (Target - Feasible_Exp) * 0.18 with Time Damping
-                req_rr = inn4_target / max(1.0, inn4_overs_left)
-                rr_excess = max(0.0, req_rr - 3.5)
-                tau_rate = 1.0 / (1.0 + (rr_excess / 2.8) ** 2)
+                    # 3. Continuous Time-Bottlenecked Chase Expectancy:
+                    # Unconstrained ability on Day 5 pitch:
+                    unconstrained_chase_exp = round(inn2_par * day5_wear_factor)
+                    # Maximum runs physically achievable in available overs at normal Test chase pace (3.4 RPO):
+                    time_capacity_runs = inn4_overs_left * 3.4
+                    feasible_chase_exp = round(min(float(unconstrained_chase_exp), time_capacity_runs))
 
-                # Bowling side (SL) upset equity from potential early 3rd-innings collapse before declaration:
-                wkts_in_hand_bat = 10 - curr_wkts
-                lead_vulnerability = max(0.0, 1.0 - (max(0, current_lead) / safe_lead))
-                p_collapse = 11.8 * (1.0 - tau_rate) * lead_vulnerability * (wkts_in_hand_bat / 10.0)
+                    # 4. Continuous Required Run Rate (RRR) Bottleneck on Chase Win Equity:
+                    # Extended Old Formula: 50.0 - (Target - Feasible_Exp) * 0.18 with Time Damping
+                    req_rr = inn4_target / max(1.0, inn4_overs_left)
+                    rr_excess = max(0.0, req_rr - 3.5)
+                    tau_rate = 1.0 / (1.0 + (rr_excess / 2.8) ** 2)
 
-                target_gap = inn4_target - feasible_chase_exp
-                raw_chase_equity = (50.0 - target_gap * 0.18) * tau_rate + p_collapse
-                chase_win_equity = round(max(3.5, min(88.0, raw_chase_equity)), 1)
-                defend_win_equity = round(100.0 - chase_win_equity, 1)
+                    # Bowling side (SL) upset equity from potential early 3rd-innings collapse before declaration:
+                    wkts_in_hand_bat = 10 - curr_wkts
+                    lead_vulnerability = max(0.0, 1.0 - (max(0, current_lead) / safe_lead))
+                    p_collapse = 11.8 * (1.0 - tau_rate) * lead_vulnerability * (wkts_in_hand_bat / 10.0)
 
-                # Decisive Split between Defending/Target-Setting Team and Chasing Team
-                ratio_chase = chase_win_equity / (chase_win_equity + defend_win_equity)
-                p_win_2nd_bat = round(decisive_pct * ratio_chase, 1)
-                p_win_1st_bat = round(decisive_pct - p_win_2nd_bat, 1)
+                    target_gap = inn4_target - feasible_chase_exp
+                    raw_chase_equity = (50.0 - target_gap * 0.18) * tau_rate + p_collapse
+                    chase_win_equity = round(max(3.5, min(88.0, raw_chase_equity)), 1)
+                    defend_win_equity = round(100.0 - chase_win_equity, 1)
 
-                p_a_calc = p_win_1st_bat if team_1st_bat == team_a_id else p_win_2nd_bat
-                p_b_calc = round(100.0 - draw_pct - p_a_calc, 1)
+                    # Decisive Split between Defending/Target-Setting Team and Chasing Team
+                    ratio_chase = chase_win_equity / (chase_win_equity + defend_win_equity)
+                    p_win_2nd_bat = round(decisive_pct * ratio_chase, 1)
+                    p_win_1st_bat = round(decisive_pct - p_win_2nd_bat, 1)
+
+                    p_a_calc = p_win_1st_bat if team_1st_bat == team_a_id else p_win_2nd_bat
+                    p_b_calc = round(100.0 - draw_pct - p_a_calc, 1)
 
                 live_test_innings_progression = {
                     "current_innings_number": 3,
