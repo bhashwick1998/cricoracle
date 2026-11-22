@@ -255,9 +255,10 @@ async def init_db():
                 p_team_b = 100.0,
                 p_draw = 0.0,
                 predictive_power_pct = 100.0,
+                pitch_report = NULL,
                 match_status_text = 'India won by 4 runs (DLS Method)',
                 last_event_description = 'Match called due to rain: India 142/3 (24.0 ov) won by 4 runs on DLS Par (138)'
-            WHERE id = 'm_nz_ind_2026_odi_3' AND state != 'COMPLETED'
+            WHERE id = 'm_nz_ind_2026_odi_3'
         """)
 
         await conn.commit()

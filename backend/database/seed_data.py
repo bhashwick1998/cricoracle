@@ -460,7 +460,7 @@ async def seed_database():
             (
                 "m_nz_ind_2026_odi_3", "India Tour of New Zealand 2026 - 3rd ODI", "ODI",
                 "NZ", "IND", "seddon_park", "2026-11-10T02:00:00Z", 1,
-                "LIVE_BALL_BY_BALL", "IND", "bowl",
+                "COMPLETED", "IND", "bowl",
                 2, 142, 3, 24, 0, 286,
                 "klrahul_ind", "rpant_ind", "t_boult_nz",
                 38.5, 61.5, 46.8, 43.8, 46.8,

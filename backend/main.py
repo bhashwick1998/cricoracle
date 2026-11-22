@@ -565,12 +565,14 @@ async def get_matches(state: Optional[str] = None):
                     live_pitch_type=detected_pitch
                 )
 
-                if m_fmt == "TEST" and m.get("scenario_score_projections"):
-                    test_win_p = m["scenario_score_projections"].get("live_test_innings_progression", {}).get("win_probabilities")
-                    if test_win_p and test_win_p.get("p_team_a") is not None:
-                        m["p_team_a"] = float(test_win_p["p_team_a"])
-                        m["p_team_b"] = float(test_win_p["p_team_b"])
-                        m["p_draw"] = float(test_win_p.get("p_draw", 0.0))
+                if m_fmt == "TEST" and m.get("scenario_score_projections") and isinstance(m["scenario_score_projections"], dict):
+                    ltip = m["scenario_score_projections"].get("live_test_innings_progression")
+                    if isinstance(ltip, dict):
+                        test_win_p = ltip.get("win_probabilities")
+                        if isinstance(test_win_p, dict) and test_win_p.get("p_team_a") is not None:
+                            m["p_team_a"] = float(test_win_p["p_team_a"])
+                            m["p_team_b"] = float(test_win_p["p_team_b"])
+                            m["p_draw"] = float(test_win_p.get("p_draw", 0.0))
 
                 m["format_specific_variables"] = compute_format_specific_prediction_variables(
                     match_format=m_fmt,
@@ -1614,12 +1616,14 @@ async def get_match_detail(match_id: str):
         )
         match_data["scenario_score_projections"] = score_projections
 
-        if match_data.get("format") == "TEST" and score_projections.get("live_test_innings_progression"):
-            test_win_p = score_projections["live_test_innings_progression"].get("win_probabilities")
-            if test_win_p and test_win_p.get("p_team_a") is not None:
-                match_data["p_team_a"] = float(test_win_p["p_team_a"])
-                match_data["p_team_b"] = float(test_win_p["p_team_b"])
-                match_data["p_draw"] = float(test_win_p.get("p_draw", 0.0))
+        if match_data.get("format") == "TEST" and score_projections and isinstance(score_projections, dict):
+            ltip = score_projections.get("live_test_innings_progression")
+            if isinstance(ltip, dict):
+                test_win_p = ltip.get("win_probabilities")
+                if isinstance(test_win_p, dict) and test_win_p.get("p_team_a") is not None:
+                    match_data["p_team_a"] = float(test_win_p["p_team_a"])
+                    match_data["p_team_b"] = float(test_win_p["p_team_b"])
+                    match_data["p_draw"] = float(test_win_p.get("p_draw", 0.0))
 
         # Player Expected Runs & Wickets Projections (Top Batter & Top Bowler identification)
         player_projections = compute_player_runs_and_wickets_projections(

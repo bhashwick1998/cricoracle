@@ -232,6 +232,10 @@ class TestStage3ComprehensiveEngine(unittest.TestCase):
                 await conn.execute("""
                     UPDATE matches SET
                         state = 'COMPLETED',
+                        pitch_report = NULL,
+                        p_team_a = 0.0,
+                        p_team_b = 100.0,
+                        p_draw = 0.0,
                         match_status_text = 'India won by 4 runs (DLS Method)',
                         last_event_description = 'Match called due to rain: India 142/3 (24.0 ov) won by 4 runs on DLS Par (138)'
                     WHERE id = 'm_nz_ind_2026_odi_3'

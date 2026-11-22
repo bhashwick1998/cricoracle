@@ -217,6 +217,20 @@ export default function HomePage() {
   const filteredMatches = useMemo(() => {
     return matches
       .filter((m) => {
+        // Safety guard: Strictly omit matches that finished more than 2 days ago (48 hours)
+        const schTime = new Date(m.scheduled_start).getTime();
+        const durationMs = m.format === "TEST" ? 5 * 86400 * 1000 : (m.format === "ODI" ? 8 * 3600 * 1000 : 4 * 3600 * 1000);
+        const matchEndMs = schTime + durationMs;
+        const pastCutoffMs = Date.now() - (2 * 86400 * 1000); // 48 hours ago
+        
+        if (m.state === "COMPLETED" && matchEndMs < pastCutoffMs) {
+          return false;
+        }
+        if (m.state === "XI_AND_TOSS_LOCKED" && matchEndMs < Date.now()) {
+          // Toss locked is strictly for upcoming matches, cannot be a stale past fixture
+          return false;
+        }
+
         // State Filter (Stage 1 & 2 removed; only Stage 3, Stage 4 and Completed <= 2 days)
         if (activeTab === "LIVE") {
           if (m.state !== "LIVE_BALL_BY_BALL" || m.is_completed) return false;
