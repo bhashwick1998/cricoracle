@@ -1264,12 +1264,21 @@ async def get_match_detail(match_id: str):
         async with conn.execute(deliv_query, (match_id,)) as cursor:
             deliv_rows = [dict(r) for r in await cursor.fetchall()]
 
-        # Ensure all delivery worm points are strictly standardized on 0-100 percentage scale
+        # Ensure all delivery worm points are strictly standardized on 0-100 percentage scale and compute p_team_b_after and p_draw
+        m_format = match_data.get("format", "T20I")
+        m_p_draw = float(match_data.get("p_draw") or 0.0) if m_format == "TEST" else 0.0
         for r in deliv_rows:
             if r.get("p_team_a_after") is not None and r["p_team_a_after"] <= 1.0:
                 r["p_team_a_after"] = round(r["p_team_a_after"] * 100.0, 1)
-
-        m_format = match_data.get("format", "T20I")
+            pa = float(r.get("p_team_a_after") or 50.0)
+            if m_format == "TEST":
+                pa = min(pa, round(100.0 - m_p_draw, 1))
+                r["p_team_a_after"] = pa
+                r["p_draw"] = m_p_draw
+                r["p_team_b_after"] = round(max(0.0, 100.0 - m_p_draw - pa), 1)
+            else:
+                r["p_draw"] = 0.0
+                r["p_team_b_after"] = round(max(0.0, 100.0 - pa), 1)
         v_profile = get_historical_venue_profile(match_data.get("venue_id", ""), m_format)
         match_data["venue_historical_profile"] = v_profile
         match_data["pace_avg_economy"] = v_profile.get("pace_avg_economy", 7.80)

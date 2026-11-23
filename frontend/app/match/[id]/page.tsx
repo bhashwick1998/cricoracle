@@ -649,11 +649,23 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   const currentPB = match.p_team_b !== undefined ? Number(match.p_team_b) : Math.round((100.0 - pDrawVal - currentPA) * 10) / 10;
 
   const wormData = deliveries.map((d: any, idx: number) => {
-    const rawPA = Number(d.p_team_a_after ?? match.p_team_a ?? 50.0);
-    const pTeamAVal = rawPA <= 1.0 ? Math.round(rawPA * 1000) / 10 : Math.round(rawPA * 10) / 10;
+    let pTeamAVal = Number(d.p_team_a_after ?? match.p_team_a ?? 50.0);
+    if (pTeamAVal <= 1.0) pTeamAVal = Math.round(pTeamAVal * 1000) / 10;
+    else pTeamAVal = Math.round(pTeamAVal * 10) / 10;
+
     const innPrefix = d.innings === 2 ? "Inn 2" : "Inn 1";
     const dDrawVal = isTest ? (d.p_draw !== undefined ? Number(d.p_draw) : pDrawVal) : 0.0;
-    const dTeamBVal = Math.round((100.0 - dDrawVal - pTeamAVal) * 10) / 10;
+
+    // Use backend-calibrated p_team_b_after or compute with strict non-negative clamping
+    let dTeamBVal = d.p_team_b_after !== undefined
+      ? Number(d.p_team_b_after)
+      : Math.round((100.0 - dDrawVal - pTeamAVal) * 10) / 10;
+
+    // Prevent negative probabilities under any numerical condition
+    dTeamBVal = Math.max(0.0, Math.min(100.0, dTeamBVal));
+    if (isTest && pTeamAVal + dDrawVal + dTeamBVal > 100.0) {
+      pTeamAVal = Math.round((100.0 - dDrawVal - dTeamBVal) * 10) / 10;
+    }
 
     return {
       ballIdx: idx + 1,
