@@ -518,6 +518,19 @@ async def get_matches(state: Optional[str] = None):
                 ):
                     m["format"] = "TEST"
 
+                # Test Cricket All-Out Invariance: completed innings without declaration are all out (10 wkts)
+                if m.get("format") == "TEST":
+                    cur_inn_num = int(m.get("current_innings") or 1)
+                    if cur_inn_num >= 2 and not m.get("innings_1_declared"):
+                        if m.get("innings_1_wickets") is None or int(m.get("innings_1_wickets") or 0) == 0:
+                            m["innings_1_wickets"] = 10
+                    if cur_inn_num >= 3 and not m.get("innings_2_declared"):
+                        if m.get("innings_2_wickets") is None or int(m.get("innings_2_wickets") or 0) == 0:
+                            m["innings_2_wickets"] = 10
+                    if cur_inn_num >= 4 and not m.get("innings_3_declared"):
+                        if m.get("innings_3_wickets") is None or int(m.get("innings_3_wickets") or 0) == 0:
+                            m["innings_3_wickets"] = 10
+
                 m_fmt = m.get("format", "T20I")
                 v_profile = get_historical_venue_profile(m.get("venue_id", ""), m_fmt)
                 m["venue_historical_profile"] = v_profile
@@ -666,7 +679,6 @@ async def get_matches(state: Optional[str] = None):
                     venue_profile=v_profile,
                     live_pitch_type=detected_pitch
                 )
-                m["player_projections"] = p_proj
                 m["top_performers"] = {
                     "team_a_batter": p_proj["team_a"]["probable_highest_scoring_batter"],
                     "team_a_bowler": p_proj["team_a"]["probable_highest_wicket_bowler"],
@@ -972,27 +984,31 @@ async def get_matches(state: Optional[str] = None):
                     m["predictive_power_pct"] = 95.0
                     m["predictive_power_badge"] = "95.0% Predictive Power"
 
-                # Background Live Win Probability Worm points
+                # Lightweight delivery markers for list view (full worm delivered on /api/matches/{id})
                 d_list = deliveries_by_match.get(m["id"], [])
-                if d_list:
-                    m["worm_points"] = [
-                        {
-                            "ballIdx": idx + 1,
-                            "innings": d.get("innings", 1),
-                            "overBall": f"Inn {d.get('innings', 1)} {d.get('over', 0)}.{d.get('ball', 0)}",
-                            "shortOver": f"{d.get('over', 0)}.{d.get('ball', 0)}",
-                            "score": d.get("score_after", 0),
-                            "wickets": d.get("wickets_after", 0),
-                            "p_team_a": round(float(d.get("p_team_a_after", 50.0)) * (100.0 if float(d.get("p_team_a_after", 50.0)) <= 1.0 else 1.0), 1),
-                            "p_team_b": round(100.0 - (float(d.get("p_team_a_after", 50.0)) * (100.0 if float(d.get("p_team_a_after", 50.0)) <= 1.0 else 1.0)), 1),
-                            "wpa": d.get("wpa", 0.0),
-                            "isWicket": bool(d.get("is_wicket", 0)),
-                            "commentary": d.get("commentary", "")
+                m["worm_points"] = [{"ballIdx": idx + 1} for idx in range(len(d_list))]
+                m["live_delivery_count"] = len(d_list)
+
+                # Trim scenario_score_projections for the match list payload to essential headline fields
+                raw_ssp = m.get("scenario_score_projections")
+                if isinstance(raw_ssp, dict):
+                    sc_1 = raw_ssp.get("scenario_team_1_bats_first") or {}
+                    sc_2 = raw_ssp.get("scenario_team_2_bats_first") or {}
+                    m["scenario_score_projections"] = {
+                        "stage_name": raw_ssp.get("stage_name"),
+                        "live_projection": raw_ssp.get("live_projection"),
+                        "live_test_innings_progression": raw_ssp.get("live_test_innings_progression"),
+                        "scenario_team_1_bats_first": {
+                            "innings_1_par": sc_1.get("innings_1_par"),
+                            "projected_1st_innings_score": sc_1.get("projected_1st_innings_score"),
+                            "probable_score": sc_1.get("probable_score"),
+                        },
+                        "scenario_team_2_bats_first": {
+                            "innings_1_par": sc_2.get("innings_1_par"),
+                            "projected_1st_innings_score": sc_2.get("projected_1st_innings_score"),
+                            "probable_score": sc_2.get("probable_score"),
                         }
-                        for idx, d in enumerate(d_list)
-                    ]
-                else:
-                    m["worm_points"] = []
+                    }
 
                 enriched_matches.append(m)
 

@@ -15,9 +15,13 @@ SENIOR_INTERNATIONAL_TEAMS = {
     "AUS", "ENG", "IND", "PAK", "SL", "SA", "NZ", "BAN", "AFG", "WI", "ZIM", "IRE"
 }
 
+PRIMARY_CRICAPI_KEY = os.environ.get("CRICAPI_KEY_PAID", "0cee2b6c-fc19-4253-a6f7-1db11fef9b82")
+FALLBACK_CRICAPI_KEY = os.environ.get("CRICAPI_KEY_FREE", os.environ.get("CRICAPI_KEY", "d0e9f357-ae08-4700-9634-1a26bc27501b"))
+
 class CricDataManager:
-    def __init__(self, api_key: str = "d0e9f357-ae08-4700-9634-1a26bc27501b", cache_ttl: int = DEFAULT_CACHE_TTL):
-        self.api_key = api_key
+    def __init__(self, api_key: Optional[str] = None, cache_ttl: int = DEFAULT_CACHE_TTL):
+        self.api_key = api_key or PRIMARY_CRICAPI_KEY
+        self.fallback_api_key = FALLBACK_CRICAPI_KEY
         self.cache_ttl = cache_ttl
         self._last_fetch_time = 0.0
         self._cached_data = None
@@ -51,25 +55,30 @@ class CricDataManager:
             logger.info(f"Serving CricData from cache (age: {round(now - self._last_fetch_time, 1)}s < {self.cache_ttl}s TTL)")
             return self._cached_data
 
-        url = f"https://api.cricapi.com/v1/cricScore?apikey={self.api_key}"
-        logger.info("Hitting CricketData.org API (cricScore single-hit)...")
-        req = urllib.request.Request(url, headers={"User-Agent": "CricOracle/2.0 (Backend Server)"})
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                if data.get("status") == "success":
-                    self._cached_data = data
-                    self._last_fetch_time = now
-                    self._save_disk_cache(data)
-                    info = data.get("info", {})
-                    logger.info(f"CricData API success! Hits today: {info.get('hitsToday')} / {info.get('hitsLimit')}")
-                    return data
-                else:
-                    logger.error(f"CricData API returned status: {data.get('status')}")
-                    return self._cached_data or {}
-        except Exception as e:
-            logger.error(f"Error calling CricData API: {e}")
-            return self._cached_data or {}
+        keys_to_try = [self.api_key]
+        if self.fallback_api_key and self.fallback_api_key != self.api_key:
+            keys_to_try.append(self.fallback_api_key)
+
+        for attempt_key in keys_to_try:
+            url = f"https://api.cricapi.com/v1/cricScore?apikey={attempt_key}"
+            logger.info(f"Hitting CricketData.org API (cricScore) using key ending in ...{attempt_key[-6:]}")
+            req = urllib.request.Request(url, headers={"User-Agent": "CricOracle/2.0 (Backend Server)"})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    if data.get("status") == "success":
+                        self._cached_data = data
+                        self._last_fetch_time = now
+                        self._save_disk_cache(data)
+                        info = data.get("info", {})
+                        logger.info(f"CricData API success! Hits today: {info.get('hitsToday')} / {info.get('hitsLimit')}")
+                        return data
+                    else:
+                        logger.warning(f"CricData API returned status: {data.get('status')} with key ending in ...{attempt_key[-6:]}")
+            except Exception as e:
+                logger.warning(f"Error calling CricData API with key ending in ...{attempt_key[-6:]}: {e}")
+
+        return self._cached_data or {}
 
     def extract_senior_international_matches(self, data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """

@@ -1,6 +1,12 @@
 {
-  "date": "2026-11-08",
-  "hitsToday": 23,
-  "hitsLimit": 100,
-  "lastUpdated": "2026-11-08T10:35:38.999048+00:00"
+  "date": "2026-11-23",
+  "primaryKeyEnding": "ef9b82",
+  "primaryHitsLimit": 2000,
+  "fallbackKeyEnding": "27501b",
+  "fallbackHitsLimit": 100,
+  "activeKey": "primary",
+  "lastUpdated": "2026-11-23T17:25:00+00:00",
+  "plan": "Fantasy Cricket API - 2000 hits/day tier (Paid active primary: 0cee2b6c-fc19-4253-a6f7-1db11fef9b82) + Fallback (Free: d0e9f357-ae08-4700-9634-1a26bc27501b)",
+  "paid_api_active": true,
+  "break_throttling_enabled": true
 }

@@ -498,7 +498,7 @@ class FailoverScraper:
         ta = normalize_team_code(team_a) or team_a
         tb = normalize_team_code(team_b) or team_b
 
-        def parse_single_token(tok: str) -> Dict[str, Any]:
+        def parse_single_token(tok: str, is_completed_innings: bool = False) -> Dict[str, Any]:
             c_tok = tok.strip()
             m_ov = re.search(r"(\d+)(?:[/-](\d+))?\s*(?:all\s*out|d)?\s*[-–(]?\s*([\d.]+)?\s*(?:ov|\)|overs)?", c_tok, re.IGNORECASE)
             r = 0
@@ -506,11 +506,15 @@ class FailoverScraper:
             ov = None
             if m_ov:
                 r = int(m_ov.group(1))
+                is_declared = any(k in c_tok.lower() for k in [" d", "/d", "d ", "dec", "declared"])
+                is_explicit_all_out = any(k in c_tok.lower() for k in ["all out", "all-out", "allout", "all_out"])
+
                 if m_ov.group(2):
                     w = int(m_ov.group(2))
-                elif "all out" in c_tok.lower():
+                elif is_explicit_all_out:
                     w = 10
-                elif int(r) >= 200 and "d" not in c_tok.lower():
+                elif is_completed_innings and not is_declared:
+                    # In cricket (especially Test matches), a completed innings without declaration is ALL OUT (10 wkts)
                     w = 10
                 else:
                     w = 0
@@ -561,9 +565,9 @@ class FailoverScraper:
 
             # Check if side 2 has 2 scores (e.g. side 2 batted in Innings 1 & 3: "IND 720/9d v NZ 60/1 & 368")
             if len(side2_tokens) >= 2:
-                t_act = parse_single_token(side2_tokens[0])
-                t_prev = parse_single_token(side2_tokens[1])
-                inn1_data = parse_single_token(side1_tokens[0])
+                t_act = parse_single_token(side2_tokens[0], is_completed_innings=False)
+                t_prev = parse_single_token(side2_tokens[1], is_completed_innings=True)
+                inn1_data = parse_single_token(side1_tokens[0], is_completed_innings=True)
 
                 # Under natural Test sequence: side 2 batted 1st (t_prev), side 1 batted 2nd (inn1_data), side 2 batted 3rd (t_act)
                 all_innings.append({
@@ -590,9 +594,9 @@ class FailoverScraper:
                 })
             elif len(side1_tokens) >= 2:
                 # Normal alternation: Team 1 batted in Innings 1 & 3
-                t_act = parse_single_token(side1_tokens[0])
-                t_prev = parse_single_token(side1_tokens[1])
-                inn2_data = parse_single_token(side2_tokens[0])
+                t_act = parse_single_token(side1_tokens[0], is_completed_innings=False)
+                t_prev = parse_single_token(side1_tokens[1], is_completed_innings=True)
+                inn2_data = parse_single_token(side2_tokens[0], is_completed_innings=True)
 
                 all_innings.append({
                     "team": s1_team,
@@ -617,7 +621,8 @@ class FailoverScraper:
                     "is_follow_on": False
                 })
             else:
-                inn1_data = parse_single_token(side1_tokens[0])
+                has_inn2 = bool(side2_tokens and any(c.isdigit() for c in side2_tokens[0]))
+                inn1_data = parse_single_token(side1_tokens[0], is_completed_innings=has_inn2)
                 all_innings.append({
                     "team": s1_team,
                     "runs": inn1_data["runs"],
@@ -625,8 +630,8 @@ class FailoverScraper:
                     "overs": inn1_data["overs"],
                     "innings_index": 1
                 })
-                if side2_tokens and any(c.isdigit() for c in side2_tokens[0]):
-                    inn2_data = parse_single_token(side2_tokens[0])
+                if has_inn2:
+                    inn2_data = parse_single_token(side2_tokens[0], is_completed_innings=False)
                     all_innings.append({
                         "team": s2_team,
                         "runs": inn2_data["runs"],

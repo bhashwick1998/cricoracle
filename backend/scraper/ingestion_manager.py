@@ -308,13 +308,18 @@ class IngestionManager:
         Cascades across top cricket scrapers (Cricbuzz -> CREX -> ESPNcricinfo -> ICC -> CricAPI fallback).
         Enforces delivery deduplication, anti-score-regression, rain/weather detection,
         and broadcasts real-time ball-by-ball telemetry updates via WebSockets.
+
+        API Hit Conservation:
+        - Stumps: throttled to once every 5 minutes (existing behaviour).
+        - Lunch/Tea/Drinks/Innings Break: detected from match_status_text; Cricbuzz
+          scrapes also throttled to 5-minute cadence, saving ~8-12 hits per break.
         """
         conn = await self.db_factory()
         conn.row_factory = aiosqlite.Row
         try:
             # 1. Fetch active live matches from database
             async with conn.execute(
-                "SELECT id, is_stumps FROM matches WHERE state IN ('LIVE_BALL_BY_BALL', 'IN_PLAY')"
+                "SELECT id, is_stumps, match_status_text FROM matches WHERE state IN ('LIVE_BALL_BY_BALL', 'IN_PLAY')"
             ) as c:
                 live_rows = await c.fetchall()
                 active_ids = []
@@ -325,6 +330,23 @@ class IngestionManager:
                         if time.time() - last_stumps_poll < 300.0:
                             continue
                         setattr(self, f"_last_stumps_poll_{r['id']}", time.time())
+                        active_ids.append(r["id"])
+                        continue
+
+                    # Throttle during scheduled match breaks (Lunch/Tea/Drinks/Innings Break)
+                    from .providers.cricapi_provider import cricapi_provider as _cap
+                    status_txt = r["match_status_text"] or ""
+                    if _cap.is_match_in_break(status_txt):
+                        break_key = f"_last_break_poll_{r['id']}"
+                        last_break_poll = getattr(self, break_key, 0.0)
+                        if time.time() - last_break_poll < 300.0:
+                            logger.debug(
+                                f"Match {r['id']} in break ({status_txt[:30]}). "
+                                "Throttling Cricbuzz scrape to 5-min cadence (API hit saving)."
+                            )
+                            continue
+                        setattr(self, break_key, time.time())
+
                     active_ids.append(r["id"])
 
             # 2. Ingest live ball-by-ball updates for active matches concurrently via cascading Top Scraper
@@ -1592,6 +1614,12 @@ class IngestionManager:
                 inn_1_wickets = inn_1["wickets"]
                 inn_1_overs = inn_1["overs"] if (inn_1.get("overs") is not None and float(inn_1["overs"]) > 0) else float(match.get("innings_1_overs") or 118.4)
 
+                # In Test cricket, if Innings 1 is completed and Innings 2 is underway, Innings 1 is ALL OUT (10 wickets) unless declared!
+                if match_format == "TEST" and (inn_1_wickets == 0 or inn_1_wickets is None):
+                    if not any(k in st_low for k in ["dec", "declared", " d"]):
+                        inn_1_wickets = 10
+                        logger.info(f"Auto-corrected 1st innings wickets to 10 (all out) for {match_id} in Test match.")
+
                 inn_2_team_id = t2
                 inn_2_score = inn_2["runs"]
                 inn_2_wickets = inn_2["wickets"]
@@ -1681,17 +1709,23 @@ class IngestionManager:
             # Anti-Score-Regression Guard:
             # If the newly extracted score or balls bowled in this innings is behind the database's recorded progress,
             # retain the database's higher score and overs so latency lags never cause the match to jump backwards!
+            # Only compare within the SAME innings against this innings' prior score (never compare Innings 2 against Innings 1!)
             cur_inn = match.get("current_innings", 1)
-            cur_r = match.get("current_score", 0) or 0
-            cur_w = match.get("current_wickets", 0) or 0
-            cur_o = match.get("current_overs", 0) or 0
-            cur_b = match.get("current_balls", 0) or 0
-            if inn_val == cur_inn and (runs < cur_r or (overs * 6 + balls) < (cur_o * 6 + cur_b)):
-                logger.info(f"Anti-regression guard active for {match_id}: incoming {runs}/{wickets} in {overs}.{balls} ov is behind DB state {cur_r}/{cur_w} in {cur_o}.{cur_b} ov. Preserving DB state.")
-                runs = cur_r
-                wickets = cur_w
-                overs = cur_o
-                balls = cur_b
+            prev_inn_score = match.get(f"innings_{inn_val}_score")
+            prev_inn_overs = match.get(f"innings_{inn_val}_overs")
+            prev_inn_wkts = match.get(f"innings_{inn_val}_wickets")
+
+            if inn_val == cur_inn and prev_inn_score is not None:
+                cur_r = int(prev_inn_score)
+                cur_w = int(prev_inn_wkts or 0)
+                cur_o = int(prev_inn_overs or 0)
+                cur_b = int(round(((prev_inn_overs or 0) - cur_o) * 10))
+                if runs < cur_r or (overs * 6 + balls) < (cur_o * 6 + cur_b):
+                    logger.info(f"Anti-regression guard active for {match_id}: incoming {runs}/{wickets} in {overs}.{balls} ov is behind DB state {cur_r}/{cur_w} in {cur_o}.{cur_b} ov. Preserving DB state.")
+                    runs = cur_r
+                    wickets = cur_w
+                    overs = cur_o
+                    balls = cur_b
 
 
             team_a_batting = (batting_team_id == match["team_a_id"])
@@ -2122,6 +2156,19 @@ class IngestionManager:
                 is_dup = await top_scraper.deduplicator.is_duplicate_in_db(conn, match_id, inn_val, overs, balls)
                 if not is_dup:
                     top_scraper.deduplicator.record_delivery(match_id, inn_val, overs, balls)
+                    is_new_innings = (inn_val != match.get("current_innings", 1))
+                    prev_w = 0 if is_new_innings else (match.get("current_wickets", 0) or 0)
+                    wkt_flag = 1 if wickets > prev_w else 0
+                    wkt_kind = "none"
+                    if wkt_flag:
+                        ev_l = event_desc.lower()
+                        if "bowled" in ev_l: wkt_kind = "bowled"
+                        elif "lbw" in ev_l: wkt_kind = "lbw"
+                        elif "run out" in ev_l: wkt_kind = "run out"
+                        elif "stumped" in ev_l: wkt_kind = "stumped"
+                        elif "caught" in ev_l or "c " in ev_l: wkt_kind = "caught"
+                        else: wkt_kind = "wicket"
+
                     await conn.execute("""
                         INSERT INTO match_deliveries (
                             match_id, innings, over, ball, striker_id, non_striker_id, bowler_id,
@@ -2130,9 +2177,9 @@ class IngestionManager:
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         match_id, inn_val, overs, balls, striker_id, non_striker_id, bowler_id,
-                        max(0, runs - match.get("current_score", 0)), 0, "none",
-                        1 if wickets > match.get("current_wickets", 0) else 0,
-                        "wicket" if wickets > match.get("current_wickets", 0) else "none",
+                        max(0, runs - (0 if is_new_innings else (match.get("current_score", 0) or 0))), 0, "none",
+                        wkt_flag,
+                        wkt_kind,
                         runs, wickets, p_a, wpa, event_desc
                     ))
 

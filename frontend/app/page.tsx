@@ -131,7 +131,11 @@ export default function HomePage() {
     };
 
     connectWs();
-    const interval = setInterval(fetchMatches, 2500);
+    // Relaxed background polling cadence to prevent proxy socket saturation on Render
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      fetchMatches();
+    }, 6000);
 
     return () => {
       clearInterval(interval);
