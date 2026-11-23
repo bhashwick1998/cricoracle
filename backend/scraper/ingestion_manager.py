@@ -1259,8 +1259,12 @@ class IngestionManager:
                 updated = dict(await c.fetchone())
 
             if updated.get("format") == "TEST" and (updated.get("is_stumps") or "stumps" in str(updated.get("match_status_text", "")).lower()):
-                updated["min_overs_remaining"] = 0.0
+                st_day = int(updated.get("stumps_day") or 4)
+                days_left = max(0, 5 - st_day)
+                min_match_ov = float(days_left * 90.0)
+                updated["min_overs_remaining"] = min_match_ov
                 updated["overs_left_today"] = 0.0
+                updated["total_match_overs_remaining"] = min_match_ov
 
             if self.broadcast_func:
                 await self.broadcast_func(match_id, {"type": "LIVE_TELEMETRY_SYNCED", "match": updated})
@@ -2202,8 +2206,12 @@ class IngestionManager:
                 updated_match = dict(await c.fetchone())
 
             if updated_match.get("format") == "TEST" and (updated_match.get("is_stumps") or "stumps" in str(updated_match.get("match_status_text", "")).lower()):
-                updated_match["min_overs_remaining"] = 0.0
+                st_day = int(updated_match.get("stumps_day") or 4)
+                days_left = max(0, 5 - st_day)
+                min_match_ov = float(days_left * 90.0)
+                updated_match["min_overs_remaining"] = min_match_ov
                 updated_match["overs_left_today"] = 0.0
+                updated_match["total_match_overs_remaining"] = min_match_ov
 
             broadcast_payload = {
                 "type": "CRICBUZZ_LIVE_INGESTED",

@@ -702,10 +702,10 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                         <span className="text-slate-400">• Need {Math.max(0, Number((match as any).follow_on_threshold) - Number(match.current_score))} to avoid</span>
                       </div>
                     )}
-                    {match.format === "TEST" && ((match as any).min_overs_remaining !== undefined || (match as any).overs_left_today !== undefined) && (
+                    {match.format === "TEST" && ((match as any).min_overs_remaining !== undefined || (match as any).overs_left_today !== undefined || (match as any).total_match_overs_remaining !== undefined) && (
                       <div className="text-[10px] text-amber-300 font-mono flex items-center gap-1.5 flex-wrap">
-                        <span>• Min. Ov. Rem: <strong>{isStumps ? 0 : ((match as any).min_overs_remaining ?? (match as any).overs_left_today)}</strong> ov</span>
-                        {(match as any).total_match_overs_remaining ? (
+                        <span>• Min. Ov. Rem: <strong>{isStumps ? ((match as any).min_overs_remaining || (match as any).total_match_overs_remaining || 90) : (((match as any).min_overs_remaining ?? (match as any).overs_left_today) || (match as any).total_match_overs_remaining || 90)}</strong> ov{isStumps ? " (Day 5)" : ""}</span>
+                        {(match as any).total_match_overs_remaining && !isStumps ? (
                           <span className="text-slate-400">({(match as any).total_match_overs_remaining} total match ov)</span>
                         ) : null}
                       </div>
