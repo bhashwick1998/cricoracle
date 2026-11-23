@@ -747,71 +747,46 @@ async def seed_database():
             WHERE id = 'm_nz_ind_2026_odi_3'
         """)
 
-        # AUS vs ENG 1st T20I (MCG)
+        # AUS vs ENG 1st T20I (MCG) - Upcoming Fixture
         await conn.execute("""
             UPDATE matches SET
-                state = 'COMPLETED',
+                state = 'UPCOMING_NO_SQUAD',
                 format = 'T20I',
-                current_innings = 2,
-                current_score = 191,
-                current_wickets = 7,
-                current_overs = 19,
-                current_balls = 5,
-                target_runs = 188,
-                innings_1_team_id = 'ENG',
-                innings_1_score = 187,
-                innings_1_wickets = 9,
-                innings_1_overs = 20.0,
-                innings_2_team_id = 'AUS',
-                innings_2_score = 191,
-                innings_2_wickets = 7,
-                innings_2_overs = 19.5,
-                p_team_a = 100.0,
-                p_team_b = 0.0,
+                current_innings = 1,
+                current_score = 0,
+                current_wickets = 0,
+                current_overs = 0,
+                current_balls = 0,
+                target_runs = NULL,
+                p_team_a = 52.0,
+                p_team_b = 48.0,
                 p_draw = 0.0,
-                match_status_text = 'Australia won by 3 wkts',
-                last_event_description = 'Australia won by 3 wkts (Target 188 reached in 19.5 ov)'
+                match_status_text = 'Scheduled 1st T20I at MCG • Melbourne',
+                last_event_description = 'Upcoming fixture • Stage 1 Macro Prediction (AUS 52.0% vs ENG 48.0%)'
             WHERE id = 'm_aus_eng_2026_t20_1'
         """)
 
-        # NZ vs IND 1st Test (Basin Reserve) - Match Drawn
+        # NZ vs IND 1st Test (Basin Reserve) - Upcoming Fixture
         await conn.execute("""
             UPDATE matches SET
-                state = 'COMPLETED',
-                toss_winner_id = 'IND',
-                toss_decision = 'bowl',
-                current_innings = 3,
-                current_score = 239,
-                current_wickets = 5,
-                current_overs = 120,
+                state = 'UPCOMING_NO_SQUAD',
+                toss_winner_id = NULL,
+                toss_decision = NULL,
+                current_innings = 1,
+                current_score = 0,
+                current_wickets = 0,
+                current_overs = 0,
                 current_balls = 0,
                 is_stumps = 0,
                 stumps_day = NULL,
                 stumps_label = NULL,
-                innings_1_team_id = 'NZ',
-                innings_1_score = 368,
-                innings_1_wickets = 10,
-                innings_1_overs = 121.0,
-                innings_1_declared = 0,
-                innings_2_team_id = 'IND',
-                innings_2_score = 720,
-                innings_2_wickets = 9,
-                innings_2_overs = 166.0,
-                innings_2_declared = 1,
-                innings_3_team_id = 'NZ',
-                innings_3_score = 239,
-                innings_3_wickets = 5,
-                innings_3_overs = 120.0,
-                innings_3_declared = 0,
-                innings_4_team_id = 'IND',
-                innings_4_score = NULL,
-                batting_tank_pct = 80.0,
-                bowling_tank_pct = 75.0,
-                p_team_a = 0.0,
-                p_team_b = 0.0,
-                p_draw = 100.0,
-                match_status_text = 'Match drawn',
-                last_event_description = 'Match drawn • IND 720/9d vs NZ 368 & 239/5'
+                batting_tank_pct = 100.0,
+                bowling_tank_pct = 100.0,
+                p_team_a = 51.0,
+                p_team_b = 49.0,
+                p_draw = 0.0,
+                match_status_text = 'Scheduled 1st Test at Basin Reserve, Wellington',
+                last_event_description = 'Stage 1 Macro Prediction (NZ 51.0% vs IND 49.0%) • Basin Reserve'
             WHERE id = 'm_nz_ind_2026_test_1'
         """)
 
@@ -867,6 +842,12 @@ async def seed_database():
         # 7. Propagate Bilateral Series Squads
         from backend.engine.series_squad_propagator import propagate_series_squads_async
         await propagate_series_squads_async(conn)
+
+        # 8. Strictly purge any completed matches to keep only in-play/upcoming live telemetry
+        await conn.execute("DELETE FROM match_deliveries WHERE match_id IN (SELECT id FROM matches WHERE state = 'COMPLETED')")
+        await conn.execute("DELETE FROM concussion_substitutions WHERE match_id IN (SELECT id FROM matches WHERE state = 'COMPLETED')")
+        await conn.execute("DELETE FROM match_squads WHERE match_id IN (SELECT id FROM matches WHERE state = 'COMPLETED')")
+        await conn.execute("DELETE FROM matches WHERE state = 'COMPLETED'")
 
         await conn.commit()
     finally:
