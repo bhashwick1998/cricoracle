@@ -264,9 +264,13 @@ class CricApiSquadProvider:
             "headingley": "headingley",
             "old trafford": "old_trafford",
             "centurion": "centurion",
+            "supersport": "centurion",
+            "supersport park": "centurion",
             "wanderers": "wanderers",
             "newlands": "newlands",
             "kingsmead": "kingsmead",
+            "gqeberha": "gqeberha",
+            "st george": "gqeberha",
             "harare": "harare"
         }
         for kw, vid in venue_map.items():

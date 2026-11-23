@@ -557,28 +557,83 @@ class IngestionManager:
 
                         # Dynamic Venue Resolution
                         title_low = (d.get("title") or "").lower()
-                        if "melbourne" in title_low or "mcg" in title_low:
+                        if "centurion" in title_low or "supersport" in title_low:
+                            v_discovered = "centurion"
+                        elif "wanderers" in title_low or "johannesburg" in title_low:
+                            v_discovered = "wanderers"
+                        elif "newlands" in title_low or "cape town" in title_low:
+                            v_discovered = "newlands"
+                        elif "kingsmead" in title_low or "durban" in title_low:
+                            v_discovered = "kingsmead"
+                        elif "gqeberha" in title_low or "george" in title_low or "port elizabeth" in title_low:
+                            v_discovered = "gqeberha"
+                        elif "melbourne" in title_low or "mcg" in title_low:
                             v_discovered = "mcg"
                         elif "sydney" in title_low or "scg" in title_low:
                             v_discovered = "scg"
                         elif "adelaide" in title_low:
                             v_discovered = "adelaide"
-                        elif "perth" in title_low:
+                        elif "perth" in title_low or "optus" in title_low:
                             v_discovered = "perth"
                         elif "brisbane" in title_low or "gabba" in title_low:
                             v_discovered = "gabba"
-                        elif "wellington" in title_low or "basin" in title_low:
+                        elif "wellington" in title_low or "basin" in title_low or "sky stadium" in title_low:
                             v_discovered = "basin_reserve"
+                        elif "eden park" in title_low or "auckland" in title_low:
+                            v_discovered = "eden_park"
+                        elif "seddon" in title_low or "hamilton" in title_low:
+                            v_discovered = "seddon_park"
+                        elif "hagley" in title_low or "christchurch" in title_low:
+                            v_discovered = "christchurch"
+                        elif "bay oval" in title_low or "mount maunganui" in title_low:
+                            v_discovered = "bay_oval"
                         elif "rawalpindi" in title_low:
                             v_discovered = "rawalpindi"
-                        elif "lahore" in title_low:
+                        elif "lahore" in title_low or "gaddafi" in title_low:
                             v_discovered = "lahore"
+                        elif "karachi" in title_low:
+                            v_discovered = "karachi"
+                        elif "multan" in title_low:
+                            v_discovered = "multan"
+                        elif "galle" in title_low:
+                            v_discovered = "galle"
+                        elif "colombo" in title_low or "premadasa" in title_low:
+                            v_discovered = "premadasa"
+                        elif "kandy" in title_low or "pallekele" in title_low:
+                            v_discovered = "pallekele"
+                        elif "wankhede" in title_low or "mumbai" in title_low:
+                            v_discovered = "wankhede"
+                        elif "eden gardens" in title_low or "kolkata" in title_low:
+                            v_discovered = "eden_gardens"
+                        elif "chepauk" in title_low or "chennai" in title_low:
+                            v_discovered = "chepauk"
+                        elif "chinnaswamy" in title_low or "bengaluru" in title_low or "bangalore" in title_low:
+                            v_discovered = "chinnaswamy"
+                        elif "ahmedabad" in title_low or "narendra modi" in title_low or "motera" in title_low:
+                            v_discovered = "narendra_modi"
+                        elif "dharamshala" in title_low:
+                            v_discovered = "dharamshala"
+                        elif "delhi" in title_low or "arun jaitley" in title_low:
+                            v_discovered = "arun_jaitley"
                         elif "sharjah" in title_low:
                             v_discovered = "sharjah"
-                        elif "hobart" in title_low:
+                        elif "dubai" in title_low:
+                            v_discovered = "dubai_dsc"
+                        elif "hobart" in title_low or "bellerive" in title_low:
                             v_discovered = "hobart"
                         else:
-                            v_discovered = "mcg" if set([t1, t2]) == {"AUS", "ENG"} else "wankhede"
+                            if "SA" in (t1, t2):
+                                v_discovered = "centurion"
+                            elif "NZ" in (t1, t2):
+                                v_discovered = "basin_reserve"
+                            elif "SL" in (t1, t2):
+                                v_discovered = "premadasa"
+                            elif "PAK" in (t1, t2):
+                                v_discovered = "rawalpindi"
+                            elif set([t1, t2]) == {"AUS", "ENG"}:
+                                v_discovered = "mcg"
+                            else:
+                                v_discovered = "wankhede"
 
                         async with conn.execute("SELECT id FROM matches WHERE id = ?", (canonical_mid,)) as c:
                             existing_canonical = await c.fetchone()
@@ -1871,6 +1926,13 @@ class IngestionManager:
                         ))
             except Exception as sc_err:
                 logger.warning(f"Error syncing live squads and scorecard for {match_id}: {sc_err}")
+
+            # Ensure early full 11-player Playing XI for both teams (not just active batters/bowlers)
+            try:
+                from ..engine.cricket_analytics_matcher import ensure_full_playing_xi_for_match
+                await ensure_full_playing_xi_for_match(conn, match_id)
+            except Exception as xi_err:
+                logger.warning(f"Error ensuring full playing XI for {match_id}: {xi_err}")
 
             # 1. Stumps & Multi-Day Session Detection
             st_low_check = (st_text + " " + (scraped.get("commentary") or "")).lower()

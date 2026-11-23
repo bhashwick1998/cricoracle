@@ -213,40 +213,23 @@ async def lifespan(app: FastAPI):
                 logger.info(f"Database has only {m_count} matches. Auto-seeding benchmark fixtures...")
                 await seed_database()
 
-            # Enforce 1st Test completed draw and 2nd Test upcoming
+            # Enforce live-only fixtures: ensure NZ vs IND Tests are upcoming fixtures (not completed)
             await conn.execute("""
                 UPDATE matches SET
-                    state = 'COMPLETED',
+                    state = 'UPCOMING_NO_SQUAD',
                     is_stumps = 0,
                     stumps_day = NULL,
                     stumps_label = NULL,
-                    innings_1_team_id = 'NZ',
-                    innings_1_score = 368,
-                    innings_1_wickets = 10,
-                    innings_1_overs = 121.0,
-                    innings_1_declared = 0,
-                    innings_2_team_id = 'IND',
-                    innings_2_score = 720,
-                    innings_2_wickets = 9,
-                    innings_2_overs = 166.0,
-                    innings_2_declared = 1,
-                    innings_3_team_id = 'NZ',
-                    innings_3_score = 239,
-                    innings_3_wickets = 5,
-                    innings_3_overs = 120.0,
-                    innings_3_declared = 0,
-                    innings_4_team_id = 'IND',
-                    innings_4_score = NULL,
-                    current_innings = 3,
-                    current_score = 239,
-                    current_wickets = 5,
-                    current_overs = 120,
+                    current_innings = 1,
+                    current_score = 0,
+                    current_wickets = 0,
+                    current_overs = 0,
                     current_balls = 0,
-                    p_team_a = 0.0,
-                    p_team_b = 0.0,
-                    p_draw = 100.0,
-                    match_status_text = 'Match drawn',
-                    last_event_description = 'Match drawn • IND 720/9d vs NZ 368 & 239/5'
+                    p_team_a = 51.0,
+                    p_team_b = 49.0,
+                    p_draw = 0.0,
+                    match_status_text = 'Scheduled 1st Test at Basin Reserve, Wellington • Squads TBA',
+                    last_event_description = 'Stage 1 Macro Prediction (NZ 51.0% vs IND 49.0%) • Basin Reserve'
                 WHERE id = 'm_nz_ind_2026_test_1'
             """)
             await conn.execute("""
@@ -266,6 +249,29 @@ async def lifespan(app: FastAPI):
                     current_balls = 0
                 WHERE id = 'm_nz_ind_2026_test_2'
             """)
+
+            # Enforce Centurion venue for BAN vs SA 2nd Test (never Mumbai)
+            await conn.execute("""
+                UPDATE matches SET venue_id = 'centurion'
+                WHERE id = 'm_ban_sa_2026_test_1' OR series_name LIKE '%Centurion%' OR series_name LIKE '%SuperSport%'
+            """)
+
+            # Purge any stale completed matches from database
+            await conn.execute("DELETE FROM match_deliveries WHERE match_id IN (SELECT id FROM matches WHERE state = 'COMPLETED')")
+            await conn.execute("DELETE FROM match_squads WHERE match_id IN (SELECT id FROM matches WHERE state = 'COMPLETED')")
+            await conn.execute("DELETE FROM matches WHERE state = 'COMPLETED'")
+
+            # Synchronize player catalog from https://cricket-analytics-ghpv.onrender.com/ and guarantee full 11 Playing XI
+            from .engine.cricket_analytics_matcher import sync_cricket_analytics_players_to_db, ensure_full_playing_xi_for_match
+            try:
+                synced_p = await sync_cricket_analytics_players_to_db(conn)
+                logger.info(f"Startup player sync with Cricket Analytics: {synced_p} players verified.")
+                async with conn.execute("SELECT id FROM matches WHERE state IN ('LIVE_BALL_BY_BALL', 'XI_AND_TOSS_LOCKED')") as live_c:
+                    for lm in await live_c.fetchall():
+                        await ensure_full_playing_xi_for_match(conn, lm[0])
+            except Exception as match_err:
+                logger.warning(f"Error during player sync / Playing XI enforcement: {match_err}")
+
             await conn.commit()
 
             propagated = await propagate_series_squads_async(conn)
@@ -474,6 +480,13 @@ async def get_matches(state: Optional[str] = None):
                 m_mid_low = str(m.get("id") or "").lower()
                 m_st_low = str(m.get("match_status_text") or "").lower()
                 m_ev_low = str(m.get("last_event_description") or "").lower()
+
+                # Venue self-healing: Centurion / SuperSport Park must strictly render Centurion, never Mumbai
+                if "centurion" in m_ser_low or "supersport" in m_ser_low or m_mid_low == "m_ban_sa_2026_test_1":
+                    m["venue_id"] = "centurion"
+                    m["venue_name"] = "SuperSport Park"
+                    m["venue_city"] = "Centurion"
+                    m["venue_country"] = "South Africa"
 
                 # Senior Men's International Matches Only: Strictly exclude women, u19, lions, domestic, emerging, rising stars
                 if any(w in m_ser_low or w in m_mid_low for w in [
@@ -1112,6 +1125,13 @@ async def get_match_detail(match_id: str):
         ev_low = str(match_data.get("last_event_description") or "").lower()
         is_stumps_flag = bool(match_data.get("is_stumps")) or any(k in st_low or k in ev_low for k in ["stumps", "close of play", "day close", "day 1", "day 2", "day 3", "day 4", "day 5"])
 
+        # Venue Self-Healing: Centurion / SuperSport Park must never render Mumbai
+        if "centurion" in ser_low or "supersport" in ser_low or mid_low == "m_ban_sa_2026_test_1":
+            match_data["venue_id"] = "centurion"
+            match_data["venue_name"] = "SuperSport Park"
+            match_data["venue_city"] = "Centurion"
+            match_data["venue_country"] = "South Africa"
+
         is_white_ball = "_t20_" in mid_low or "_t20i_" in mid_low or "t20" in ser_low or "_odi_" in mid_low or "odi" in ser_low
         if "_t20_" in mid_low or "_t20i_" in mid_low or "t20" in ser_low:
             match_data["format"] = "T20I"
@@ -1177,6 +1197,18 @@ async def get_match_detail(match_id: str):
         """
         async with conn.execute(squad_query, (match_id,)) as cursor:
             squad_rows = [dict(r) for r in await cursor.fetchall()]
+
+        # Early Playing XI Guard: Ensure both teams have complete 11 confirmed players from CricPulse / CricAPI
+        ta_confirmed = len([p for p in squad_rows if p.get("is_confirmed_xi") == 1 and p.get("team_id") == ta])
+        tb_confirmed = len([p for p in squad_rows if p.get("is_confirmed_xi") == 1 and p.get("team_id") == tb])
+        if match_data.get("state") in ("LIVE_BALL_BY_BALL", "XI_AND_TOSS_LOCKED") and (ta_confirmed < 11 or tb_confirmed < 11):
+            try:
+                from .engine.cricket_analytics_matcher import ensure_full_playing_xi_for_match
+                await ensure_full_playing_xi_for_match(conn, match_id)
+                async with conn.execute(squad_query, (match_id,)) as cursor:
+                    squad_rows = [dict(r) for r in await cursor.fetchall()]
+            except Exception as xi_e:
+                logger.warning(f"Error ensuring full playing XI in match_detail for {match_id}: {xi_e}")
 
         # Live Match: Current innings strictly dictates the active batting team.
         # A striker ID from a previous innings must NEVER flip the active batting team.

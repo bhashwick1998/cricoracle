@@ -635,6 +635,18 @@ async def seed_database():
                 340, 300, 390,
                 0.0, 0.0, "Pace and carry at Hagley Oval favors fast bowling quartets",
                 0.0, "Scheduled 2nd Test at Hagley Oval"
+            ),
+            # 17. SA vs BAN - 2nd Test (Centurion, SuperSport Park)
+            (
+                "m_ban_sa_2026_test_1", "Bangladesh Tour of South Africa 2026 - 2nd Test", "TEST",
+                "SA", "BAN", "centurion", "2026-11-23T08:00:00Z", 0,
+                "LIVE_BALL_BY_BALL", "SA", "bowl",
+                1, 44, 3, 14, 0, None,
+                "m_haque_ban", "t_hridoy_ban", "a_nortje_sa",
+                53.6, 42.4, 52.0, 52.0, 52.0,
+                295, 250, 340,
+                0.0, 0.0, "SuperSport Park pace & steep bounce rigorously tests top-order technique against Rabada and Nortje",
+                0.0, "Day 1: 2nd Session • Bangladesh 44/3 (14.0 ov)"
             )
         ]
 
@@ -848,6 +860,14 @@ async def seed_database():
         await conn.execute("DELETE FROM concussion_substitutions WHERE match_id IN (SELECT id FROM matches WHERE state = 'COMPLETED')")
         await conn.execute("DELETE FROM match_squads WHERE match_id IN (SELECT id FROM matches WHERE state = 'COMPLETED')")
         await conn.execute("DELETE FROM matches WHERE state = 'COMPLETED'")
+
+        # 9. Sync Cricket Analytics player catalog & enforce full 11-player Playing XI for active matches
+        from backend.engine.cricket_analytics_matcher import sync_cricket_analytics_players_to_db, ensure_full_playing_xi_for_match
+        try:
+            await sync_cricket_analytics_players_to_db(conn)
+            await ensure_full_playing_xi_for_match(conn, 'm_ban_sa_2026_test_1')
+        except Exception as xi_e:
+            pass
 
         await conn.commit()
     finally:
