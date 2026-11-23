@@ -505,6 +505,16 @@ class IngestionManager:
                 if db_match:
                     mid = db_match["id"]
                     if is_comp:
+                        # Safety Guard: NEVER mark a future fixture as COMPLETED!
+                        sch_str = db_match.get("scheduled_start")
+                        if sch_str:
+                            try:
+                                sch_dt = datetime.fromisoformat(str(sch_str).replace("Z", "+00:00"))
+                                if sch_dt > datetime.now(timezone.utc):
+                                    logger.info(f"Skipping completion for {mid}: scheduled start is in the future ({sch_str}).")
+                                    continue
+                            except Exception:
+                                pass
                         logger.info(f"Discovered concluded match {mid} ({t1} vs {t2}). Marking COMPLETED.")
                         await conn.execute("UPDATE matches SET state = 'COMPLETED', is_stumps = 0, stumps_label = NULL WHERE id = ?", (mid,))
                         await conn.commit()

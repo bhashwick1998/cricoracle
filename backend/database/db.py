@@ -117,38 +117,60 @@ async def init_db():
         await add_col("match_squads", "bowling_economy", "REAL DEFAULT 0.0")
 
         # Ground-Truth Innings Integrity Migration for NZ vs IND 1st Test:
-        # NZ 1st Innings (368), IND 1st Innings (720/9d), NZ 2nd Innings (119/2, Stumps Day 4), IND 2nd Innings yet to play.
+        # Match drawn: NZ 1st Innings (368), IND 1st Innings (720/9d), NZ 2nd Innings (239/5).
         await conn.execute("""
             UPDATE matches SET
+                state = 'COMPLETED',
                 innings_1_team_id = 'NZ',
                 innings_1_score = 368,
                 innings_1_wickets = 10,
                 innings_1_overs = 121.0,
+                innings_1_declared = 0,
                 innings_2_team_id = 'IND',
                 innings_2_score = 720,
                 innings_2_wickets = 9,
                 innings_2_overs = 166.0,
                 innings_2_declared = 1,
                 innings_3_team_id = 'NZ',
-                innings_3_score = 119,
-                innings_3_wickets = 2,
-                innings_3_overs = 45.0,
+                innings_3_score = 239,
+                innings_3_wickets = 5,
+                innings_3_overs = 120.0,
+                innings_3_declared = 0,
                 innings_4_team_id = 'IND',
                 innings_4_score = NULL,
                 current_innings = 3,
-                current_score = 119,
-                current_wickets = 2,
-                current_overs = 45,
+                current_score = 239,
+                current_wickets = 5,
+                current_overs = 120,
                 current_balls = 0,
-                p_team_a = 18.7,
-                p_team_b = 41.9,
-                p_draw = 39.4,
-                is_stumps = 1,
-                stumps_day = 4,
-                stumps_label = '🌙 STUMPS • DAY 4 CLOSE OF PLAY',
-                match_status_text = 'Day 4: Stumps - New Zealand 119/2 (45.0 ov) • Trail by 233 runs',
-                last_event_description = "44.6Jasprit Bumrah to Devon Conway, no run, it's the short ball but it's leg-side and DC easily sits under it. Dies on the way to the keeper"
+                p_team_a = 0.0,
+                p_team_b = 0.0,
+                p_draw = 100.0,
+                is_stumps = 0,
+                stumps_day = NULL,
+                stumps_label = NULL,
+                match_status_text = 'Match drawn',
+                last_event_description = 'Match drawn • IND 720/9d vs NZ 368 & 239/5'
             WHERE id = 'm_nz_ind_2026_test_1'
+        """)
+
+        # Ensure m_nz_ind_2026_test_2 is an upcoming fixture
+        await conn.execute("""
+            UPDATE matches SET
+                state = 'UPCOMING_NO_SQUAD',
+                is_stumps = 0,
+                stumps_day = NULL,
+                stumps_label = NULL,
+                match_status_text = 'Scheduled 2nd Test at Seddon Park, Hamilton • Squads TBA',
+                last_event_description = 'Stage 1 Macro Prediction (NZ 50.5% vs IND 49.5%) • Seddon Park • Squads TBA',
+                p_team_a = 50.5,
+                p_team_b = 49.5,
+                p_draw = 0.0,
+                current_score = 0,
+                current_wickets = 0,
+                current_overs = 0,
+                current_balls = 0
+            WHERE id = 'm_nz_ind_2026_test_2'
         """)
 
         # Ensure deliveries for m_nz_ind_2026_test_1 are complete up to over 44.6

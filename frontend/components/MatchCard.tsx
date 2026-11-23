@@ -500,23 +500,32 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
               </span>
             </div>
             <div className="w-full min-w-0 flex flex-col items-center justify-center my-auto py-0.5">
-              <div className="flex items-center justify-center gap-1 text-[10px] sm:text-[11px] font-black text-white w-full min-w-0 px-0.5">
-                <span className="text-cyan-400 font-bold truncate shrink-1">{metaA.short} {match.p_team_a}%</span>
-                <span className="text-[8px] text-slate-500 font-normal shrink-0">vs</span>
-                <span className="text-amber-400 font-bold truncate shrink-1">{match.p_team_b}% {metaB.short}</span>
-              </div>
-              {match.format === "TEST" && (match.p_draw || 0) > 0 && (
-                <div className="flex items-center justify-center gap-1 text-[9px] font-bold text-slate-300 mt-0.5">
-                  <span className="text-[8px] text-slate-400 uppercase font-semibold">Draw</span>
-                  <span className="text-slate-100 font-mono-numbers bg-slate-900/90 px-1 py-0.2 rounded border border-slate-700/60 leading-none">
-                    {match.p_draw}%
-                  </span>
+              {match.state === "COMPLETED" && (match.p_draw || 0) >= 99.0 ? (
+                <div className="flex flex-col items-center justify-center text-center">
+                  <span className="text-[11px] font-black text-emerald-400 uppercase tracking-wide">Match Drawn</span>
+                  <span className="text-[9px] text-slate-300 font-mono-numbers font-bold">Draw 100%</span>
                 </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-center gap-1 text-[10px] sm:text-[11px] font-black text-white w-full min-w-0 px-0.5">
+                    <span className="text-cyan-400 font-bold truncate shrink-1">{metaA.short} {match.p_team_a}%</span>
+                    <span className="text-[8px] text-slate-500 font-normal shrink-0">vs</span>
+                    <span className="text-amber-400 font-bold truncate shrink-1">{match.p_team_b}% {metaB.short}</span>
+                  </div>
+                  {match.format === "TEST" && (match.p_draw || 0) > 0 && (
+                    <div className="flex items-center justify-center gap-1 text-[9px] font-bold text-slate-300 mt-0.5">
+                      <span className="text-[8px] text-slate-400 uppercase font-semibold">Draw</span>
+                      <span className="text-slate-100 font-mono-numbers bg-slate-900/90 px-1 py-0.2 rounded border border-slate-700/60 leading-none">
+                        {match.p_draw}%
+                      </span>
+                    </div>
+                  )}
+                </>
               )}
             </div>
             <div className="w-full min-w-0 mt-1 pt-0.5 border-t border-rose-900/30">
               <span className="text-[8.5px] sm:text-[9px] text-slate-400 block truncate text-center leading-tight">
-                {match.state === "COMPLETED" ? "Match Finalized" : match.state === "LIVE_BALL_BY_BALL" ? "Telemetry In-Play" : "Pre-Match Standby"}
+                {match.state === "COMPLETED" ? ((match.p_draw || 0) >= 99.0 ? "Official Result: Draw" : "Match Finalized") : match.state === "LIVE_BALL_BY_BALL" ? "Telemetry In-Play" : "Pre-Match Standby"}
               </span>
             </div>
           </div>
@@ -608,8 +617,27 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                     : `Live In-Play • ${match.format === "TEST" ? `Innings ${match.current_innings}` : `Innings ${match.current_innings}`}`}
                 </div>
                 {isCompleted ? (
-                  <div className="text-sm font-extrabold text-white mt-1">
-                    {(match as any).result_description || match.last_event_description || "Match Completed"}
+                  <div className="mt-1">
+                    <div className="text-sm font-extrabold text-white">
+                      {(match as any).result_description || match.last_event_description || "Match Completed"}
+                    </div>
+                    {match.format === "TEST" && (match as any).innings_1_score != null && (
+                      <div className="text-xs text-slate-300 font-mono-numbers mt-1 flex items-center gap-2 flex-wrap">
+                        <span>
+                          <strong className="text-cyan-300">{(match as any).innings_1_team_id || metaA.short}:</strong> {(match as any).innings_1_score}/{(match as any).innings_1_wickets}{(match as any).innings_1_declared ? "d" : ""}
+                        </span>
+                        {(match as any).innings_2_score != null && (
+                          <span>
+                            • <strong className="text-amber-300">{(match as any).innings_2_team_id || metaB.short}:</strong> {(match as any).innings_2_score}/{(match as any).innings_2_wickets}{(match as any).innings_2_declared ? "d" : ""}
+                          </span>
+                        )}
+                        {(match as any).innings_3_score != null && (
+                          <span>
+                            &amp; {(match as any).innings_3_score}/{(match as any).innings_3_wickets}{(match as any).innings_3_declared ? "d" : ""}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : isInningsBreak ? (
                   <div className="mt-1">
