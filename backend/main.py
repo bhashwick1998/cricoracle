@@ -1478,12 +1478,28 @@ async def get_match_detail(match_id: str):
         team_b_players = [p for p in enriched_squad_rows if p["team_id"] == match_data["team_b_id"]]
 
         # Calculate Squad & Playing XI Pitch Adaptability averages on the REAL detected pitch
-        a_xi = [p for p in team_a_players if p.get("is_confirmed_xi") or p.get("is_probable_xi")]
-        b_xi = [p for p in team_b_players if p.get("is_confirmed_xi") or p.get("is_probable_xi")]
-        if not a_xi:
-            a_xi = team_a_players[:11]
-        if not b_xi:
-            b_xi = team_b_players[:11]
+        # Strictly select 11 confirmed players sorted by authentic batting order
+        confirmed_a = [p for p in team_a_players if p.get("is_confirmed_xi") == 1]
+        confirmed_a.sort(key=lambda p: int(p.get("batting_order") or 99))
+        if len(confirmed_a) < 11:
+            probable_a = [p for p in team_a_players if p.get("is_probable_xi") == 1 and p not in confirmed_a]
+            probable_a.sort(key=lambda p: int(p.get("batting_order") or 99))
+            confirmed_a.extend(probable_a)
+        if len(confirmed_a) < 11:
+            other_a = [p for p in team_a_players if p not in confirmed_a]
+            confirmed_a.extend(other_a)
+        a_xi = confirmed_a[:11]
+
+        confirmed_b = [p for p in team_b_players if p.get("is_confirmed_xi") == 1]
+        confirmed_b.sort(key=lambda p: int(p.get("batting_order") or 99))
+        if len(confirmed_b) < 11:
+            probable_b = [p for p in team_b_players if p.get("is_probable_xi") == 1 and p not in confirmed_b]
+            probable_b.sort(key=lambda p: int(p.get("batting_order") or 99))
+            confirmed_b.extend(probable_b)
+        if len(confirmed_b) < 11:
+            other_b = [p for p in team_b_players if p not in confirmed_b]
+            confirmed_b.extend(other_b)
+        b_xi = confirmed_b[:11]
 
         team_a_xi_pitch_adapt = float(sum(p["pitch_adaptability"].get(detected_pitch, 75.0) for p in a_xi) / max(1, len(a_xi))) if a_xi else 75.0
         team_b_xi_pitch_adapt = float(sum(p["pitch_adaptability"].get(detected_pitch, 75.0) for p in b_xi) / max(1, len(b_xi))) if b_xi else 75.0
@@ -1653,10 +1669,25 @@ async def get_match_detail(match_id: str):
 
             pos_comps = []
             lens_tallies = {"Balanced": {"team_a_wins": 0, "team_b_wins": 0, "ties": 0}, "Explosive": {"team_a_wins": 0, "team_b_wins": 0, "ties": 0}, "Purist": {"team_a_wins": 0, "team_b_wins": 0, "ties": 0}, "Clutch": {"team_a_wins": 0, "team_b_wins": 0, "ties": 0}}
+            position_labels = [
+                "Opening Batter (#1)",
+                "Opening Batter (#2)",
+                "Top-Order Anchor (#3)",
+                "Middle-Order Anchor (#4)",
+                "Middle-Order Enforcer (#5)",
+                "Wicketkeeper-Batter (#6)",
+                "Primary All-Rounder (#7)",
+                "Secondary All-Rounder / Spinner (#8)",
+                "Spearhead Fast Bowler (#9)",
+                "First Change Fast Bowler (#10)",
+                "Enforcer / Death Bowler (#11)"
+            ]
             n_pairs = min(len(attrs_a), len(attrs_b), 11)
             for idx in range(n_pairs):
+                pos_title = position_labels[idx] if idx < len(position_labels) else f"Position #{idx+1}"
                 pos_entry = {
                     "position_index": idx + 1,
+                    "position_title": pos_title,
                     "player_a_name": attrs_a[idx].get("name"),
                     "player_b_name": attrs_b[idx].get("name"),
                     "lens_results": {}

@@ -211,6 +211,21 @@ class EntityResolver:
             if best_match and best_score >= 78.0:
                 return best_match
 
+            # 2b. Global search if team-specific candidate search yielded no confident match (< 78.0)
+            # Prevents allocating a known international player (e.g. Tanzid Hasan) to an opposing team as uncapped
+            if candidates is not all_players:
+                global_best = None
+                global_score = 0.0
+                for p in all_players:
+                    score1 = fuzz.token_set_ratio(clean_name, p["name"])
+                    score2 = fuzz.token_sort_ratio(clean_name, p["name"])
+                    score = max(score1, score2)
+                    if score > global_score:
+                        global_score = score
+                        global_best = p
+                if global_best and global_score >= 82.0:
+                    return global_best
+
         # 3. Check Franchise database for uncapped / new players
         slug = clean_name.lower().replace(" ", "_").replace(".", "").replace("-", "_")
         for f_key, f_data in FRANCHISE_DATABASE.items():

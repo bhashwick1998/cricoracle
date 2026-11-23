@@ -189,17 +189,71 @@ async def ensure_full_playing_xi_for_match(conn: aiosqlite.Connection, match_id:
     team_a = m["team_a_id"]
     team_b = m["team_b_id"]
 
-    # Delete corrupt or dummy player entries (e.g. sa_striker, sa_non_striker)
+    # Delete corrupt or dummy player entries (e.g. sa_striker, sa_non_striker, uncapped cross-team duplicates)
     await conn.execute("""
         DELETE FROM match_squads
-        WHERE match_id = ? AND (player_id LIKE 'sa_striker%' OR player_id LIKE 'sa_non_striker%' OR player_id LIKE '%dummy%')
+        WHERE match_id = ? AND (
+            player_id LIKE 'sa_striker%' OR player_id LIKE 'sa_non_striker%' OR player_id LIKE '%dummy%'
+            OR (team_id = 'SA' AND (player_id LIKE '%tanzid%' OR player_id LIKE '%shanto%' OR player_id LIKE '%islam%'))
+            OR (team_id = 'BAN' AND (player_id LIKE '%markram%' OR player_id LIKE '%nortje%' OR player_id LIKE '%rabada%'))
+        )
     """, (match_id,))
 
-    # Fix cross-team misallocations (e.g. Mahfijul Islam who is BAN assigned to SA)
+    await conn.execute("""
+        DELETE FROM players
+        WHERE (id LIKE 'sa_striker%' OR id LIKE 'sa_non_striker%' OR id LIKE '%dummy%')
+           OR (team_id = 'SA' AND (id LIKE '%tanzid%' OR id LIKE '%shanto%' OR id LIKE '%islam%' OR name LIKE '%Tanzid%' OR name LIKE '%Shanto%' OR name LIKE '%Mahfijul%'))
+           OR (team_id = 'BAN' AND (id LIKE '%markram%' OR id LIKE '%nortje%' OR id LIKE '%rabada%'))
+    """)
+
+    # Fix specific cross-team misallocations for BAN vs SA 2nd Test
     if match_id == "m_ban_sa_2026_test_1":
+        sa_canonical = [
+            ('a_markram_sa', 1),
+            ('t_de_zorzi_sa', 2),
+            ('m_ackerman_sa', 3),
+            ('z_hamza_sa', 4),
+            ('m_breetzke_sa', 5),
+            ('t_stubbs_sa', 6),
+            ('w_mulder_sa', 7),
+            ('m_jansen_sa', 8),
+            ('s_harmer_sa', 9),
+            ('k_rabada_sa', 10),
+            ('a_nortje_sa', 11),
+        ]
+        for pid, ord_idx in sa_canonical:
+            await conn.execute("""
+                UPDATE match_squads SET is_confirmed_xi = 1, is_probable_xi = 1, batting_order = ?, sub_status = 'CONFIRMED_XI'
+                WHERE match_id = ? AND team_id = 'SA' AND player_id = ?
+            """, (ord_idx, match_id, pid))
+
         await conn.execute("""
-            UPDATE match_squads SET team_id = 'BAN'
-            WHERE match_id = ? AND player_id LIKE '%mahfijul%'
+            UPDATE match_squads SET is_confirmed_xi = 0, is_probable_xi = 0, batting_order = 99, sub_status = 'BENCH_RESERVE'
+            WHERE match_id = ? AND team_id = 'SA' AND player_id NOT IN ('a_markram_sa','t_de_zorzi_sa','m_ackerman_sa','z_hamza_sa','m_breetzke_sa','t_stubbs_sa','w_mulder_sa','m_jansen_sa','s_harmer_sa','k_rabada_sa','a_nortje_sa')
+        """, (match_id,))
+
+        ban_canonical = [
+            ('t_hasan_ban', 1),
+            ('m_islam_ban', 2),
+            ('m_haque_ban', 3),
+            ('n_shanto_ban', 4),
+            ('t_hridoy_ban', 5),
+            ('l_das_ban', 6),
+            ('j_ali_ban', 7),
+            ('s_islam_ban', 8),
+            ('t_ahmed_ban', 9),
+            ('k_ahmed_ban', 10),
+            ('e_hossain_ban', 11),
+        ]
+        for pid, ord_idx in ban_canonical:
+            await conn.execute("""
+                UPDATE match_squads SET is_confirmed_xi = 1, is_probable_xi = 1, batting_order = ?, sub_status = 'CONFIRMED_XI'
+                WHERE match_id = ? AND team_id = 'BAN' AND player_id = ?
+            """, (ord_idx, match_id, pid))
+
+        await conn.execute("""
+            UPDATE match_squads SET is_confirmed_xi = 0, is_probable_xi = 0, batting_order = 99, sub_status = 'BENCH_RESERVE'
+            WHERE match_id = ? AND team_id = 'BAN' AND player_id NOT IN ('t_hasan_ban','m_islam_ban','m_haque_ban','n_shanto_ban','t_hridoy_ban','l_das_ban','j_ali_ban','s_islam_ban','t_ahmed_ban','k_ahmed_ban','e_hossain_ban')
         """, (match_id,))
 
     # Canonicalize uncapped_ player IDs into genuine international player IDs from players table
@@ -287,13 +341,12 @@ async def ensure_full_playing_xi_for_match(conn: aiosqlite.Connection, match_id:
 
         # If candidates are needed to make 11:
         if len(confirmed_players) > 11:
-            # Keep top 11 by played priority, then order
+            # Keep top 11: active players (balls faced / overs bowled / runs) first, then ascending batting order
             confirmed_players.sort(
                 key=lambda x: (
-                    1 if ((x.get("balls_faced") or 0) > 0 or (x.get("overs_bowled") or 0) > 0) else 0,
+                    0 if ((x.get("balls_faced") or 0) > 0 or (x.get("overs_bowled") or 0) > 0 or (x.get("current_match_runs") or 0) > 0 or bool(x.get("is_out"))) else 1,
                     x.get("batting_order") or 99
-                ),
-                reverse=True
+                )
             )
             candidates.extend(confirmed_players[11:])
             confirmed_players = confirmed_players[:11]
@@ -326,7 +379,8 @@ async def ensure_full_playing_xi_for_match(conn: aiosqlite.Connection, match_id:
                     """, (match_id, p["player_id"], tid, p["batting_order"]))
 
         # 2. Update all confirmed XI players with is_confirmed_xi = 1, sub_status = 'CONFIRMED_XI'
-        for idx, p in enumerate(confirmed_players[:11], start=1):
+        confirmed_top_11 = sorted(confirmed_players[:11], key=lambda x: x.get("batting_order") or 99)
+        for idx, p in enumerate(confirmed_top_11, start=1):
             b_ord = p.get("batting_order")
             if not b_ord or b_ord >= 90:
                 b_ord = idx
