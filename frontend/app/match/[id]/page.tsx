@@ -638,11 +638,23 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     troubled_archetypes: ["OB"]
   };
 
-  // Prepare Worm Chart Data strictly representing upper box win probability for both teams
+  // Prepare Worm Chart Data strictly representing upper box win probability for both teams and Draw
+  const isTest = match.format === "TEST";
+  const pDrawVal = isTest ? Number(match.p_draw ?? 0.0) : 0.0;
+  const p0PriorA = Number(match.p0_pre_match ?? (match.p_team_a ?? 50.0));
+  const p0PriorDraw = isTest ? 15.0 : 0.0;
+  const p0PriorB = Math.round((100.0 - p0PriorA - p0PriorDraw) * 10) / 10;
+
+  const currentPA = Number(match.p_team_a ?? 50.0);
+  const currentPB = match.p_team_b !== undefined ? Number(match.p_team_b) : Math.round((100.0 - pDrawVal - currentPA) * 10) / 10;
+
   const wormData = deliveries.map((d: any, idx: number) => {
     const rawPA = Number(d.p_team_a_after ?? match.p_team_a ?? 50.0);
     const pTeamAVal = rawPA <= 1.0 ? Math.round(rawPA * 1000) / 10 : Math.round(rawPA * 10) / 10;
     const innPrefix = d.innings === 2 ? "Inn 2" : "Inn 1";
+    const dDrawVal = isTest ? (d.p_draw !== undefined ? Number(d.p_draw) : pDrawVal) : 0.0;
+    const dTeamBVal = Math.round((100.0 - dDrawVal - pTeamAVal) * 10) / 10;
+
     return {
       ballIdx: idx + 1,
       innings: d.innings || 1,
@@ -651,9 +663,8 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
       score: d.score_after,
       wickets: d.wickets_after,
       p_team_a: pTeamAVal,
-      p_team_b: match.format === "TEST" && match.p_team_b !== undefined
-        ? Number(match.p_team_b)
-        : Math.round((100.0 - (match.format === "TEST" ? Number(match.p_draw || 0) : 0) - pTeamAVal) * 10) / 10,
+      p_team_b: dTeamBVal,
+      p_draw: dDrawVal,
       wpa: d.wpa,
       isWicket: d.is_wicket === 1,
       commentary: d.commentary
@@ -662,10 +673,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
 
   // Ensure latest delivery point precisely matches the upper box live win probability
   if (wormData.length > 0 && match.p_team_a !== undefined) {
-    wormData[wormData.length - 1].p_team_a = Number(match.p_team_a);
-    wormData[wormData.length - 1].p_team_b = match.p_team_b !== undefined
-      ? Number(match.p_team_b)
-      : Math.round((100.0 - (match.format === "TEST" ? Number(match.p_draw || 0) : 0) - Number(match.p_team_a)) * 10) / 10;
+    wormData[wormData.length - 1].p_team_a = currentPA;
+    wormData[wormData.length - 1].p_team_b = currentPB;
+    wormData[wormData.length - 1].p_draw = pDrawVal;
   }
 
   const initialDataPoint = {
@@ -675,32 +685,64 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     shortOver: "0.0",
     score: 0,
     wickets: 0,
-    p_team_a: match.p0_pre_match || match.p_team_a || 50.0,
-    p_team_b: match.p_team_b !== undefined && match.state === "LIVE_BALL_BY_BALL"
-      ? Number(match.p_team_b)
-      : Math.round((100.0 - (match.p0_pre_match || match.p_team_a || 50.0)) * 10) / 10,
+    p_team_a: p0PriorA,
+    p_team_b: p0PriorB,
+    p_draw: p0PriorDraw,
     wpa: 0,
     isWicket: false,
     commentary: "Pre-Match P₀ Prior Locked"
   };
 
   const fullChartData = deliveries.length === 0
-    ? [
-        initialDataPoint,
-        {
-          ballIdx: 1,
-          innings: 1,
-          overBall: "P₀ Prior",
-          shortOver: "P₀",
-          score: 0,
-          wickets: 0,
-          p_team_a: match.p0_pre_match || match.p_team_a || 50.0,
-          p_team_b: Math.round((100.0 - (match.p0_pre_match || match.p_team_a || 50.0)) * 10) / 10,
-          wpa: 0,
-          isWicket: false,
-          commentary: "Stage 3 XI & Toss Locked"
-        }
-      ]
+    ? (match.state === "LIVE_BALL_BY_BALL" || Number(match.current_score || 0) > 0)
+      ? [
+          initialDataPoint,
+          ...(match.innings_1_score ? [{
+            ballIdx: 1,
+            innings: 1,
+            overBall: `Inn 1 (${match.innings_1_overs || "33.3"} ov)`,
+            shortOver: `${match.innings_1_overs || "33.3"}`,
+            score: match.innings_1_score,
+            wickets: match.innings_1_wickets || 10,
+            p_team_a: isTest ? 75.0 : currentPA,
+            p_team_b: isTest ? 15.0 : currentPB,
+            p_draw: isTest ? 10.0 : 0.0,
+            wpa: 0,
+            isWicket: true,
+            commentary: `${match.innings_1_team_id || metaB.short} 1st Innings Closed (${match.innings_1_score} all out)`
+          }] : []),
+          {
+            ballIdx: 2,
+            innings: match.current_innings || 1,
+            overBall: `Live (${match.current_overs || "17.0"} ov)`,
+            shortOver: `${match.current_overs || "17.0"}`,
+            score: match.current_score || 0,
+            wickets: match.current_wickets || 0,
+            p_team_a: currentPA,
+            p_team_b: currentPB,
+            p_draw: pDrawVal,
+            wpa: match.last_wpa_swing || 0,
+            isWicket: false,
+            commentary: match.last_event_description || "Real-time in-play state"
+          }
+        ]
+      : [
+          initialDataPoint,
+          {
+            ballIdx: 1,
+            innings: 1,
+            overBall: "P₀ Prior",
+            shortOver: "P₀",
+            score: 0,
+            wickets: 0,
+            p_team_a: p0PriorA,
+            p_team_b: p0PriorB,
+            p_draw: p0PriorDraw,
+            wpa: 0,
+            isWicket: false,
+            commentary: "Stage 3 XI & Toss Locked"
+          }
+        ]
     : [initialDataPoint, ...wormData];
 
   // Next Ball Distribution Data
@@ -3509,6 +3551,14 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                       <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                       {metaB.short} {match.p_team_b}%
                     </span>
+                    {match.format === "TEST" && Number(match.p_draw) > 0 && (
+                      <>
+                        <span className="text-slate-500 font-bold text-[11px]">vs</span>
+                        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 font-semibold shadow-sm text-[11px]">
+                          Draw {match.p_draw}%
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -3540,7 +3590,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                         }}
                         formatter={(val: any, name: any) => [
                           `${val}%`,
-                          name === metaA.short || name === "p_team_a" ? `${metaA.short} (${metaA.name})` : `${metaB.short} (${metaB.name})`
+                          name === metaA.short || name === "p_team_a"
+                            ? `${metaA.short} (${metaA.name})`
+                            : (name === "Draw" || name === "p_draw" ? "Draw Probability" : `${metaB.short} (${metaB.name})`)
                         ]}
                         labelFormatter={(label, payload) => {
                           const item = payload?.[0]?.payload;
@@ -3580,6 +3632,18 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                         dot={false}
                         activeDot={{ r: 5, fill: metaB.primaryColor || "#10b981" }}
                       />
+                      {match.format === "TEST" && (
+                        <Line
+                          type="monotone"
+                          dataKey="p_draw"
+                          name="Draw"
+                          stroke="#94a3b8"
+                          strokeWidth={2}
+                          strokeDasharray="4 4"
+                          dot={false}
+                          activeDot={{ r: 4, fill: "#94a3b8" }}
+                        />
+                      )}
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
