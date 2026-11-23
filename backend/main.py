@@ -207,6 +207,67 @@ async def lifespan(app: FastAPI):
     try:
         conn = await get_db()
         try:
+            async with conn.execute("SELECT count(*) FROM matches") as cur:
+                m_count = (await cur.fetchone())[0]
+            if m_count < 5:
+                logger.info(f"Database has only {m_count} matches. Auto-seeding benchmark fixtures...")
+                await seed_database()
+
+            # Enforce 1st Test completed draw and 2nd Test upcoming
+            await conn.execute("""
+                UPDATE matches SET
+                    state = 'COMPLETED',
+                    is_stumps = 0,
+                    stumps_day = NULL,
+                    stumps_label = NULL,
+                    innings_1_team_id = 'NZ',
+                    innings_1_score = 368,
+                    innings_1_wickets = 10,
+                    innings_1_overs = 121.0,
+                    innings_1_declared = 0,
+                    innings_2_team_id = 'IND',
+                    innings_2_score = 720,
+                    innings_2_wickets = 9,
+                    innings_2_overs = 166.0,
+                    innings_2_declared = 1,
+                    innings_3_team_id = 'NZ',
+                    innings_3_score = 239,
+                    innings_3_wickets = 5,
+                    innings_3_overs = 120.0,
+                    innings_3_declared = 0,
+                    innings_4_team_id = 'IND',
+                    innings_4_score = NULL,
+                    current_innings = 3,
+                    current_score = 239,
+                    current_wickets = 5,
+                    current_overs = 120,
+                    current_balls = 0,
+                    p_team_a = 0.0,
+                    p_team_b = 0.0,
+                    p_draw = 100.0,
+                    match_status_text = 'Match drawn',
+                    last_event_description = 'Match drawn • IND 720/9d vs NZ 368 & 239/5'
+                WHERE id = 'm_nz_ind_2026_test_1'
+            """)
+            await conn.execute("""
+                UPDATE matches SET
+                    state = 'UPCOMING_NO_SQUAD',
+                    is_stumps = 0,
+                    stumps_day = NULL,
+                    stumps_label = NULL,
+                    match_status_text = 'Scheduled 2nd Test at Seddon Park, Hamilton • Squads TBA',
+                    last_event_description = 'Stage 1 Macro Prediction (NZ 50.5% vs IND 49.5%) • Seddon Park • Squads TBA',
+                    p_team_a = 50.5,
+                    p_team_b = 49.5,
+                    p_draw = 0.0,
+                    current_score = 0,
+                    current_wickets = 0,
+                    current_overs = 0,
+                    current_balls = 0
+                WHERE id = 'm_nz_ind_2026_test_2'
+            """)
+            await conn.commit()
+
             propagated = await propagate_series_squads_async(conn)
             logger.info(f"Startup series squad propagation: {len(propagated)} matches updated.")
         finally:
