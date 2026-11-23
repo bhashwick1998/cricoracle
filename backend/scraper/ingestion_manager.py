@@ -340,10 +340,10 @@ class IngestionManager:
             if active_ids:
                 await asyncio.gather(*(sync_single_match(mid) for mid in active_ids), return_exceptions=True)
 
-            # 3. Synchronize with CricAPI senior matches as quota-friendly fallback (10-minute cadence, max 100 hits/day)
+            # 3. Synchronize with CricAPI senior matches (35-second cadence using 2,000 hits/day tier)
             now_ts = time.time()
             last_cricapi_sync = getattr(self, "_last_cricapi_live_sync", 0.0)
-            if (now_ts - last_cricapi_sync) >= 600.0 or not active_ids:
+            if (now_ts - last_cricapi_sync) >= 35.0 or not active_ids:
                 self._last_cricapi_live_sync = now_ts
                 from .providers.cricapi_provider import cricapi_provider
                 updated_ids = await cricapi_provider.sync_live_senior_mens_matches(conn)

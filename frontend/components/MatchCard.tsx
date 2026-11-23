@@ -603,7 +603,7 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                     <Flame className="w-3.5 h-3.5 animate-bounce" />
                   )}
                   {isCompleted
-                    ? "MATCH COMPLETED • RESULT"
+                    ? "LIVE TELEMETRY COMPLETED"
                     : isInningsBreak
                     ? `☕ INNINGS BREAK • TARGET ${match.target_runs || (match.innings_1_score ? match.innings_1_score + 1 : 200)}`
                     : isRainInterrupted
@@ -923,13 +923,10 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                   {match.state === "COMPLETED" ? (
                     <>
                       <span className="text-[10px] uppercase font-bold text-emerald-400 block mb-0.5">
-                        Match Result
+                        Live Final Telemetry
                       </span>
                       <div className="text-xs font-black text-white truncate">
                         {match.match_status_text || (match as any).result_description || "Match Completed"}
-                      </div>
-                      <div className="text-[9px] text-emerald-400 mt-0.5">
-                        Official Result Recorded
                       </div>
                     </>
                   ) : match.state === "LIVE_BALL_BY_BALL" ? (() => {

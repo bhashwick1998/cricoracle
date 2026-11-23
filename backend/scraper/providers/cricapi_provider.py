@@ -12,11 +12,12 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 import httpx
 import requests
+from ...engine.cricapi_match_parser import parse_cricapi_match_state, MatchStateContext
 
 logger = logging.getLogger("cricapi_provider")
 
 CRICAPI_KEY = "d0e9f357-ae08-4700-9634-1a26bc27501b"
-MAX_DAILY_CALLS = 90  # Keep 10-call safety buffer under the 100/day limit
+MAX_DAILY_CALLS = 1950  # 2,000 hits/day tier (with 50-call safety buffer)
 
 class CricApiSquadProvider:
     def __init__(self, api_key: str = CRICAPI_KEY):
@@ -485,10 +486,10 @@ class CricApiSquadProvider:
                         })
             return live_matches
 
-        # Check in-memory cache TTL (600 seconds / 10 minutes to protect daily quota)
+        # Check in-memory cache TTL (35 seconds to maximize freshness within 2,000 hits/day quota)
         if not force and getattr(self, "_cached_live_scores", None):
             cached_t = getattr(self, "_cached_live_scores_time", 0.0)
-            if (now - cached_t) < 600.0:
+            if (now - cached_t) < 35.0:
                 return self._cached_live_scores
 
         if not self._check_and_increment_quota():
@@ -646,6 +647,18 @@ class CricApiSquadProvider:
                     i2_wkts = inn_2_sc.get("wickets") if inn_2_sc else db_m.get("innings_2_wickets")
                     i2_ovs = inn_2_sc.get("overs") if inn_2_sc else db_m.get("innings_2_overs")
 
+                    # Parse DLS, revised overs, rain delay, and bowler restrictions via CricApiMatchParser
+                    ctx: MatchStateContext = parse_cricapi_match_state(
+                        data=m,
+                        match_id=mid,
+                        match_format=db_m.get("format")
+                    )
+
+                    tgt_runs = ctx.revised_target or ctx.target_runs or db_m.get("target_runs")
+                    dls_tgt = ctx.revised_target if ctx.is_dls_applied else db_m.get("dls_target")
+                    ov_lost = max(0.0, ctx.standard_max_overs - ctx.revised_max_overs) if ctx.is_reduced_overs else float(db_m.get("overs_lost") or 0.0)
+                    weather_cond = "RAIN_DELAY" if (ctx.is_interrupted and not ctx.is_abandoned) else ("WASHED_OUT" if ctx.is_abandoned else (db_m.get("weather_condition") or "CLEAR"))
+
                     await conn.execute("""
                         UPDATE matches SET
                             state = 'LIVE_BALL_BY_BALL',
@@ -654,6 +667,10 @@ class CricApiSquadProvider:
                             current_wickets = ?,
                             current_overs = ?,
                             current_balls = ?,
+                            target_runs = ?,
+                            dls_target = ?,
+                            overs_lost = ?,
+                            weather_condition = ?,
                             match_status_text = ?,
                             is_stumps = ?,
                             stumps_day = ?,
@@ -668,7 +685,8 @@ class CricApiSquadProvider:
                             innings_2_overs = ?
                         WHERE id = ?
                     """, (
-                        inn_val, runs, wkts, ovs, balls, status_text, is_stumps, s_day, s_lbl,
+                        inn_val, runs, wkts, ovs, balls, tgt_runs, dls_tgt, ov_lost, weather_cond,
+                        status_text, is_stumps, s_day, s_lbl,
                         i1_team, i1_runs, i1_wkts, i1_ovs,
                         i2_team, i2_runs, i2_wkts, i2_ovs,
                         mid

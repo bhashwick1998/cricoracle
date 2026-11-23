@@ -394,7 +394,7 @@ export default function HomePage() {
                   {activeTab === "LIVE"
                     ? "Live In-Play & Stumps Matches"
                     : activeTab === "COMPLETED"
-                    ? "Official Match Results (Past 2 Days)"
+                    ? "Live Telemetry & In-Play Matches"
                     : activeTab === "XI_LOCKED"
                     ? "Stage 3: Confirmed Playing 11 & Toss Locked"
                     : "Official Senior International Fixtures & Odds"}
@@ -539,10 +539,10 @@ export default function HomePage() {
           <div className="text-center py-16 bg-slate-900/40 rounded-3xl border border-slate-800">
             <Radio className="w-12 h-12 text-slate-600 mx-auto mb-3" />
             <h3 className="text-base font-bold text-slate-300">
-              No matches found matching your filters
+              {activeTab === "COMPLETED" ? "No completed matches — Live In-Play Only" : "No matches found matching your filters"}
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              Try clearing your search query or selecting a different format.
+              {activeTab === "COMPLETED" ? "Completed match results have been purged. System strictly monitors live in-play and upcoming senior international matches." : "Try clearing your search query or selecting a different format."}
             </p>
           </div>
         ) : viewMode === "table" ? (

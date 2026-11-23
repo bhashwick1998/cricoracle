@@ -1107,9 +1107,8 @@ async def get_matches(state: Optional[str] = None):
                     continue
 
                 if st == "COMPLETED":
-                    # Strictly only show finished matches for 2 days (48 hours)
-                    if (diff_sec + match_duration) >= -max_past_window:
-                        filtered_matches.append(m)
+                    # User requirement: Keep only live matches, remove all other types of matches inside match results, including match result text.
+                    continue
                 elif st in ("XI_AND_TOSS_LOCKED", "SQUAD_ANNOUNCED", "UPCOMING_NO_SQUAD"):
                     # Upcoming fixtures (Stage 1 Macro, Stage 2 Squad, Stage 3 XI Locked)
                     # Strictly valid ONLY for upcoming/future fixtures (not stale past matches)
@@ -2955,9 +2954,22 @@ def get_cricapi_playing_xi(cricapi_id: str, force: bool = False):
 def get_cricapi_live_scores(force: bool = False):
     """
     Fetches official senior international live scores from CricketData.org (cricScore single-hit).
-    Cached with 90-second TTL to strictly protect daily credit quotas and prevent rate limit exhaustion.
+    Cached with 35-second TTL to maximize freshness within the 2,000 hits/day quota.
     """
     return cricapi_provider.fetch_live_senior_scores(force=force)
+
+@app.post("/api/cricapi/parse-match-state")
+def api_parse_cricapi_match_state(payload: Dict[str, Any]):
+    """
+    Parses raw CricAPI (CricketData.org) match payload into strongly-typed MatchStateContext:
+    - Rain & interruption detection
+    - DLS revised target & remaining balls extraction via resilient regex
+    - ICC Reduced-Overs Rule Engine (bowler max overs, powerplay duration)
+    - Returns structured MatchStateContext model with ML features vector.
+    """
+    from .engine.cricapi_match_parser import parse_cricapi_match_state
+    ctx = parse_cricapi_match_state(payload)
+    return ctx.model_dump()
 
 @app.post("/api/cricapi/sync-live")
 async def sync_cricapi_live_to_matches():
