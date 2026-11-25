@@ -291,7 +291,8 @@ def run_vectorized_pre_match_simulation(
     format_adjustment_delta: float = 0.0,
     vulnerability_delta: float = 0.0,
     positional_delta: float = 0.0,
-    top_duel_delta: float = 0.0
+    top_duel_delta: float = 0.0,
+    country_adapt_delta: float = 0.0
 ) -> Tuple[float, int, int, int]:
     """
     Vectorized Monte Carlo match simulator running 5,000 matches from Ball 0.1.
@@ -351,7 +352,8 @@ def run_vectorized_pre_match_simulation(
         positional_delta * 1.5 +
         top_duel_delta * 0.35 +
         vulnerability_delta * 0.25 +
-        format_adjustment_delta * 0.40
+        format_adjustment_delta * 0.40 +
+        country_adapt_delta * 0.55
     )
 
     toss_shift_vector = np.random.normal(loc=cricsheet_toss_edge * 0.28, scale=3.0, size=n_sims)
@@ -514,8 +516,8 @@ def calculate_stage3_xi_locked(
     # -----------------------------------------------------------------
     # 3. 5-Way Pitch Adaptability & Surface Mastery (65% Recency Weighting)
     # -----------------------------------------------------------------
-    xi_a_adaptabilities = [compute_player_5way_pitch_adaptability(p) for p in confirmed_xi_a]
-    xi_b_adaptabilities = [compute_player_5way_pitch_adaptability(p) for p in confirmed_xi_b]
+    xi_a_adaptabilities = [compute_player_5way_pitch_adaptability(p, match_format=fmt) for p in confirmed_xi_a]
+    xi_b_adaptabilities = [compute_player_5way_pitch_adaptability(p, match_format=fmt) for p in confirmed_xi_b]
 
     def get_effective_surface_mastery(p_adapt: Dict[str, Any], arch: str) -> float:
         career = p_adapt.get("pitch_adaptability", {}).get(arch, 75.0)
@@ -723,6 +725,7 @@ def calculate_stage3_xi_locked(
     # -----------------------------------------------------------------
     # 12. 5,000-Run Vectorized Monte Carlo Rollout
     # -----------------------------------------------------------------
+    country_adapt_delta = float(country_a_details.get("composite_score", 75.0)) - float(country_b_details.get("composite_score", 75.0))
     p_a_mc, par_proj, par_min, par_max = run_vectorized_pre_match_simulation(
         base_par=base_par,
         dew_factor=dew_factor,
@@ -740,12 +743,22 @@ def calculate_stage3_xi_locked(
         format_adjustment_delta=format_adjustment_delta,
         vulnerability_delta=net_hazard_advantage_a,
         positional_delta=pos_edge_a,
-        top_duel_delta=avg_top_duel_delta
+        top_duel_delta=avg_top_duel_delta,
+        country_adapt_delta=country_adapt_delta
     )
 
-    # Bayesian log-odds blending of Stage 2 Squad Prior (25%) + Confirmed XI Micro-Tensors (75%)
-    p_a_final = round(0.25 * p2_squad_prob_a + 0.75 * p_a_mc, 1)
-    p_b_final = round(100.0 - p_a_final, 1)
+    if fmt == "TEST":
+        p_draw = round(venue.get("test_draw_pct", 0.11) * 100.0, 1)
+        decisive_pool = 100.0 - p_draw
+        p2_decisive_share = min(99.5, max(0.5, (p2_squad_prob_a / max(1.0, decisive_pool)) * 100.0))
+        p_a_decisive = 0.25 * p2_decisive_share + 0.75 * p_a_mc
+        p_a_final = round((p_a_decisive / 100.0) * decisive_pool, 1)
+        p_b_final = round(decisive_pool - p_a_final, 1)
+    else:
+        p_draw = 0.0
+        # Bayesian log-odds blending of Stage 2 Squad Prior (25%) + Confirmed XI Micro-Tensors (75%)
+        p_a_final = round(0.25 * p2_squad_prob_a + 0.75 * p_a_mc, 1)
+        p_b_final = round(100.0 - p_a_final, 1)
     delta_toss_shift = round(p_a_final - p2_squad_prob_a, 1)
 
     # -----------------------------------------------------------------
@@ -760,6 +773,7 @@ def calculate_stage3_xi_locked(
         "gear": "Gear 2B",
         "p_team_a": p_a_final,
         "p_team_b": p_b_final,
+        "p_draw": p_draw,
         "p0_pre_match": p_a_final,
         "ground_pitch_archetype": pitch_archetype,
         "is_pitch_override": is_pitch_override,

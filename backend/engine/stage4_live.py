@@ -812,7 +812,9 @@ def predict_first_innings_score_dls(
     overs_lost: float = 0.0,
     pitch_sweat_index: float = 0.0,
     spin_grip_penalty_pct: float = 0.0,
-    outfield_friction_pct: float = 0.0
+    outfield_friction_pct: float = 0.0,
+    batting_team: Optional[str] = None,
+    bowling_team: Optional[str] = None
 ) -> Tuple[int, int, int]:
     """
     PredictViz DLS Resource Matrix & Phase-Aware 1st Innings Score Predictor (Rain-Adaptive).
@@ -861,7 +863,9 @@ def predict_first_innings_score_dls(
             "is_day_night": 1 if is_day_night else 0,
             "dew_factor": dew_factor,
             "recent_commentary": commentary,
-            "current_bowler_id": (bowler.get("player_id") or bowler.get("id")) if bowler else None
+            "current_bowler_id": (bowler.get("player_id") or bowler.get("id")) if bowler else None,
+            "batting_team": batting_team,
+            "bowling_team": bowling_team
         },
         n_sims=3000
     )
@@ -1890,7 +1894,9 @@ def calculate_stage4_live(
             overs_lost=overs_lost,
             pitch_sweat_index=pitch_sweat_index,
             spin_grip_penalty_pct=spin_grip_penalty_pct,
-            outfield_friction_pct=outfield_friction_pct
+            outfield_friction_pct=outfield_friction_pct,
+            batting_team=(team_a if team_a_batting else team_b),
+            bowling_team=(team_b if team_a_batting else team_a)
         )
         target_chase_dynamics = {
             "is_chasing": False,

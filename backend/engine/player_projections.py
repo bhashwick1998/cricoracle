@@ -2241,8 +2241,20 @@ def predict_live_innings_score_monte_carlo(
             normalize_team_code,
             ICC_FULL_MEMBERS
         )
-        batting_team_name = match_data.get("batting_team") or match_data.get("team_a") or "IND"
-        bowling_team_name = match_data.get("bowling_team") or match_data.get("team_b") or "AUS"
+        inn_num = int(match_data.get("current_innings") or 1)
+        t_a = match_data.get("team_a") or match_data.get("team_a_id") or "IND"
+        t_b = match_data.get("team_b") or match_data.get("team_b_id") or "AUS"
+        inn1_t = match_data.get("innings_1_team_id")
+        inn2_t = match_data.get("innings_2_team_id")
+        if match_data.get("batting_team"):
+            batting_team_name = match_data["batting_team"]
+            bowling_team_name = match_data.get("bowling_team") or (t_b if batting_team_name == t_a else t_a)
+        elif inn1_t:
+            batting_team_name = inn1_t if inn_num == 1 else (inn2_t or (t_b if inn1_t == t_a else t_a))
+            bowling_team_name = (t_b if batting_team_name == t_a else t_a)
+        else:
+            batting_team_name = t_a
+            bowling_team_name = t_b
         bat_code = normalize_team_code(batting_team_name)
         bowl_code = normalize_team_code(bowling_team_name)
 
@@ -3322,7 +3334,7 @@ def compute_match_scenario_score_projections(
                 crr = curr_score / max(1.0, curr_overs + curr_balls / 6.0)
 
                 wkts_left = max(0, 10 - curr_wkts)
-                if wkts_left <= 0:
+                if wkts_left <= 0 or balls_left <= 0:
                     proj_final = curr_score
                     proj_low = curr_score
                     proj_high = curr_score
@@ -3330,24 +3342,23 @@ def compute_match_scenario_score_projections(
                     active_batting_squad = (team_b_squad if team_1st_bat == team_a_id else team_a_squad) or (team_b_squad or team_a_squad)
                     active_bowling_squad = (team_a_squad if team_1st_bat == team_a_id else team_b_squad) or (team_a_squad or team_b_squad)
 
-                    # Dynamic count of remaining recognized batters (top 7) vs pure tail (8-11)
-                    valid_orders = [int(p.get("batting_order")) for p in (active_batting_squad or []) if p.get("batting_order") is not None and 1 <= int(p.get("batting_order")) <= 11]
-                    if len(valid_orders) >= 4:
-                        rec_left = sum(1 for p in active_batting_squad if p.get("is_out", 0) in [0, "0", False, None] and 1 <= int(p.get("batting_order") or 99) <= 7)
-                    else:
-                        rec_left = max(0, min(7 - curr_wkts, wkts_left))
-                    tail_left = max(0, wkts_left - rec_left)
-
-                    quality_mult = float(match_data.get("batting_quality_mult") or 1.0)
-                    run_per_rec = (30.0 if fmt == "ODI" else 18.0) * quality_mult
-                    run_per_tail = (10.0 if fmt == "ODI" else 6.0) * quality_mult
-
-                    # Capacity bounded by remaining wickets and available balls
-                    wkt_capacity = (rec_left * run_per_rec) + (tail_left * run_per_tail)
-                    ball_capacity = (balls_left / 6.0) * max(3.5, min(8.5, crr))
-                    expected_rem_runs = min(wkt_capacity, ball_capacity)
-
-                    fall_short_total = curr_score + min(max(0, runs_needed - 1), int(round(expected_rem_runs)))
+                    # Phase-aware Monte Carlo projection (Powerplay / Middle / Death curves, overs-bounded)
+                    mc_pred_chase = predict_live_innings_score_monte_carlo(
+                        fmt=fmt,
+                        curr_score=curr_score,
+                        curr_wkts=curr_wkts,
+                        curr_overs=curr_overs,
+                        curr_balls=curr_balls,
+                        batting_squad=active_batting_squad,
+                        bowling_squad=active_bowling_squad,
+                        active_striker_id=match_data.get("current_striker_id"),
+                        active_non_striker_id=match_data.get("current_non_striker_id"),
+                        ground_arch=ground_arch,
+                        match_data={**match_data, "batting_team": team_2nd_bat, "bowling_team": team_1st_bat},
+                        weather_report=weather_report,
+                        n_sims=2000
+                    )
+                    fall_short_total = curr_score + min(max(0, runs_needed - 1), int(round(mc_pred_chase["expected_remaining_runs"])))
 
                     chase_win_p = float(match_data.get("p_team_b" if team_2nd_bat == team_b_id else "p_team_a") or 50.0) / 100.0
                     proj_final = int(round(chase_win_p * effective_target + (1.0 - chase_win_p) * fall_short_total))

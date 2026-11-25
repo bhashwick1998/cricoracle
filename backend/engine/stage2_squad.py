@@ -21,7 +21,7 @@ def calculate_player_pitch_fit(player: Dict[str, Any], venue: Dict[str, Any], ma
     """
     fmt = match_format.upper() if match_format else "T20I"
     pitch_archetype = get_ground_pitch_archetype(venue.get("id", ""), fmt)
-    adaptability = compute_player_5way_pitch_adaptability(player)
+    adaptability = compute_player_5way_pitch_adaptability(player, match_format=fmt)
     return adaptability["pitch_adaptability"].get(pitch_archetype, 70.0)
 
 def select_probable_xi(
@@ -43,7 +43,7 @@ def select_probable_xi(
     # Score each player by composite heuristic
     scored_players = []
     for p in squad:
-        adaptability = compute_player_5way_pitch_adaptability(p)
+        adaptability = compute_player_5way_pitch_adaptability(p, match_format=match_format)
         fit_score = adaptability["pitch_adaptability"].get(pitch_archetype, 70.0)
         sel_weight = float(p.get("recent_selection_weight", 0.8))
         composite_score = (sel_weight * 50.0) + (fit_score * 0.50)
@@ -138,7 +138,7 @@ def evaluate_lineup_power(
         balls_faced = p.get("intl_balls_faced", 500)
         balls_bowled = p.get("intl_balls_bowled", 300)
 
-        adaptability = compute_player_5way_pitch_adaptability(p)
+        adaptability = compute_player_5way_pitch_adaptability(p, match_format=fmt)
         fit_score = adaptability["pitch_adaptability"].get(pitch_archetype, 70.0)
         fit_multiplier = fit_score / 75.0  # Normalized around 1.0
 
@@ -155,8 +155,10 @@ def evaluate_lineup_power(
             bat_rating = ((base_avg / 42.0) * 0.75 + balls_resilience * 0.25) * shrunk_cond_ratio * fit_multiplier * 50.0
 
             if p.get("role") in ["frontline_pacer", "frontline_spinner", "all_rounder", "bowling_all_rounder", "bowler", "pacer", "spinner"]:
-                base_bowl_avg = float(p.get("test_bowling_avg") or p.get("bowling_avg") or 28.0)
-                base_bowl_sr = float(p.get("test_bowling_sr") or 52.0)
+                raw_b_avg = p.get("test_bowling_avg") or p.get("bowling_avg")
+                base_bowl_avg = float(raw_b_avg) if (raw_b_avg is not None and float(raw_b_avg) > 0) else 28.0
+                raw_b_sr = p.get("test_bowling_sr")
+                base_bowl_sr = float(raw_b_sr) if (raw_b_sr is not None and float(raw_b_sr) > 0) else 52.0
                 if balls_bowled < 120 or p.get("is_debutant", 0) == 1:
                     prior = compute_debutant_prior(p.get("role", "all_rounder"), p.get("bowling_style", "NONE"), p.get("league_experience_tier", "none"))
                     base_bowl_avg = compute_empirical_bayes_shrinkage(base_bowl_avg, balls_bowled, 30.0)
@@ -173,8 +175,11 @@ def evaluate_lineup_power(
             bat_rating = ((base_avg / 38.0) * 0.50 + (base_sr / 90.0) * 0.50) * shrunk_cond_ratio * fit_multiplier * 50.0
 
             if p.get("role") in ["frontline_pacer", "frontline_spinner", "all_rounder", "bowling_all_rounder", "bowler", "pacer", "spinner"]:
-                base_econ = float(p.get("odi_economy") or (p.get("t20_economy", 7.8) * 0.72))
-                base_bowl_sr = float(p.get("odi_bowling_sr") or 34.0)
+                raw_odi_econ = p.get("odi_economy")
+                raw_t20_econ = p.get("t20_economy")
+                base_econ = float(raw_odi_econ) if (raw_odi_econ is not None and float(raw_odi_econ) > 0) else (float(raw_t20_econ) * 0.72 if (raw_t20_econ is not None and float(raw_t20_econ) > 0) else 5.4)
+                raw_odi_sr = p.get("odi_bowling_sr")
+                base_bowl_sr = float(raw_odi_sr) if (raw_odi_sr is not None and float(raw_odi_sr) > 0) else 34.0
                 if balls_bowled < 120 or p.get("is_debutant", 0) == 1:
                     prior = compute_debutant_prior(p.get("role", "all_rounder"), p.get("bowling_style", "NONE"), p.get("league_experience_tier", "none"))
                     base_econ = compute_empirical_bayes_shrinkage(base_econ, balls_bowled, 5.4)
@@ -191,8 +196,10 @@ def evaluate_lineup_power(
             bat_rating = ((base_sr / 135.0) * 0.65 + (base_avg / 30.0) * 0.35) * shrunk_cond_ratio * fit_multiplier * 50.0
 
             if p.get("role") in ["frontline_pacer", "frontline_spinner", "all_rounder", "bowling_all_rounder", "bowler", "pacer", "spinner"]:
-                base_econ = float(p.get("t20_economy", 8.2))
-                base_bowl_sr = float(p.get("t20_bowling_sr", 18.0))
+                raw_t20_econ = p.get("t20_economy")
+                base_econ = float(raw_t20_econ) if (raw_t20_econ is not None and float(raw_t20_econ) > 0) else 8.2
+                raw_t20_sr = p.get("t20_bowling_sr")
+                base_bowl_sr = float(raw_t20_sr) if (raw_t20_sr is not None and float(raw_t20_sr) > 0) else 18.0
                 if balls_bowled < 120 or p.get("is_debutant", 0) == 1:
                     prior = compute_debutant_prior(p.get("role", "all_rounder"), p.get("bowling_style", "NONE"), p.get("league_experience_tier", "none"))
                     base_econ = compute_empirical_bayes_shrinkage(base_econ, balls_bowled, prior["t20_economy"])
@@ -245,16 +252,16 @@ def calculate_stage2_squad(
     xi_logit = (delta_bat / 15.0) * 0.50 + (delta_bowl / 15.0) * 0.30 + delta_cond * 0.25 + delta_adaptability * 0.35 + safety_delta
     p_xi_a = 1.0 / (1.0 + math.exp(-xi_logit)) * 100.0
 
-    # Blend 70% Projected XI + 30% Stage 1 Macro
-    p_blended_a = (0.70 * p_xi_a) + (0.30 * p1_macro_prob_a)
-
     if fmt == "TEST":
         p_draw = round(venue.get("test_draw_pct", 0.11) * 100.0, 1)
         decisive_pool = 100.0 - p_draw
+        p1_decisive_share = min(99.5, max(0.5, (p1_macro_prob_a / max(1.0, decisive_pool)) * 100.0))
+        p_blended_a = (0.65 * p_xi_a) + (0.35 * p1_decisive_share)
         p_team_a = round((p_blended_a / 100.0) * decisive_pool, 1)
         p_team_b = round(decisive_pool - p_team_a, 1)
     else:
         p_draw = 0.0
+        p_blended_a = (0.70 * p_xi_a) + (0.30 * p1_macro_prob_a)
         p_team_a = round(p_blended_a, 1)
         p_team_b = round(100.0 - p_team_a, 1)
 

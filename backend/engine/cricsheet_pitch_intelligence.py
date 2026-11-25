@@ -2629,7 +2629,7 @@ def get_country_pitch_phase_rates(
     return res
 
 
-def compute_player_5way_pitch_adaptability(player: Dict[str, Any], recency_weight: float = 0.65) -> Dict[str, Any]:
+def compute_player_5way_pitch_adaptability(player: Dict[str, Any], recency_weight: float = 0.65, match_format: str = "T20I") -> Dict[str, Any]:
     """
     Calculates detailed 0-100 adaptability scores across ALL 5 pitch archetypes
     ('flat', 'green', 'seam', 'bounce', 'spin heavy') for a player.
@@ -2710,12 +2710,34 @@ def compute_player_5way_pitch_adaptability(player: Dict[str, Any], recency_weigh
     career_ratings = calculate_raw_scores(pace_sr, spin_sr, pace_avg, spin_avg, econ, boundary_pct, sub_aff, sena_aff)
     recent_ratings = calculate_raw_scores(recent_pace_sr, recent_spin_sr, recent_pace_avg, recent_spin_avg, recent_econ, recent_boundary_pct, sub_aff, sena_aff)
 
+    # Empirical Bayes Country-Surface Prior:
+    # When player-level foreign condition splits are uncalibrated defaults (1.0/1.0) or low sample size,
+    # anchor strongly toward the player's national team adaptability on each pitch archetype.
+    team_code = player.get("team_id") or player.get("country")
+    country_anchor_weight = 0.0
+    country_arch_scores: Dict[str, float] = {}
+    if team_code:
+        norm_c = normalize_team_code(str(team_code))
+        fmt_up = str(match_format or "T20I").upper()
+        c_career = COUNTRY_PITCH_ADAPTABILITY.get(norm_c, {}).get(fmt_up, {}) or COUNTRY_PITCH_ADAPTABILITY.get(norm_c, {}).get("T20I", {})
+        c_recent = COUNTRY_RECENT_1YR_ADAPTABILITY.get(norm_c, {}).get(fmt_up, {}) or COUNTRY_RECENT_1YR_ADAPTABILITY.get(norm_c, {}).get("T20I", {})
+        if c_career:
+            balls_exp = max(int(player.get("intl_balls_faced") or 0), int(player.get("intl_balls_bowled") or 0))
+            is_default_splits = (abs(sena_aff - 1.0) < 1e-6 and abs(sub_aff - 1.0) < 1e-6)
+            country_anchor_weight = 0.65 if (is_default_splits or balls_exp < 300) else 0.25
+            for arch in PITCH_ARCHETYPES:
+                ca_c = float(c_career.get(arch, 75.0))
+                ca_r = float(c_recent.get(arch, ca_c))
+                country_arch_scores[arch] = (ca_r * recency_weight) + (ca_c * (1.0 - recency_weight))
+
     # Blend Career and Recent 1-Year (default 65% recent weight)
     composite_ratings = {}
     for arch in PITCH_ARCHETYPES:
         c_score = career_ratings[arch]
         r_score = recent_ratings[arch]
         comp = (r_score * recency_weight) + (c_score * (1.0 - recency_weight))
+        if country_anchor_weight > 0.0 and arch in country_arch_scores:
+            comp = comp * (1.0 - country_anchor_weight) + country_arch_scores[arch] * country_anchor_weight
         composite_ratings[arch] = round(comp, 1)
 
     # Composite seam / green archetype (green decks always exhibit seam movement)

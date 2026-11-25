@@ -936,6 +936,11 @@ def apply_pitch_corridor_envelope(
 
         ceil_adj = max(ceil_adj, float(raw_score) + max(0, 10 - w) * 8.0)
         floor_adj = min(floor_adj, float(raw_score))
+        rem_ov_odi = max(0.0, 50.0 - float(overs_completed))
+        if rem_ov_odi <= 0.0:
+            ceil_adj = float(raw_score)
+        else:
+            ceil_adj = min(ceil_adj, float(raw_score) + rem_ov_odi * 12.5)
 
     else:  # T20 / T20I
         bounds = {
@@ -955,9 +960,15 @@ def apply_pitch_corridor_envelope(
 
         ceil_adj = max(ceil_adj, float(raw_score) + max(0, 10 - w) * 4.0)
         floor_adj = min(floor_adj, float(raw_score))
+        rem_ov_t20 = max(0.0, 20.0 - float(overs_completed))
+        if rem_ov_t20 <= 0.0:
+            ceil_adj = float(raw_score)
+        else:
+            ceil_adj = min(ceil_adj, float(raw_score) + rem_ov_t20 * 16.0)
 
     clamped = max(floor_adj, min(ceil_adj, float(raw_score)))
-    clamped = max(float(raw_score), clamped)
+    if f == "TEST":
+        clamped = max(float(raw_score), clamped)
     return float(round(clamped, 1))
 
 
@@ -1011,10 +1022,23 @@ def compute_target_intent_equilibrium(
         else: intent = -0.10 * (w - 1) * par
 
     target_equil = par + (intent * max(0.80, min(1.20, batting_depth_mult)))
-    # Physical conservation law: target equilibrium cannot be lower than current score + remaining wickets minimal contribution
-    if current_score > 0:
-        min_rem_runs = (10 - w) * (9.0 if f == "TEST" else (6.0 if f == "ODI" else 4.0))
-        target_equil = max(target_equil, float(current_score) + min_rem_runs)
+    # Physical conservation law:
+    # - TEST matches are wicket-bounded (no 20/50 over limit).
+    # - ODI / T20I matches are overs-bounded (remaining runs cannot exceed remaining overs capacity).
+    if f == "TEST":
+        if current_score > 0:
+            min_rem_runs = (10 - w) * 9.0
+            target_equil = max(target_equil, float(current_score) + min_rem_runs)
+    else:
+        max_ov = 50.0 if f == "ODI" else 20.0
+        rem_ov = max(0.0, max_ov - float(current_overs))
+        if rem_ov <= 0.0:
+            return float(round(current_score, 1))
+        min_rem_runs = min((10 - w) * (6.0 if f == "ODI" else 4.0), rem_ov * 4.0)
+        max_rem_runs = min((10 - w) * (42.0 if f == "ODI" else 30.0), rem_ov * (12.0 if f == "ODI" else 15.5))
+        if current_score > 0:
+            target_equil = max(float(current_score) + min_rem_runs, target_equil)
+        target_equil = min(float(current_score) + max_rem_runs, target_equil)
     return float(round(target_equil, 1))
 
 
