@@ -42,14 +42,18 @@ export default function HomePage() {
 
   // Fetch matches from API
   const fetchMatches = useCallback(async () => {
+    const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    const directBase = isLocal
+      ? `http://${window.location.hostname}:8000`
+      : "https://cricoracle-backend.onrender.com";
     try {
       let res = await fetch(`/api/matches?_t=${Date.now()}`, {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" }
       });
-      // Fallback directly to public backend if proxy rewrite returns non-200
+      // Fallback directly to backend if proxy rewrite returns non-200
       if (!res.ok) {
-        res = await fetch(`https://cricoracle-backend.onrender.com/api/matches?_t=${Date.now()}`, {
+        res = await fetch(`${directBase}/api/matches?_t=${Date.now()}`, {
           cache: "no-store",
           headers: { "Cache-Control": "no-cache" }
         });
@@ -61,7 +65,7 @@ export default function HomePage() {
     } catch (err) {
       console.error("Failed to fetch matches via proxy, trying direct backend:", err);
       try {
-        const directRes = await fetch(`https://cricoracle-backend.onrender.com/api/matches?_t=${Date.now()}`);
+        const directRes = await fetch(`${directBase}/api/matches?_t=${Date.now()}`);
         if (directRes.ok) {
           const data = await directRes.json();
           setMatches(Array.isArray(data) ? data : []);
