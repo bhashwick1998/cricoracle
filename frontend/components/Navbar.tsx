@@ -66,54 +66,14 @@ export default function Navbar({
           {/* Desktop Navigation Links */}
           <nav className="hidden lg:flex items-center gap-1.5 text-xs font-semibold">
             <button
-              onClick={() => handleSelectTab("ALL")}
-              className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
-                activeTab === "ALL"
-                  ? "bg-cyan-600/20 text-cyan-300 border border-cyan-700/60 shadow-sm"
-                  : "text-slate-300 hover:text-white hover:bg-slate-800/60"
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5 text-cyan-400" />
-              All Fixtures
-            </button>
-
-            <button
               onClick={() => handleSelectTab("LIVE")}
-              className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
-                activeTab === "LIVE"
-                  ? "bg-rose-600/25 text-rose-300 border border-rose-600 shadow-sm"
-                  : "text-slate-300 hover:text-white hover:bg-slate-800/60"
-              }`}
+              className="px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 bg-rose-600/25 text-rose-300 border border-rose-600 shadow-sm"
             >
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
               </span>
-              Live Now &amp; Stumps
-            </button>
-
-            <button
-              onClick={() => handleSelectTab("XI_LOCKED")}
-              className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
-                activeTab === "XI_LOCKED"
-                  ? "bg-amber-600/20 text-amber-300 border border-amber-600/60 shadow-sm"
-                  : "text-slate-300 hover:text-white hover:bg-slate-800/60"
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              Stage 3 (XI &amp; Toss Locked)
-            </button>
-
-            <button
-              onClick={() => handleSelectTab("COMPLETED")}
-              className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
-                activeTab === "COMPLETED"
-                  ? "bg-emerald-600/20 text-emerald-300 border border-emerald-700/60 shadow-sm"
-                  : "text-slate-300 hover:text-white hover:bg-slate-800/60"
-              }`}
-            >
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              Live Results
+              Live Matches
             </button>
           </nav>
 
@@ -170,74 +130,17 @@ export default function Navbar({
         {mobileMenuOpen && (
           <div className="lg:hidden border-t border-slate-800/90 bg-[#090d16]/98 px-4 py-3 space-y-2 animate-fadeIn shadow-2xl">
             <button
-              onClick={() => handleSelectTab("ALL")}
-              className={`w-full px-3 py-2.5 rounded-xl transition flex items-center justify-between text-xs font-semibold ${
-                activeTab === "ALL"
-                  ? "bg-cyan-600/20 text-cyan-300 border border-cyan-700/60"
-                  : "text-slate-300 hover:bg-slate-800/60"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-cyan-400" />
-                <span>All International Fixtures</span>
-              </div>
-              {activeTab === "ALL" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-              )}
-            </button>
-
-            <button
               onClick={() => handleSelectTab("LIVE")}
-              className={`w-full px-3 py-2.5 rounded-xl transition flex items-center justify-between text-xs font-semibold ${
-                activeTab === "LIVE"
-                  ? "bg-rose-600/25 text-rose-300 border border-rose-600"
-                  : "text-slate-300 hover:bg-slate-800/60"
-              }`}
+              className="w-full px-3 py-2.5 rounded-xl transition flex items-center justify-between text-xs font-semibold bg-rose-600/25 text-rose-300 border border-rose-600"
             >
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
                 </span>
-                <span>Live In-Play &amp; Stumps</span>
+                <span>Live Matches</span>
               </div>
-              {activeTab === "LIVE" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-              )}
-            </button>
-
-            <button
-              onClick={() => handleSelectTab("XI_LOCKED")}
-              className={`w-full px-3 py-2.5 rounded-xl transition flex items-center justify-between text-xs font-semibold ${
-                activeTab === "XI_LOCKED"
-                  ? "bg-amber-600/20 text-amber-300 border border-amber-600/60"
-                  : "text-slate-300 hover:bg-slate-800/60"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>Stage 3: XI &amp; Toss Locked</span>
-              </div>
-              {activeTab === "XI_LOCKED" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-              )}
-            </button>
-
-            <button
-              onClick={() => handleSelectTab("COMPLETED")}
-              className={`w-full px-3 py-2.5 rounded-xl transition flex items-center justify-between text-xs font-semibold ${
-                activeTab === "COMPLETED"
-                  ? "bg-emerald-600/20 text-emerald-300 border border-emerald-700/60"
-                  : "text-slate-300 hover:bg-slate-800/60"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>Live Results</span>
-              </div>
-              {activeTab === "COMPLETED" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              )}
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
             </button>
           </div>
         )}

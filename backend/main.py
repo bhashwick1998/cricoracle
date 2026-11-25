@@ -425,6 +425,9 @@ async def get_matches(state: Optional[str] = None):
         if state:
             query += " AND m.state = ?"
             params.append(state)
+        else:
+            # Only serve live in-play matches (extracted from CricAPI) by default
+            query += " AND m.state = 'LIVE_BALL_BY_BALL'"
 
         query += " ORDER BY CASE m.state " \
                  "WHEN 'LIVE_BALL_BY_BALL' THEN 1 " \

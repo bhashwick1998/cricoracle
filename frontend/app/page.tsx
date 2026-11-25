@@ -31,7 +31,7 @@ import {
 export default function HomePage() {
   const [matches, setMatches] = useState<MatchData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<string>("ALL");
+  const [activeTab, setActiveTab] = useState<string>("LIVE");
   const [formatFilter, setFormatFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
@@ -225,33 +225,8 @@ export default function HomePage() {
   const filteredMatches = useMemo(() => {
     return matches
       .filter((m) => {
-        // Safety guard: Strictly omit matches that finished more than 2 days ago (48 hours)
-        const schTime = new Date(m.scheduled_start).getTime();
-        const durationMs = m.format === "TEST" ? 5 * 86400 * 1000 : (m.format === "ODI" ? 8 * 3600 * 1000 : 4 * 3600 * 1000);
-        const matchEndMs = schTime + durationMs;
-        const pastCutoffMs = Date.now() - (2 * 86400 * 1000); // 48 hours ago
-        
-        if (m.state === "COMPLETED" && matchEndMs < pastCutoffMs) {
-          return false;
-        }
-        if (m.state === "XI_AND_TOSS_LOCKED" && matchEndMs < Date.now()) {
-          // Toss locked is strictly for upcoming matches, cannot be a stale past fixture
-          return false;
-        }
-        if ((m.state === "UPCOMING_NO_SQUAD" || m.state === "SQUAD_ANNOUNCED") && matchEndMs < Date.now()) {
-          // Upcoming fixtures cannot be stale past fixtures
-          return false;
-        }
-
-        // State Filter
-        if (activeTab === "LIVE") {
-          if (m.state !== "LIVE_BALL_BY_BALL" || m.is_completed) return false;
-        } else if (activeTab === "COMPLETED") {
-          if (m.state !== "COMPLETED") return false;
-        } else if (activeTab === "XI_LOCKED") {
-          if (m.state !== "XI_AND_TOSS_LOCKED") return false;
-        }
-        // "ALL" shows all verified matches (Live in-play, Stage 3 XI Locked, Stage 2 Squad, Stage 1 Macro, and Completed <= 2 days)
+        // Strictly keep Live In-Play matches only (extracted from CricAPI)
+        if (m.state !== "LIVE_BALL_BY_BALL" || m.is_completed) return false;
 
         // Format Filter
         if (formatFilter !== "ALL" && m.format !== formatFilter) {
@@ -303,51 +278,14 @@ export default function HomePage() {
 
       <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-8 w-full flex-1">
 
-        {/* Mobile Quick-Navigation Category Pills (visible on mobile and tablet) */}
+        {/* Mobile Quick-Navigation Category Pill */}
         <div className="lg:hidden flex items-center gap-2 overflow-x-auto pb-3 -mx-3 px-3 sm:mx-0 sm:px-0 scrollbar-none mb-4">
           <button
-            onClick={() => setActiveTab("ALL")}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 border shrink-0 ${
-              activeTab === "ALL"
-                ? "bg-cyan-600/25 text-cyan-300 border-cyan-500 shadow-sm"
-                : "bg-slate-900/80 text-slate-400 border-slate-800"
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5 text-cyan-400" />
-            <span>All Fixtures</span>
-          </button>
-          <button
             onClick={() => setActiveTab("LIVE")}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 border shrink-0 ${
-              activeTab === "LIVE"
-                ? "bg-rose-600/30 text-rose-300 border-rose-500 shadow-sm"
-                : "bg-slate-900/80 text-slate-400 border-slate-800"
-            }`}
+            className="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 border shrink-0 bg-rose-600/30 text-rose-300 border-rose-500 shadow-sm"
           >
             <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block" />
             <span>Live Now ({liveMatches.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("XI_LOCKED")}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 border shrink-0 ${
-              activeTab === "XI_LOCKED"
-                ? "bg-amber-600/25 text-amber-300 border-amber-500 shadow-sm"
-                : "bg-slate-900/80 text-slate-400 border-slate-800"
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>Stage 3 (XI Locked)</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("COMPLETED")}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 border shrink-0 ${
-              activeTab === "COMPLETED"
-                ? "bg-emerald-600/25 text-emerald-300 border-emerald-500 shadow-sm"
-                : "bg-slate-900/80 text-slate-400 border-slate-800"
-            }`}
-          >
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Results</span>
           </button>
         </div>
 
@@ -399,13 +337,7 @@ export default function HomePage() {
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-2xl font-black text-white tracking-tight">
-                  {activeTab === "LIVE"
-                    ? "Live In-Play & Stumps Matches"
-                    : activeTab === "COMPLETED"
-                    ? "Live Telemetry & In-Play Matches"
-                    : activeTab === "XI_LOCKED"
-                    ? "Stage 3: Confirmed Playing 11 & Toss Locked"
-                    : "Official Senior International Fixtures & Odds"}
+                  Live International Matches (CricAPI)
                 </h2>
                 <span className="text-xs font-bold text-cyan-400 bg-cyan-950/80 px-2.5 py-0.5 rounded-full border border-cyan-800">
                   {filteredMatches.length} Matches
@@ -547,10 +479,10 @@ export default function HomePage() {
           <div className="text-center py-16 bg-slate-900/40 rounded-3xl border border-slate-800">
             <Radio className="w-12 h-12 text-slate-600 mx-auto mb-3" />
             <h3 className="text-base font-bold text-slate-300">
-              {activeTab === "COMPLETED" ? "No completed matches — Live In-Play Only" : "No matches found matching your filters"}
+              No live international matches in play right now
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              {activeTab === "COMPLETED" ? "Completed match results have been purged. System strictly monitors live in-play and upcoming senior international matches." : "Try clearing your search query or selecting a different format."}
+              Monitoring CricAPI for live senior international matches (TEST, ODI, T20I).
             </p>
           </div>
         ) : viewMode === "table" ? (
