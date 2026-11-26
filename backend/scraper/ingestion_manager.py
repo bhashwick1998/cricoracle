@@ -943,11 +943,14 @@ class IngestionManager:
             )
             live_pitch_archetype = pitch_eval["classified_pitch_type"]
 
-            from ..engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability
+            from ..engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability, resolve_venue_dossier_context
             t_a = match.get("team_a_id", "IND")
             t_b = match.get("team_b_id", "NZ")
             t_a_adapt = get_country_pitch_adaptability(t_a, m_fmt, live_pitch_archetype)
             t_b_adapt = get_country_pitch_adaptability(t_b, m_fmt, live_pitch_archetype)
+            v_name_hint = match.get("venue") or v_id or match.get("series_name")
+            v_ctx = resolve_venue_dossier_context(v_name_hint, m_fmt)
+            hist_venue_par = v_ctx.get("venue_par")
 
             from ..engine.live_dew_detector import LiveDewDetector
             cur_ov_calc = live_data["current_overs"] + live_data["current_balls"] / 6.0
@@ -991,7 +994,9 @@ class IngestionManager:
                 pitch_override_reason=pitch_eval.get("override_reason"),
                 is_day_night=bool(match.get("is_day_night", 0)),
                 dew_factor=calibrated_dew_factor,
-                dew_intelligence=dew_eval
+                dew_intelligence=dew_eval,
+                venue_name=v_name_hint,
+                historical_venue_par=hist_venue_par
             )
 
             p_a = res["p_team_a"]
@@ -1824,11 +1829,14 @@ class IngestionManager:
             )
             detected_pitch = pitch_eval["classified_pitch_type"]
 
-            from ..engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability
+            from ..engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability, resolve_venue_dossier_context
             t_a = match.get("team_a_id", "PAK")
             t_b = match.get("team_b_id", "SL")
             t_a_adapt = get_country_pitch_adaptability(t_a, match_format, detected_pitch)
             t_b_adapt = get_country_pitch_adaptability(t_b, match_format, detected_pitch)
+            v_name_hint_cb = match.get("venue") or scraped.get("venue") or v_id or match.get("series_name")
+            v_ctx_cb = resolve_venue_dossier_context(v_name_hint_cb, match_format)
+            hist_venue_par_cb = v_ctx_cb.get("venue_par")
 
             # 5. Full Stage 4 ML Inference with Duel Simulation & Quality Resource Tanks
             from ..engine.live_dew_detector import LiveDewDetector
@@ -1872,7 +1880,9 @@ class IngestionManager:
                 pitch_override_reason=pitch_eval.get("override_reason"),
                 is_day_night=bool(match.get("is_day_night", 0)),
                 dew_factor=calibrated_dew_factor,
-                dew_intelligence=dew_eval
+                dew_intelligence=dew_eval,
+                venue_name=v_name_hint_cb,
+                historical_venue_par=hist_venue_par_cb
             )
 
             if match_format == "TEST" and (is_stumps_val or match.get("is_stumps")):

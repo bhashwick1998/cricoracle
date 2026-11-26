@@ -1878,7 +1878,7 @@ def predict_live_innings_score_monte_carlo(
             "expected_remaining_runs": 0.0
         }
 
-    from .cricsheet_pitch_intelligence import canonicalize_pitch_type
+    from .cricsheet_pitch_intelligence import canonicalize_pitch_type, resolve_venue_dossier_context
     pitch_type = canonicalize_pitch_type(ground_arch)
 
     from .advanced_score_intelligence import (
@@ -1890,13 +1890,23 @@ def predict_live_innings_score_monte_carlo(
         calculate_ground_geometry_wind_factor
     )
 
+    venue_hint = (
+        match_data.get("venue")
+        or match_data.get("venue_name")
+        or match_data.get("venue_id")
+        or match_data.get("venue_profile")
+        or match_data.get("id")
+    )
+    venue_ctx = resolve_venue_dossier_context(venue_hint, fmt)
+    resolved_hist_par = float(match_data.get("historical_venue_par") or venue_ctx.get("venue_par") or 0.0)
+
     # Lever 5: Real-Time Pitch Drift via Online Kalman Filter
     if fmt == "TEST":
-        exp_par_rpo = float(match_data.get("historical_venue_par") or 330.0) / 90.0
+        exp_par_rpo = (resolved_hist_par if resolved_hist_par > 0 else 330.0) / 90.0
     elif fmt == "ODI":
-        exp_par_rpo = float(match_data.get("historical_venue_par") or 265.0) / 50.0
+        exp_par_rpo = (resolved_hist_par if resolved_hist_par > 0 else 270.0) / 50.0
     else:
-        exp_par_rpo = float(match_data.get("historical_venue_par") or 170.0) / 20.0
+        exp_par_rpo = (resolved_hist_par if resolved_hist_par > 0 else 170.0) / 20.0
 
     effective_overs = float(curr_overs + (curr_balls / 6.0))
     drifted_pitch, kalman_drift_mult = apply_kalman_pitch_drift(
@@ -1908,10 +1918,22 @@ def predict_live_innings_score_monte_carlo(
         recent_overs_rpo=match_data.get("recent_overs_rpo"),
         fmt=fmt
     )
+    # In Test 1st innings Day 1, preserve prior pitch archetype against premature early slow-over downgrade to dusty
+    if fmt == "TEST" and int(match_data.get("current_innings") or 1) == 1 and effective_overs < 30.0 and pitch_type == "balanced" and drifted_pitch == "dusty":
+        drifted_pitch = "balanced"
     pitch_type = drifted_pitch
 
     # Lever 6: Asymmetric Ground Geometry & Wind Vector Modulation
-    venue_profile_dict = match_data.get("venue_profile") or match_data
+    raw_vp = match_data.get("venue_profile")
+    if isinstance(raw_vp, dict) and raw_vp.get("boundary_dimensions"):
+        venue_profile_dict = raw_vp
+    elif venue_ctx.get("matched"):
+        venue_profile_dict = {
+            "venue_id": venue_ctx.get("venue_key"),
+            "boundary_dimensions": venue_ctx.get("boundary_dimensions") or {"avg_m": venue_ctx.get("avg_m", 68.0)},
+        }
+    else:
+        venue_profile_dict = raw_vp or match_data
     geom_wind_mult = calculate_ground_geometry_wind_factor(
         venue_profile=venue_profile_dict,
         weather_report=weather_report or match_data.get("weather_report"),
@@ -2111,6 +2133,30 @@ def predict_live_innings_score_monte_carlo(
             exp_r = max(8.0, (base_avg * fit_mult * settled_mult * c_longevity_mult * duel_rpo_factor * bowler_perf_mult * partnership_mult * momentum_mult * kalman_drift_mult * geom_wind_mult) - (runs_so_far * 0.18))
             expected_runs_by_wkt.append(exp_r)
 
+        has_squad_data = len(batting_squad) >= 6
+        crr_test = (curr_score / max(1.0, effective_overs)) if effective_overs >= 2.0 else 3.1
+        # Empirical Test platform survival & CRR adjustment:
+        # Surviving the opening ~15-20 over new-ball window with 0-1 wickets down yields ~410 avg 1st-inn score;
+        # losing 4+ early wickets triggers early lower-order exposure (~190 avg).
+        if curr_test_inn == 1:
+            if curr_wkts <= 1 and effective_overs >= 12.0:
+                platform_mult = 1.28 if curr_wkts == 0 else 1.22
+            elif curr_wkts == 2:
+                platform_mult = 0.98
+            elif curr_wkts == 3:
+                platform_mult = 0.88
+            elif curr_wkts >= 4:
+                platform_mult = max(0.70, 0.80 - (curr_wkts - 4) * 0.06)
+            else:
+                platform_mult = 1.06
+        else:
+            platform_mult = 1.00 if curr_wkts <= 2 else (0.88 if curr_wkts == 3 else 0.78)
+
+        crr_tempo_mult = 1.00
+        if effective_overs >= 8.0 and curr_score > 0:
+            crr_alpha = min(0.28, effective_overs / (effective_overs + 40.0))
+            crr_tempo_mult = max(0.86, min(1.16, 1.0 + crr_alpha * ((crr_test - exp_par_rpo) / max(2.2, exp_par_rpo))))
+
         slots_needed = max(0, wickets_left - len(expected_runs_by_wkt))
         for idx in range(slots_needed):
             if idx < len(dugout_batters):
@@ -2139,7 +2185,15 @@ def predict_live_innings_score_monte_carlo(
                 ref_avg=35.0
             )
             role_w = unified_w
-            base_avg = 48.0 if pitch_type == "flat" else (42.0 if pitch_type in ["bouncy", "balanced"] else 37.0)
+            # Calibrated slot expectation: Day-1 dusty pitches play similar to balanced before Day 3-5 deterioration
+            if pitch_type == "flat":
+                base_avg = 60.0
+            elif pitch_type in ["bouncy", "balanced"]:
+                base_avg = 51.0
+            elif pitch_type == "dusty":
+                base_avg = 49.0 if curr_test_inn == 1 else 36.0
+            else:  # green
+                base_avg = 39.0
             fit_mult = max(0.65, min(1.35, fit / 75.0))
 
             # Render 5-surface pitch adaptability & 22 attributes for dugout
@@ -2151,21 +2205,29 @@ def predict_live_innings_score_monte_carlo(
                 res_w = float(r_profile.get("resilience_bat") or 50.0) / 50.0
                 base_avg *= max(0.85, min(1.20, (dep_w * 0.5 + res_w * 0.5)))
 
-            tank_mult = 0.75 + 0.25 * (batting_tank_pct / 100.0)
-            exp_r = max(2.0, base_avg * role_w * fit_mult * tank_mult * bowler_perf_mult * kalman_drift_mult * geom_wind_mult)
+            # Without explicit squad tank, avoid double-discounting via tank_mult on top of role_w + platform_mult
+            tank_mult = (0.82 + 0.18 * (batting_tank_pct / 100.0)) if has_squad_data else 1.0
+            exp_r = max(2.0, base_avg * role_w * fit_mult * tank_mult * platform_mult * crr_tempo_mult * bowler_perf_mult * kalman_drift_mult * geom_wind_mult)
             expected_runs_by_wkt.append(exp_r)
 
         if pitch_type == "flat":
             wear_mult = 1.20 if match_day <= 2 else (1.08 if match_day == 3 else 0.90)
         elif pitch_type == "dusty":
-            wear_mult = 0.95 if match_day <= 2 else (0.82 if match_day == 3 else (0.68 if match_day == 4 else 0.52))
+            # Day 1-2 first-innings dusty decks bat well before breaking up in Innings 2-4 / Days 3-5
+            if curr_test_inn == 1 and match_day <= 2:
+                wear_mult = 1.03
+            else:
+                wear_mult = 0.88 if match_day <= 2 else (0.76 if match_day == 3 else (0.64 if match_day == 4 else 0.50))
         elif pitch_type in ["green", "seam"]:
-            wear_mult = 0.84 if match_day <= 2 else (0.96 if match_day == 3 else 0.90)
+            wear_mult = 0.88 if match_day <= 2 else (0.98 if match_day == 3 else 0.90)
         elif pitch_type == "bouncy":
-            wear_mult = 0.98 if match_day <= 2 else (0.94 if match_day == 3 else 0.82)
+            wear_mult = 1.00 if match_day <= 2 else (0.94 if match_day == 3 else 0.82)
         else:
-            wear_mult = 1.00 if match_day <= 2 else (0.92 if match_day == 3 else 0.80)
+            wear_mult = 1.02 if match_day <= 2 else (0.92 if match_day == 3 else 0.80)
 
+        # Correlated innings-level regime shock preserves realistic 400-550 right tails & 140-180 collapses
+        regime_sigma = 0.22
+        regime_shock = np.exp(np.random.normal(loc=-0.5 * (regime_sigma ** 2), scale=regime_sigma, size=n_sims))
         sim_remaining = np.zeros(n_sims)
         for exp_r in expected_runs_by_wkt:
             calibrated_mean = max(1.0, exp_r * wear_mult)
@@ -2173,29 +2235,33 @@ def predict_live_innings_score_monte_carlo(
             theta_scale = calibrated_mean / k_shape
             sampled = np.random.gamma(shape=k_shape, scale=theta_scale, size=n_sims)
             sim_remaining += sampled
+        sim_remaining = sim_remaining * regime_shock
 
-        # Include expected Test innings extras (~1.8 runs per remaining wicket)
-        sim_scores = curr_score + sim_remaining + (wickets_left * 1.8)
-        
+        # Test extras scale smoothly (~4.5% of remaining runs + base wicket extras)
+        sim_extras = np.maximum(wickets_left * 1.6, sim_remaining * 0.045)
+        sim_scores = curr_score + sim_remaining + sim_extras
+
         # Bayesian calibration with historical venue par (smooth transition as overs progress in 1st/2nd innings)
-        test_venue_par = float(match_data.get("historical_venue_par") or 0.0)
-        if test_venue_par <= 0:
-            from .cricsheet_pitch_intelligence import get_country_pitch_phase_rates, normalize_team_code
-            bat_c = normalize_team_code(match_data.get("batting_team") or match_data.get("team_a") or "IND")
-            bowl_c = normalize_team_code(match_data.get("bowling_team") or match_data.get("team_b") or "AUS")
-            test_venue_par = get_country_pitch_phase_rates(bat_c, "TEST", pitch_type, opponent_code=bowl_c)["par"]
+        from .cricsheet_pitch_intelligence import get_country_pitch_phase_rates, normalize_team_code
+        bat_c = normalize_team_code(match_data.get("batting_team") or match_data.get("team_a") or "IND")
+        bowl_c = normalize_team_code(match_data.get("bowling_team") or match_data.get("team_b") or "AUS")
+        country_pitch_par = get_country_pitch_phase_rates(bat_c, "TEST", pitch_type, opponent_code=bowl_c)["par"]
+        if resolved_hist_par > 0:
+            test_venue_par = 0.55 * country_pitch_par + 0.45 * resolved_hist_par
+        else:
+            test_venue_par = country_pitch_par
 
-        if test_venue_par > 0 and int(match_data.get("current_innings") or 1) <= 2:
-            test_progress = min(1.0, effective_overs / 120.0)
-            has_squad_data = len(batting_squad) >= 6
-            base_w = 0.65 if has_squad_data else 0.45
+        if test_venue_par > 0 and curr_test_inn <= 2:
+            test_progress = min(1.0, effective_overs / 110.0)
+            base_w = 0.72 if has_squad_data else 0.64
             weight_model = base_w + (1.0 - base_w) * test_progress
             sim_scores = (sim_scores * weight_model) + (test_venue_par * (1.0 - weight_model))
 
-        raw_median = float(np.median(sim_scores))
+        # Balance median and trimmed expectation so right-skewed Test platforms aren't under-predicted
+        raw_point = 0.55 * float(np.median(sim_scores)) + 0.45 * float(np.mean(sim_scores))
         target_equil = compute_target_intent_equilibrium(curr_score, effective_overs, curr_wkts, pitch_type, fmt, 1.0)
-        eq_w = 0.20 if (curr_wkts <= 3 and test_venue_par > 0) else 0.30
-        blended = raw_median * (1.0 - eq_w) + target_equil * eq_w
+        eq_w = 0.16 if curr_wkts <= 2 else 0.24
+        blended = raw_point * (1.0 - eq_w) + target_equil * eq_w
         clamped = apply_pitch_corridor_envelope(blended, pitch_type, fmt, curr_wkts, effective_overs)
         proj_final = max(curr_score, int(round(clamped)))
         proj_low = max(curr_score, int(round(proj_final - 35)))
@@ -2268,14 +2334,13 @@ def predict_live_innings_score_monte_carlo(
         rr_death = phase_dict["death"]
         bench_par = phase_dict["par"]
 
-        # Variable 4: Opponent Bowling Attack Suppression on Pitch Archetype
-        bowl_adapt = get_country_pitch_adaptability(bowl_code, fmt, pitch_type)
-        opp_bowl_diff = (bowl_adapt - 75.0) / 100.0
+        # Variable 4: Opponent Bowling Adjustment (without double-counting OPPONENT_SURFACE_BOWLING_INDEX
+        # already baked into get_country_pitch_phase_rates!)
         w_opp = 1.00 if bowl_code in ICC_FULL_MEMBERS else 0.80
         is_bat_assoc = bat_code not in ICC_FULL_MEMBERS
-        assoc_boost = 0.14 if (w_opp < 1.0 and not is_bat_assoc and pitch_type == "flat") else 0.0
-        assoc_suppress = 0.25 if (is_bat_assoc and w_opp >= 1.0 and pitch_type not in ["flat", "bouncy"]) else 0.0
-        opp_bowl_factor = max(0.65, min(1.30, 1.0 - (opp_bowl_diff * 0.40) + assoc_boost - assoc_suppress))
+        assoc_boost = 0.12 if (w_opp < 1.0 and not is_bat_assoc and pitch_type == "flat") else 0.0
+        assoc_suppress = 0.22 if (is_bat_assoc and w_opp >= 1.0 and pitch_type not in ["flat", "bouncy"]) else 0.0
+        opp_bowl_factor = max(0.70, min(1.20, 1.0 + assoc_boost - assoc_suppress))
 
         if fmt == "ODI":
             pp_balls = max(0, min(60 - total_balls_bowled, balls_left))
@@ -2329,13 +2394,22 @@ def predict_live_innings_score_monte_carlo(
         if fmt == "ODI":
             needed_rec = min(7.0, max(1.5, balls_left / 36.0))
             coverage = min(1.0, rec_batters / max(1.0, needed_rec))
-            wkt_factor = (wickets_left / 10.0) ** 0.25
-            depletion = max(0.35, min(1.10, wkt_factor * (0.45 + 0.55 * coverage)))
+            if curr_wkts <= 1:
+                depletion = 1.04 if curr_wkts == 0 else 1.00
+            elif curr_wkts == 2:
+                depletion = max(0.76, 0.84 + 0.10 * coverage)
+            elif curr_wkts == 3:
+                depletion = max(0.66, 0.72 + 0.12 * coverage)
+            else:
+                wkt_factor = (wickets_left / 10.0) ** 0.32
+                depletion = max(0.45, min(0.82, wkt_factor * (0.58 + 0.42 * coverage)))
         else:
-            needed_rec = min(7.0, max(2.0, balls_left / 16.0))
+            # Modern T20 batting depth to #8 absorbs up to 3 early wickets without drastic scoring collapse
+            needed_rec = min(7.0, max(2.0, balls_left / 18.0))
             coverage = min(1.0, rec_batters / needed_rec)
-            wkt_factor = (wickets_left / 10.0) ** 0.35
-            depletion = max(0.25, min(1.05, wkt_factor * (0.32 + 0.68 * coverage)))
+            wkt_exp = 0.22 if curr_wkts <= 3 else 0.40
+            wkt_factor = (wickets_left / 10.0) ** wkt_exp
+            depletion = max(0.42, min(1.04, wkt_factor * (0.64 + 0.36 * coverage)))
 
         # Variable B: Batter vs Bowler Matchup Matrix (Render.com /api/duel)
         duel_factor = 1.0
@@ -2427,39 +2501,107 @@ def predict_live_innings_score_monte_carlo(
         # Variable G & Lever 4: Dynamic Dew Saturation Curve & Outfield Slickness
         is_dn = int(match_data.get("is_day_night") or 0)
         curr_inn = int(match_data.get("current_innings") or 1)
+        eff_dew_base = float(
+            match_data.get("dew_factor")
+            or (match_data.get("venue_profile", {}).get("dew_factor") if isinstance(match_data.get("venue_profile"), dict) else None)
+            or venue_ctx.get("dew_factor")
+            or 0.25
+        )
         dew_saturation, spin_grip_penalty, extra_dew_runs = calculate_dynamic_dew_factor(
             is_day_night=is_dn,
             current_innings=curr_inn,
             curr_overs=effective_overs,
-            dew_factor_base=float(match_data.get("dew_factor") or (match_data.get("venue_profile", {}).get("dew_factor") if isinstance(match_data.get("venue_profile"), dict) else 0.25) or 0.25),
+            dew_factor_base=eff_dew_base,
             weather_report=weather_report or match_data.get("weather_report"),
             fmt=fmt
         )
 
-        pp_rate = rr_pp * opp_bowl_factor * depletion * duel_factor * striker_pitch_mult * st_settled_mult * st_longevity_mult * bowler_perf_mult * momentum_mult * kalman_drift_mult * geom_wind_mult
-        mid_rate = rr_mid * opp_bowl_factor * depletion * duel_factor * striker_pitch_mult * partnership_mult * tank_mult * tail_penalty * momentum_mult * kalman_drift_mult * geom_wind_mult
-        death_rate = rr_death * opp_bowl_factor * depletion * death_bowler_mult * finisher_death_mult * tank_mult * tail_penalty * momentum_mult * kalman_drift_mult * geom_wind_mult
+        # Avoid double-counting CRR inside both kalman_drift_mult and explicit crr_delta
+        eff_kalman_mult = 1.0 + (kalman_drift_mult - 1.0) * 0.25
+        has_lo_squad = len(batting_squad) >= 6
+        eff_tank_mult = tank_mult if has_lo_squad else (1.00 if curr_wkts <= 1 else (0.96 if curr_wkts <= 3 else 0.90))
 
-        expected_remaining_r = (
-            (pp_balls / 6.0) * pp_rate +
-            (mid_balls / 6.0) * mid_rate +
-            (death_balls / 6.0) * death_rate
+        # Observed Powerplay CRR carry-over (decisive in T20I r=+0.808; tempered by wickets in ODI)
+        crr_lo = (curr_score / max(1.0, effective_overs)) if effective_overs >= 1.5 else rr_pp
+        crr_excess = crr_lo - rr_pp
+        if fmt == "ODI":
+            crr_shrink = min(0.50, effective_overs / (effective_overs + 14.0))
+            wkt_carry_damp = 1.0 if curr_wkts <= 1 else (0.60 if curr_wkts == 2 else (0.35 if curr_wkts == 3 else 0.10))
+            pp_crr_delta = 0.30 * crr_shrink * wkt_carry_damp * max(-1.8, min(2.4, crr_excess))
+            mid_crr_delta = 0.25 * crr_shrink * wkt_carry_damp * max(-1.6, min(2.1, crr_excess))
+            death_crr_delta = 0.20 * crr_shrink * wkt_carry_damp * max(-1.4, min(2.0, crr_excess))
+            # Bouncy tracks with 2+ PP wickets lost suppress middle/death scoring; dusty tracks hold steady
+            surface_adj = 0.90 if (pitch_type == "bouncy" and curr_wkts >= 2) else (1.05 if pitch_type == "dusty" and curr_wkts <= 2 else 1.00)
+        else:  # T20 / T20I
+            crr_shrink = min(0.70, effective_overs / (effective_overs + 2.2))
+            wkt_carry_damp = 0.95 if curr_wkts <= 1 else (0.80 if curr_wkts <= 3 else 0.45)
+            pp_crr_delta = 0.44 * crr_shrink * wkt_carry_damp * max(-2.6, min(3.4, crr_excess))
+            mid_crr_delta = 0.38 * crr_shrink * wkt_carry_damp * max(-2.2, min(3.0, crr_excess))
+            death_crr_delta = 0.32 * crr_shrink * wkt_carry_damp * max(-2.0, min(2.8, crr_excess))
+            surface_adj = 1.05 if (pitch_type == "bouncy" and curr_wkts <= 1) else 0.97 if (pitch_type != "bouncy" and curr_wkts <= 1) else 1.00
+
+        pp_rate = max(2.5, (rr_pp + pp_crr_delta) * opp_bowl_factor * depletion * duel_factor * striker_pitch_mult * st_settled_mult * st_longevity_mult * bowler_perf_mult * momentum_mult * eff_kalman_mult * geom_wind_mult * surface_adj)
+        mid_rate = max(2.5, (rr_mid + mid_crr_delta) * opp_bowl_factor * depletion * duel_factor * striker_pitch_mult * partnership_mult * eff_tank_mult * tail_penalty * momentum_mult * eff_kalman_mult * geom_wind_mult * surface_adj)
+        death_rate = max(3.5, (rr_death + death_crr_delta) * opp_bowl_factor * depletion * death_bowler_mult * finisher_death_mult * eff_tank_mult * tail_penalty * momentum_mult * eff_kalman_mult * geom_wind_mult * surface_adj)
+
+        # Competing All-Out Termination Hazard: teams losing 4+ early wickets get bowled out
+        # before exhausting all scheduled overs; keep 0-3 wkt survival realistic (~96-100% of overs).
+        if fmt == "ODI":
+            if curr_wkts <= 2:
+                mean_balls_surv = float(balls_left) * 3.5
+                k_surv = 24.0
+            elif curr_wkts == 3:
+                mean_balls_surv = float(balls_left) * 2.2
+                k_surv = 16.0
+            else:
+                ov_per_wkt_col = 4.6 if pitch_type == "flat" else 3.8
+                mean_balls_surv = max(24.0, wickets_left * ov_per_wkt_col * 6.0 * (0.72 + 0.28 * coverage))
+                k_surv = 5.0
+        else:
+            if curr_wkts <= 3:
+                mean_balls_surv = float(balls_left) * 3.5
+                k_surv = 24.0
+            else:
+                ov_per_wkt_col = 2.0 if pitch_type == "flat" else 1.65
+                mean_balls_surv = max(12.0, wickets_left * ov_per_wkt_col * 6.0)
+                k_surv = 5.0
+
+        balls_before_all_out = np.random.gamma(shape=k_surv, scale=max(6.0, mean_balls_surv) / k_surv, size=n_sims)
+        sim_balls_played = np.minimum(float(balls_left), balls_before_all_out)
+        sim_pp_balls = np.minimum(float(pp_balls), sim_balls_played)
+        sim_mid_balls = np.minimum(float(mid_balls), np.maximum(0.0, sim_balls_played - float(pp_balls)))
+        sim_death_balls = np.maximum(0.0, sim_balls_played - float(pp_balls) - float(mid_balls))
+
+        sim_phase_runs = (
+            (sim_pp_balls / 6.0) * pp_rate +
+            (sim_mid_balls / 6.0) * mid_rate +
+            (sim_death_balls / 6.0) * death_rate
         ) + extra_dew_runs
+        expected_remaining_r = float(np.mean(sim_phase_runs))
 
-        venue_par = float(match_data.get("historical_venue_par") or bench_par)
+        # Venue Par Anchor conditioned on active pitch archetype (avoid pulling flat/dusty extremes to generic ground mean)
+        if resolved_hist_par > 0:
+            venue_par = 0.72 * bench_par + 0.28 * resolved_hist_par
+        else:
+            venue_par = float(bench_par)
         progress = min(1.0, total_balls_bowled / float(max_balls))
-        weight_model = 0.70 + 0.30 * progress
-        live_model_total = curr_score + expected_remaining_r
-        blended_target = live_model_total * weight_model + venue_par * (1.0 - weight_model)
-        calibrated_remaining = max(0.0, blended_target - curr_score)
+        if curr_wkts >= 4:
+            weight_model = 0.90 + 0.10 * progress
+        elif fmt != "ODI":
+            weight_model = 0.76 + 0.24 * progress
+        else:
+            weight_model = 0.80 + 0.20 * progress
 
-        scale_err = max(5.0, math.sqrt(balls_left) * (1.1 if fmt == "ODI" else 1.35))
-        sim_remaining = np.maximum(0, np.random.normal(loc=calibrated_remaining, scale=scale_err, size=n_sims))
-        sim_scores = curr_score + sim_remaining
+        blended_sim_scores = curr_score + sim_phase_runs
+        rem_scale = max(5.0, math.sqrt(max(1.0, float(np.mean(sim_balls_played)))) * (1.55 if fmt == "ODI" else 1.75))
+        score_noise = np.random.normal(loc=0.0, scale=rem_scale, size=n_sims)
+        sim_scores = np.maximum(float(curr_score), blended_sim_scores * weight_model + venue_par * (1.0 - weight_model) + score_noise)
+        sim_remaining = np.maximum(0.0, sim_scores - curr_score)
 
         raw_median = float(np.median(sim_scores))
-        target_equil = compute_target_intent_equilibrium(curr_score, effective_overs, curr_wkts, pitch_type, fmt, tank_mult)
-        blended = raw_median * 0.65 + target_equil * 0.35
+        target_equil = compute_target_intent_equilibrium(curr_score, effective_overs, curr_wkts, pitch_type, fmt, eff_tank_mult)
+        eq_w = 0.15 if fmt != "ODI" else (0.14 if curr_wkts >= 4 else 0.18)
+        blended = raw_median * (1.0 - eq_w) + target_equil * eq_w
         clamped = apply_pitch_corridor_envelope(blended, pitch_type, fmt, curr_wkts, effective_overs)
         proj_final = max(curr_score, int(round(clamped)))
         proj_low = max(curr_score, int(round(proj_final - (12 if fmt == "T20" else 22))))

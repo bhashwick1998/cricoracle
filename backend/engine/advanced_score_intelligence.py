@@ -297,7 +297,13 @@ def calculate_ground_geometry_wind_factor(
     v_name = ""
     if isinstance(venue_profile, dict):
         b_dims = venue_profile.get("boundary_dimensions") or {}
-        v_name = str(venue_profile.get("venue_id") or venue_profile.get("venue_name") or venue_profile.get("venue") or "").lower()
+        v_name = str(
+            venue_profile.get("venue_id")
+            or venue_profile.get("venue_name")
+            or venue_profile.get("venue")
+            or venue_profile.get("id")
+            or ""
+        ).lower()
     else:
         v_name = str(venue_profile).lower()
 
@@ -305,12 +311,13 @@ def calculate_ground_geometry_wind_factor(
     # Automatic Ground Dossier Resolution if dimensions not explicitly provided
     if (not b_dims or not b_dims.get("avg_m")) and v_name:
         try:
-            from .cricsheet_pitch_intelligence import FORMAT_GROUND_PITCH_DOSSIERS
-            for k, v in FORMAT_GROUND_PITCH_DOSSIERS.items():
-                if k in v_name or v.get("name", "").lower() in v_name or v_name in v.get("name", "").lower():
-                    b_dims = v.get("boundary_dimensions", {})
-                    coords = v.get("coordinates")
-                    break
+            from .cricsheet_pitch_intelligence import FORMAT_GROUND_PITCH_DOSSIERS, resolve_venue_dossier_context
+            v_ctx = resolve_venue_dossier_context(v_name, fmt)
+            if v_ctx.get("matched"):
+                b_dims = v_ctx.get("boundary_dimensions") or {}
+                vk = v_ctx.get("venue_key")
+                if vk and vk in FORMAT_GROUND_PITCH_DOSSIERS:
+                    coords = FORMAT_GROUND_PITCH_DOSSIERS[vk].get("coordinates")
         except Exception:
             b_dims = {}
 
@@ -984,61 +991,106 @@ def compute_target_intent_equilibrium(
     batting_depth_mult: float = 1.0
 ) -> float:
     """
-    Models the strategic Target Adjustment Function T*(t, W) that the batting
-    captain is actively pacing toward:
-    T* = Par_venue + Delta_intent(W_rem, CRR)
-    Blends raw statistical extrapolation toward this human strategic equilibrium.
+    Models the strategic Target Adjustment Function T*(t, W, CRR) that the batting
+    side is actively pacing toward, incorporating both surface equilibrium par and
+    live scoring tempo (Empirical Bayes CRR drift) + wicket collapse conservation.
     """
     arch = (pitch_archetype or "balanced").strip().lower()
     f = fmt.strip().upper()
     w = max(0, min(10, int(wickets_lost)))
+    ov = max(0.0, float(current_overs))
+    crr = (float(current_score) / ov) if ov > 0.5 else 0.0
 
     if f == "TEST":
-        par_map = {"flat": 415.0, "green": 245.0, "dusty": 240.0, "bouncy": 335.0, "balanced": 315.0}
-        par = par_map.get(arch, 315.0)
-        if w <= 1: intent = 0.12 * par
-        elif w == 2: intent = 0.04 * par
-        elif w == 3: intent = -0.05 * par
-        elif w >= 6: intent = -0.65 * par
-        elif w >= 4: intent = -0.35 * par
-        else: intent = -0.12 * (w - 2) * par
-    elif f == "ODI":
-        par_map = {"flat": 310.0, "green": 242.0, "dusty": 236.0, "bouncy": 278.0, "balanced": 268.0}
-        par = par_map.get(arch, 268.0)
-        if w <= 1: intent = 0.12 * par
-        elif w == 2: intent = 0.04 * par
-        elif w == 3: intent = -0.06 * par
-        elif w >= 5: intent = -0.55 * par
-        elif w == 4: intent = -0.38 * par
-        else: intent = -0.12 * (w - 2) * par
-    else:  # T20
-        par_map = {"flat": 185.0, "green": 146.0, "dusty": 144.0, "bouncy": 170.0, "balanced": 164.0}
-        par = par_map.get(arch, 164.0)
-        if w == 0: intent = 0.14 * par
-        elif w == 1: intent = 0.05 * par
-        elif w == 2: intent = -0.03 * par
-        elif w >= 4: intent = -0.45 * par
-        elif w == 3: intent = -0.20 * par
-        else: intent = -0.10 * (w - 1) * par
+        # Day-1 1st-innings equilibrium pars: dusty surfaces play flat early before Day 3-5 wear
+        par_map = {"flat": 430.0, "green": 245.0, "dusty": 310.0, "bouncy": 330.0, "balanced": 325.0}
+        par = par_map.get(arch, 325.0)
+        if w <= 1:
+            intent = (0.18 if ov >= 14.0 else 0.14) * par
+        elif w == 2:
+            intent = 0.02 * par
+        elif w == 3:
+            intent = -0.14 * par
+        elif w >= 6:
+            intent = -0.58 * par
+        elif w >= 4:
+            intent = -0.35 * par
+        else:
+            intent = -0.10 * (w - 2) * par
 
-    target_equil = par + (intent * max(0.80, min(1.20, batting_depth_mult)))
-    # Physical conservation law:
-    # - TEST matches are wicket-bounded (no 20/50 over limit).
-    # - ODI / T20I matches are overs-bounded (remaining runs cannot exceed remaining overs capacity).
-    if f == "TEST":
+        target_equil = par + (intent * max(0.80, min(1.20, batting_depth_mult)))
+        if ov >= 6.0 and current_score > 0:
+            par_rpo = par / 95.0
+            alpha = min(0.35, ov / (ov + 36.0))
+            crr_scale = max(0.82, min(1.22, 1.0 + alpha * ((crr - par_rpo) / max(2.2, par_rpo))))
+            target_equil *= crr_scale
+
         if current_score > 0:
-            min_rem_runs = (10 - w) * 9.0
+            min_rem_runs = (10 - w) * 10.0
             target_equil = max(target_equil, float(current_score) + min_rem_runs)
-    else:
-        max_ov = 50.0 if f == "ODI" else 20.0
-        rem_ov = max(0.0, max_ov - float(current_overs))
+
+    elif f == "ODI":
+        par_map = {"flat": 312.0, "green": 242.0, "dusty": 244.0, "bouncy": 265.0, "balanced": 268.0}
+        par = par_map.get(arch, 268.0)
+        if w <= 1:
+            intent = 0.12 * par
+        elif w == 2:
+            intent = -0.05 * par
+        elif w == 3:
+            intent = -0.16 * par
+        elif w >= 4:
+            # 4+ wickets down early causes severe early all-out risk well before 50 overs
+            intent = -(0.42 + min(0.28, (w - 4) * 0.10)) * par
+        else:
+            intent = -0.12 * (w - 2) * par
+
+        target_equil = par + (intent * max(0.80, min(1.20, batting_depth_mult)))
+        if ov >= 3.0 and current_score > 0:
+            par_rpo = par / 50.0
+            alpha = min(0.55, ov / (ov + 14.0))
+            target_equil = target_equil * (1.0 - alpha) + ((float(current_score) + max(0.0, 50.0 - ov) * max(3.2, crr * (1.0 - 0.05 * max(0, w - 1)))) * alpha)
+
+        rem_ov = max(0.0, 50.0 - ov)
         if rem_ov <= 0.0:
             return float(round(current_score, 1))
-        min_rem_runs = min((10 - w) * (6.0 if f == "ODI" else 4.0), rem_ov * 4.0)
-        max_rem_runs = min((10 - w) * (42.0 if f == "ODI" else 30.0), rem_ov * (12.0 if f == "ODI" else 15.5))
+        min_rem_runs = min((10 - w) * 5.0, rem_ov * 3.2)
+        per_wkt_cap = 18.0 if w >= 4 else 40.0
+        max_rem_runs = min((10 - w) * per_wkt_cap, rem_ov * 12.0)
         if current_score > 0:
             target_equil = max(float(current_score) + min_rem_runs, target_equil)
         target_equil = min(float(current_score) + max_rem_runs, target_equil)
+
+    else:  # T20 / T20I
+        par_map = {"flat": 192.0, "green": 146.0, "dusty": 146.0, "bouncy": 180.0, "balanced": 168.0}
+        par = par_map.get(arch, 168.0)
+        if w == 0:
+            intent = 0.12 * par
+        elif w == 1:
+            intent = 0.05 * par
+        elif w == 2:
+            intent = -0.03 * par
+        elif w == 3:
+            # Modern T20 batting depth to #8 preserves ~148-155 par even at 3 early wickets
+            intent = -0.09 * par
+        else:
+            intent = -(0.36 + min(0.25, (w - 4) * 0.12)) * par
+
+        target_equil = par + (intent * max(0.80, min(1.20, batting_depth_mult)))
+        if ov >= 2.0 and current_score > 0:
+            alpha = min(0.70, ov / (ov + 2.5))
+            crr_proj = float(current_score) + max(0.0, 20.0 - ov) * max(5.0, crr * (1.03 if w <= 1 else (0.94 if w <= 3 else 0.72)))
+            target_equil = target_equil * (1.0 - alpha) + crr_proj * alpha
+
+        rem_ov = max(0.0, 20.0 - ov)
+        if rem_ov <= 0.0:
+            return float(round(current_score, 1))
+        min_rem_runs = min((10 - w) * 4.0, rem_ov * 4.0)
+        per_wkt_cap = 16.0 if w >= 4 else 32.0
+        max_rem_runs = min((10 - w) * per_wkt_cap, rem_ov * 15.5)
+        if current_score > 0:
+            target_equil = max(float(current_score) + min_rem_runs, target_equil)
+        target_equil = min(float(current_score) + max_rem_runs, target_equil)
+
     return float(round(target_equil, 1))
 
 

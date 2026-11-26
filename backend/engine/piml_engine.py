@@ -28,6 +28,7 @@ from backend.engine.cricsheet_pitch_intelligence import (
     get_country_pitch_adaptability,
     get_country_pitch_phase_rates,
     canonicalize_pitch_type,
+    resolve_venue_dossier_context,
     OPPONENT_SURFACE_BOWLING_INDEX
 )
 from backend.engine.advanced_score_intelligence import (
@@ -252,10 +253,106 @@ class CricketPIMLEngine:
                 clf.load_model(clf_path)
                 self.regressors[fmt] = reg
                 self.classifiers[fmt] = clf
-                self.trained_formats.append(fmt)
+                if fmt not in self.trained_formats:
+                    self.trained_formats.append(fmt)
             else:
-                # Train model on synthetic/historical calibration set
+                # Train model on historical matches when available, falling back to calibration generator
                 self._train_format_piml(fmt, reg_path, clf_path)
+
+    def _build_real_training_arrays(self, fmt: str, matches: List[Dict[str, Any]]) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Builds physics-enriched feature matrix and targets (remaining runs, Team-A win label, sample weights) from historical matches."""
+        rows_x = []
+        rows_y_rem = []
+        rows_y_win = []
+        rows_w = []
+        norm_fmt = "T20I" if fmt.upper() in ("T20", "T20I") else fmt.upper()
+        for m in matches:
+            ov = float(m.get("overs_at_20pct") or 0.0)
+            sc = float(m.get("score_at_20pct") or 0.0)
+            wk = int(m.get("wickets_at_20pct") or 0)
+            act_sc = float(m.get("actual_1st_score") or 0.0)
+            ta = str(m.get("team_a") or "IND")
+            tb = str(m.get("team_b") or "AUS")
+            pitch = canonicalize_pitch_type(m.get("pitch_archetype", "balanced"))
+            venue_name = str(m.get("venue") or m.get("match_name") or "")
+            v_ctx = resolve_venue_dossier_context(venue_name, norm_fmt)
+            b_m = float(m.get("boundary_avg_m") or v_ctx.get("avg_m") or 68.0)
+            p0 = float(m.get("p0_a") or 50.0)
+            is_dn = bool(m.get("is_day_night"))
+            dew = float(m.get("dew_factor") if m.get("dew_factor") is not None else (v_ctx.get("dew_factor") or 0.25))
+
+            fv = extract_piml_feature_vector(
+                score=sc, overs=ov, wickets=wk, fmt=("T20" if norm_fmt == "T20I" else norm_fmt),
+                pitch_archetype=pitch, team_a=ta, team_b=tb, venue=venue_name,
+                boundary_avg_m=b_m, is_day_night=is_dn, dew_factor=dew, p0_a=p0
+            )
+            rem = max(0.0, act_sc - sc)
+            winner = m.get("actual_winner")
+            y_w = 1.0 if winner == ta else (0.0 if winner == tb else 0.5)
+            rows_x.append(fv)
+            rows_y_rem.append(rem)
+            rows_y_win.append(y_w)
+            rows_w.append(0.0 if winner not in (ta, tb) else 1.0)
+        return np.array(rows_x, dtype=np.float32), np.array(rows_y_rem, dtype=np.float32), np.array(rows_y_win, dtype=np.float32), np.array(rows_w, dtype=np.float32)
+
+    def fit_on_historical_matches(
+        self,
+        fmt: str,
+        matches: List[Dict[str, Any]],
+        save_to_disk: bool = False
+    ) -> None:
+        """
+        Fits strongly regularized XGBoost Regressor + Classifier directly on real historical match states.
+        Supports strict out-of-sample CV training (save_to_disk=False) as well as saving production models.
+        """
+        f_key = "T20" if fmt.upper() in ("T20", "T20I") else fmt.upper()
+        X, y_rem, y_win, w_win = self._build_real_training_arrays(f_key, matches)
+        if len(X) < 15:
+            reg_path = os.path.join(MODELS_DIR, f"piml_reg_{f_key.lower()}.json")
+            clf_path = os.path.join(MODELS_DIR, f"piml_clf_{f_key.lower()}.json")
+            self._train_format_piml(f_key, reg_path, clf_path)
+            return
+
+        reg = xgb.XGBRegressor(
+            n_estimators=75,
+            max_depth=2,
+            learning_rate=0.05,
+            min_child_weight=6,
+            reg_lambda=18.0,
+            reg_alpha=3.0,
+            subsample=0.80,
+            colsample_bytree=0.80,
+            random_state=42,
+            n_jobs=2
+        )
+        reg.fit(X, y_rem)
+        self.regressors[f_key] = reg
+
+        mask = w_win > 0.5
+        X_clf = X[mask] if np.sum(mask) >= 12 else X
+        y_clf = (y_win[mask] >= 0.5).astype(np.float32) if np.sum(mask) >= 12 else (y_win >= 0.5).astype(np.float32)
+        clf = xgb.XGBClassifier(
+            n_estimators=65,
+            max_depth=2,
+            learning_rate=0.04,
+            min_child_weight=7,
+            reg_lambda=20.0,
+            reg_alpha=2.0,
+            subsample=0.80,
+            colsample_bytree=0.75,
+            random_state=42,
+            n_jobs=2,
+            eval_metric="logloss"
+        )
+        clf.fit(X_clf, y_clf)
+        self.classifiers[f_key] = clf
+
+        if f_key not in self.trained_formats:
+            self.trained_formats.append(f_key)
+
+        if save_to_disk:
+            reg.save_model(os.path.join(MODELS_DIR, f"piml_reg_{f_key.lower()}.json"))
+            clf.save_model(os.path.join(MODELS_DIR, f"piml_clf_{f_key.lower()}.json"))
 
     def _train_format_piml(self, fmt: str, reg_path: str, clf_path: str):
         np.random.seed(42 + len(fmt))
@@ -369,25 +466,30 @@ class CricketPIMLEngine:
         3. Physics conservation and pacing corridor clamping
         4. XGBoost match winner classification with isotonic calibration
         """
-        if fmt not in self.regressors:
+        # Normalize format key ("T20I" -> "T20") for model dictionary lookup
+        f_up = str(fmt or "T20").upper().strip()
+        model_key = "T20" if f_up in ("T20", "T20I") else ("ODI" if "ODI" in f_up else "TEST")
+        if model_key not in self.regressors:
             self.train_or_load_models()
 
-        reg = self.regressors[fmt]
-        clf = self.classifiers[fmt]
+        reg = self.regressors[model_key]
+        clf = self.classifiers[model_key]
 
         pitch = canonicalize_pitch_type(pitch_archetype)
-        max_overs = 90.0 if fmt == "TEST" else (50.0 if fmt == "ODI" else 20.0)
+        v_ctx = resolve_venue_dossier_context(venue, "T20I" if model_key == "T20" else model_key)
+        eff_bm = float(boundary_avg_m if boundary_avg_m != 68.0 else (v_ctx.get("avg_m") or 68.0))
+        max_overs = 90.0 if model_key == "TEST" else (50.0 if model_key == "ODI" else 20.0)
 
         fv = extract_piml_feature_vector(
             score=score,
             overs=overs,
             wickets=wickets,
-            fmt=fmt,
+            fmt=model_key,
             pitch_archetype=pitch,
             team_a=team_a,
             team_b=team_b,
             venue=venue,
-            boundary_avg_m=boundary_avg_m,
+            boundary_avg_m=eff_bm,
             is_day_night=is_day_night,
             dew_factor=dew_factor,
             p0_a=p0_a
@@ -399,11 +501,12 @@ class CricketPIMLEngine:
 
         # PIML Constraint 1: Strict Monotonicity (Remaining runs >= 0)
         rem_overs = max(0.0, max_overs - overs)
-        if wickets >= 10 or rem_overs <= 0:
+        if wickets >= 10 or (model_key != "TEST" and rem_overs <= 0):
             pred_rem_runs = 0.0
+        elif model_key == "TEST":
+            pred_rem_runs = max((10 - wickets) * 8.0, min(550.0, pred_rem_runs))
         else:
-            # Physical run rate ceiling on surface
-            max_phys_rr = 15.0 if fmt == "T20" else (10.0 if fmt == "ODI" else 6.0)
+            max_phys_rr = 15.0 if model_key == "T20" else 10.0
             min_phys_rr = 0.5
             pred_rem_runs = max(rem_overs * min_phys_rr, min(rem_overs * max_phys_rr, pred_rem_runs))
 
@@ -411,36 +514,27 @@ class CricketPIMLEngine:
 
         # PIML Constraint 2: Captain Target Intent Equilibrium Blending
         batting_depth_mult = 1.05 if wickets <= 2 else (0.95 if wickets >= 4 else 1.0)
-        target_equil = compute_target_intent_equilibrium(score, overs, wickets, pitch, fmt, batting_depth_mult)
-        w_target = 0.25 if fmt == "TEST" else (0.30 if fmt == "ODI" else 0.31)
+        target_equil = compute_target_intent_equilibrium(score, overs, wickets, pitch, model_key, batting_depth_mult)
+        w_target = 0.18 if model_key == "TEST" else (0.20 if model_key == "ODI" else 0.16)
         blended_score = raw_final_score * (1.0 - w_target) + target_equil * w_target
 
-        # PIML Constraint 3: Tweedie Distribution & Physics Pacing Corridor Envelope
-        crr = score / max(0.1, overs)
-        tweedie_score = compute_tweedie_mode_score(blended_score, crr, rem_overs, 10 - wickets, pitch)
-        piml_final_score = int(round(apply_pitch_corridor_envelope(tweedie_score, pitch, fmt, wickets, overs)))
+        # PIML Constraint 3: Physics Pacing Corridor Envelope
+        piml_final_score = int(round(apply_pitch_corridor_envelope(blended_score, pitch, model_key, wickets, overs)))
 
         # PIML Milestone Horizon Forecast
-        ms_overs = 28.0 if fmt == "TEST" else (20.0 if fmt == "ODI" else 9.0)
+        ms_overs = 28.0 if model_key == "TEST" else (20.0 if model_key == "ODI" else 9.0)
         ms_rem_ov = max(1.0, ms_overs - overs)
         rem_rpo = pred_rem_runs / max(1.0, rem_overs)
         piml_milestone_score = int(round(score + (ms_rem_ov * rem_rpo * 0.98)))
 
-        # 2. XGBoost Win Probability & Isotonic Calibration
-        win_proba_raw = float(clf.predict_proba(X_in)[0][1]) * 100.0  # Team A win prob %
+        # 2. XGBoost Win Probability & Smooth Calibration
+        win_proba_raw = float(clf.predict_proba(X_in)[0][1]) * 100.0
         prog_ratio = overs / max_overs
-        
-        # Subcontinent spin defending advantage
-        if fmt == "ODI" and pitch == "dusty" and team_a in ["IND", "SL", "AFG", "BAN"]:
-            win_proba_raw += 5.0
-        elif fmt == "ODI" and pitch == "flat" and team_b in ["AUS", "ENG"]:
-            win_proba_raw -= 4.0
-
         prob_a_adj = max(2.0, min(98.0, win_proba_raw))
-        prob_a, prob_b = calibrate_isotonic_win_prob(prob_a_adj, prog_ratio, fmt, team_a=team_a, team_b=team_b, pitch_archetype=pitch)
+        prob_a, prob_b = calibrate_isotonic_win_prob(prob_a_adj, prog_ratio, model_key, team_a=team_a, team_b=team_b, pitch_archetype=pitch)
 
         # Test Draw Threshold Logic
-        if fmt == "TEST" and abs(p0_a - 50.0) <= 20.0 and pitch in ["flat", "balanced"] and wickets <= 2 and overs <= 25.0:
+        if model_key == "TEST" and abs(p0_a - 50.0) <= 14.0 and pitch in ["flat", "balanced"] and wickets <= 1 and overs <= 25.0:
             pred_winner = "DRAW"
         else:
             pred_winner = team_a if prob_a >= prob_b else team_b

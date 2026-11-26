@@ -18,6 +18,9 @@ Provides:
 
 from typing import Dict, Any, List, Tuple, Optional
 import math
+import os
+import re
+import sqlite3
 import numpy as np
 
 # 5 Core Pitch Archetypes
@@ -1994,6 +1997,110 @@ def get_ground_pitch_archetype(venue_id: str, match_format: str = "T20I", match_
     return "flat"
 
 
+_VENUES_DB_CACHE: Optional[List[Dict[str, Any]]] = None
+
+def _load_venues_db_cache() -> List[Dict[str, Any]]:
+    """Lazy-loads venue metrics from SQLite once for low-latency dossier merging."""
+    global _VENUES_DB_CACHE
+    if _VENUES_DB_CACHE is not None:
+        return _VENUES_DB_CACHE
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "cricoracle.db"))
+    rows: List[Dict[str, Any]] = []
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path, timeout=2.0)
+            conn.row_factory = sqlite3.Row
+            rows = [dict(r) for r in conn.execute(
+                "SELECT id, name, city, country, pitch_type, avg_first_innings_score_t20, "
+                "avg_first_innings_score_odi, chase_win_pct, dew_factor, dimensions_avg_boundary_m FROM venues"
+            ).fetchall()]
+            conn.close()
+        except Exception:
+            rows = []
+    _VENUES_DB_CACHE = rows
+    return _VENUES_DB_CACHE
+
+
+def resolve_venue_dossier_context(venue_hint: Optional[str], match_format: str = "T20I") -> Dict[str, Any]:
+    """
+    Resolves format-specific venue par, boundary dimensions, dew factor, and empirical chase win%
+    from FORMAT_GROUND_PITCH_DOSSIERS and SQLite venues table using safe token/city matching.
+    """
+    fmt_raw = str(match_format or "T20I").upper().strip()
+    fmt = "TEST" if "TEST" in fmt_raw else ("ODI" if "ODI" in fmt_raw else "T20I")
+    if not venue_hint:
+        return {"matched": False, "venue_key": None, "venue_par": None, "boundary_dimensions": {}, "avg_m": 68.0, "dew_factor": None, "chase_win_pct": None, "pitch_wear_rate": None}
+
+    raw_lower = str(venue_hint).lower()
+    norm_id = raw_lower.replace("-", "_").replace(" ", "_")
+
+    def _token_in_text(tok: str, text: str) -> bool:
+        t = tok.strip().lower()
+        if not t or len(t) < 3:
+            return False
+        if len(t) <= 4:
+            return bool(re.search(rf"(?:^|[^a-z0-9]){re.escape(t)}(?:$|[^a-z0-9])", text))
+        return t in text
+
+    matched_key = None
+    dossier = FORMAT_GROUND_PITCH_DOSSIERS.get(norm_id)
+    if dossier:
+        matched_key = norm_id
+    else:
+        for k, v in sorted(FORMAT_GROUND_PITCH_DOSSIERS.items(), key=lambda kv: len(kv[0]), reverse=True):
+            v_name = str(v.get("name", "")).lower()
+            v_city = str(v.get("city", "")).lower()
+            if _token_in_text(k.replace("_", " "), raw_lower) or _token_in_text(k, norm_id) or _token_in_text(v_name, raw_lower) or (v_city and _token_in_text(v_city, raw_lower)):
+                matched_key = k
+                dossier = v
+                break
+
+    db_row = None
+    for row in _load_venues_db_cache():
+        rid = str(row.get("id", "")).lower()
+        rname = str(row.get("name", "")).lower()
+        rcity = str(row.get("city", "")).lower()
+        if (matched_key and (rid == matched_key or matched_key in rid)) or _token_in_text(rname, raw_lower) or (rcity and _token_in_text(rcity, raw_lower)):
+            db_row = row
+            break
+
+    if not dossier and not db_row:
+        return {"matched": False, "venue_key": None, "venue_par": None, "boundary_dimensions": {}, "avg_m": 68.0, "dew_factor": None, "chase_win_pct": None, "pitch_wear_rate": None}
+
+    b_dims = dict((dossier or {}).get("boundary_dimensions") or {})
+    avg_m = float(b_dims.get("avg_m") or (db_row or {}).get("dimensions_avg_boundary_m") or 68.0)
+    if "avg_m" not in b_dims:
+        b_dims["avg_m"] = avg_m
+
+    d_par = (dossier or {}).get("format_pars", {}).get(fmt)
+    db_par = None
+    if db_row:
+        if fmt == "ODI":
+            db_par = db_row.get("avg_first_innings_score_odi")
+        elif fmt == "T20I":
+            db_par = db_row.get("avg_first_innings_score_t20")
+
+    if d_par and db_par:
+        venue_par = 0.55 * float(d_par) + 0.45 * float(db_par)
+    elif d_par:
+        venue_par = float(d_par)
+    elif db_par:
+        venue_par = float(db_par)
+    else:
+        venue_par = None
+
+    return {
+        "matched": True,
+        "venue_key": matched_key or ((db_row or {}).get("id")),
+        "venue_par": round(venue_par, 1) if venue_par is not None else None,
+        "boundary_dimensions": b_dims,
+        "avg_m": avg_m,
+        "dew_factor": float(dossier["dew_factor"]) if (dossier and dossier.get("dew_factor") is not None) else ((float(db_row["dew_factor"])) if db_row and db_row.get("dew_factor") is not None else None),
+        "chase_win_pct": float(db_row["chase_win_pct"]) if (db_row and db_row.get("chase_win_pct") is not None) else None,
+        "pitch_wear_rate": float(dossier["pitch_wear_rate"]) if (dossier and dossier.get("pitch_wear_rate") is not None) else None,
+    }
+
+
 def get_country_home_surfaces(country_code: str, match_format: str = "ODI") -> Dict[str, float]:
     """
     Returns 5 Home Surface Baselines (green_home, dusty_home, bouncy_home, flat_home, balanced_home).
@@ -2474,88 +2581,88 @@ OPPONENT_SURFACE_BOWLING_INDEX: Dict[str, Dict[str, float]] = {
 
 TEST_COUNTRY_PITCH_RATES: Dict[str, Dict[str, Dict[str, float]]] = {
     "IND": {
-        "flat":     {"s1": 3.7, "s2": 4.1, "s3": 4.4, "pp": 3.7, "mid": 4.1, "death": 4.4, "par": 435.0},
-        "dusty":    {"s1": 2.5, "s2": 2.8, "s3": 3.0, "pp": 2.5, "mid": 2.8, "death": 3.0, "par": 245.0},
+        "flat":     {"s1": 3.7, "s2": 4.1, "s3": 4.4, "pp": 3.7, "mid": 4.1, "death": 4.4, "par": 440.0},
+        "dusty":    {"s1": 3.0, "s2": 3.4, "s3": 3.6, "pp": 3.0, "mid": 3.4, "death": 3.6, "par": 325.0},
         "green":    {"s1": 2.4, "s2": 2.8, "s3": 3.2, "pp": 2.4, "mid": 2.8, "death": 3.2, "par": 260.0},
-        "bouncy":   {"s1": 3.0, "s2": 3.4, "s3": 3.6, "pp": 3.0, "mid": 3.4, "death": 3.6, "par": 340.0},
-        "balanced": {"s1": 3.1, "s2": 3.4, "s3": 3.5, "pp": 3.1, "mid": 3.4, "death": 3.5, "par": 325.0},
+        "bouncy":   {"s1": 3.0, "s2": 3.4, "s3": 3.6, "pp": 3.0, "mid": 3.4, "death": 3.6, "par": 345.0},
+        "balanced": {"s1": 3.1, "s2": 3.5, "s3": 3.7, "pp": 3.1, "mid": 3.5, "death": 3.7, "par": 335.0},
     },
     "AUS": {
-        "flat":     {"s1": 3.8, "s2": 4.2, "s3": 4.5, "pp": 3.8, "mid": 4.2, "death": 4.5, "par": 445.0},
-        "bouncy":   {"s1": 3.2, "s2": 3.6, "s3": 3.8, "pp": 3.2, "mid": 3.6, "death": 3.8, "par": 355.0},
+        "flat":     {"s1": 3.8, "s2": 4.2, "s3": 4.5, "pp": 3.8, "mid": 4.2, "death": 4.5, "par": 450.0},
+        "bouncy":   {"s1": 3.2, "s2": 3.6, "s3": 3.8, "pp": 3.2, "mid": 3.6, "death": 3.8, "par": 360.0},
         "green":    {"s1": 2.6, "s2": 3.0, "s3": 3.3, "pp": 2.6, "mid": 3.0, "death": 3.3, "par": 275.0},
-        "dusty":    {"s1": 2.5, "s2": 2.7, "s3": 2.9, "pp": 2.5, "mid": 2.7, "death": 2.9, "par": 235.0},
-        "balanced": {"s1": 3.2, "s2": 3.5, "s3": 3.7, "pp": 3.2, "mid": 3.5, "death": 3.7, "par": 335.0},
+        "dusty":    {"s1": 2.9, "s2": 3.2, "s3": 3.4, "pp": 2.9, "mid": 3.2, "death": 3.4, "par": 305.0},
+        "balanced": {"s1": 3.2, "s2": 3.6, "s3": 3.8, "pp": 3.2, "mid": 3.6, "death": 3.8, "par": 345.0},
     },
     "SA": {
-        "flat":     {"s1": 3.5, "s2": 4.0, "s3": 4.3, "pp": 3.5, "mid": 4.0, "death": 4.3, "par": 415.0},
+        "flat":     {"s1": 3.5, "s2": 4.0, "s3": 4.3, "pp": 3.5, "mid": 4.0, "death": 4.3, "par": 420.0},
         "bouncy":   {"s1": 3.1, "s2": 3.4, "s3": 3.7, "pp": 3.1, "mid": 3.4, "death": 3.7, "par": 345.0},
         "green":    {"s1": 2.3, "s2": 2.7, "s3": 3.1, "pp": 2.3, "mid": 2.7, "death": 3.1, "par": 240.0},
-        "dusty":    {"s1": 2.4, "s2": 2.6, "s3": 2.8, "pp": 2.4, "mid": 2.6, "death": 2.8, "par": 230.0},
-        "balanced": {"s1": 3.0, "s2": 3.3, "s3": 3.5, "pp": 3.0, "mid": 3.3, "death": 3.5, "par": 310.0},
+        "dusty":    {"s1": 2.8, "s2": 3.1, "s3": 3.3, "pp": 2.8, "mid": 3.1, "death": 3.3, "par": 295.0},
+        "balanced": {"s1": 3.0, "s2": 3.3, "s3": 3.5, "pp": 3.0, "mid": 3.3, "death": 3.5, "par": 318.0},
     },
     "ENG": {
-        "flat":     {"s1": 3.7, "s2": 4.2, "s3": 4.6, "pp": 3.7, "mid": 4.2, "death": 4.6, "par": 420.0},
+        "flat":     {"s1": 3.7, "s2": 4.2, "s3": 4.6, "pp": 3.7, "mid": 4.2, "death": 4.6, "par": 430.0},
         "green":    {"s1": 2.4, "s2": 2.9, "s3": 3.4, "pp": 2.4, "mid": 2.9, "death": 3.4, "par": 265.0},
-        "dusty":    {"s1": 2.5, "s2": 2.8, "s3": 3.0, "pp": 2.5, "mid": 2.8, "death": 3.0, "par": 245.0},
-        "bouncy":   {"s1": 3.0, "s2": 3.4, "s3": 3.6, "pp": 3.0, "mid": 3.4, "death": 3.6, "par": 330.0},
-        "balanced": {"s1": 3.1, "s2": 3.5, "s3": 3.7, "pp": 3.1, "mid": 3.5, "death": 3.7, "par": 320.0},
+        "dusty":    {"s1": 2.9, "s2": 3.2, "s3": 3.5, "pp": 2.9, "mid": 3.2, "death": 3.5, "par": 305.0},
+        "bouncy":   {"s1": 3.0, "s2": 3.4, "s3": 3.6, "pp": 3.0, "mid": 3.4, "death": 3.6, "par": 335.0},
+        "balanced": {"s1": 3.1, "s2": 3.5, "s3": 3.7, "pp": 3.1, "mid": 3.5, "death": 3.7, "par": 328.0},
     },
     "NZ": {
-        "flat":     {"s1": 3.4, "s2": 3.9, "s3": 4.3, "pp": 3.4, "mid": 3.9, "death": 4.3, "par": 410.0},
+        "flat":     {"s1": 3.4, "s2": 3.9, "s3": 4.3, "pp": 3.4, "mid": 3.9, "death": 4.3, "par": 420.0},
         "green":    {"s1": 2.3, "s2": 2.8, "s3": 3.2, "pp": 2.3, "mid": 2.8, "death": 3.2, "par": 255.0},
-        "dusty":    {"s1": 2.4, "s2": 2.6, "s3": 2.8, "pp": 2.4, "mid": 2.6, "death": 2.8, "par": 235.0},
-        "bouncy":   {"s1": 2.9, "s2": 3.3, "s3": 3.6, "pp": 2.9, "mid": 3.3, "death": 3.6, "par": 325.0},
-        "balanced": {"s1": 3.0, "s2": 3.4, "s3": 3.6, "pp": 3.0, "mid": 3.4, "death": 3.6, "par": 315.0},
+        "dusty":    {"s1": 2.8, "s2": 3.1, "s3": 3.3, "pp": 2.8, "mid": 3.1, "death": 3.3, "par": 295.0},
+        "bouncy":   {"s1": 2.9, "s2": 3.3, "s3": 3.6, "pp": 2.9, "mid": 3.3, "death": 3.6, "par": 330.0},
+        "balanced": {"s1": 3.0, "s2": 3.4, "s3": 3.6, "pp": 3.0, "mid": 3.4, "death": 3.6, "par": 322.0},
     },
     "PAK": {
-        "flat":     {"s1": 3.6, "s2": 4.1, "s3": 4.4, "pp": 3.6, "mid": 4.1, "death": 4.4, "par": 430.0},
-        "dusty":    {"s1": 2.5, "s2": 2.7, "s3": 2.9, "pp": 2.5, "mid": 2.7, "death": 2.9, "par": 240.0},
+        "flat":     {"s1": 3.6, "s2": 4.1, "s3": 4.4, "pp": 3.6, "mid": 4.1, "death": 4.4, "par": 435.0},
+        "dusty":    {"s1": 2.9, "s2": 3.2, "s3": 3.4, "pp": 2.9, "mid": 3.2, "death": 3.4, "par": 305.0},
         "green":    {"s1": 2.3, "s2": 2.7, "s3": 3.0, "pp": 2.3, "mid": 2.7, "death": 3.0, "par": 250.0},
-        "bouncy":   {"s1": 2.8, "s2": 3.2, "s3": 3.5, "pp": 2.8, "mid": 3.2, "death": 3.5, "par": 320.0},
-        "balanced": {"s1": 3.0, "s2": 3.3, "s3": 3.5, "pp": 3.0, "mid": 3.3, "death": 3.5, "par": 310.0},
+        "bouncy":   {"s1": 2.8, "s2": 3.2, "s3": 3.5, "pp": 2.8, "mid": 3.2, "death": 3.5, "par": 325.0},
+        "balanced": {"s1": 3.0, "s2": 3.3, "s3": 3.5, "pp": 3.0, "mid": 3.3, "death": 3.5, "par": 318.0},
     },
     "AFG": {
-        "flat":     {"s1": 3.2, "s2": 3.6, "s3": 3.9, "pp": 3.2, "mid": 3.6, "death": 3.9, "par": 360.0},
-        "dusty":    {"s1": 2.6, "s2": 2.9, "s3": 3.1, "pp": 2.6, "mid": 2.9, "death": 3.1, "par": 265.0},
+        "flat":     {"s1": 3.2, "s2": 3.6, "s3": 3.9, "pp": 3.2, "mid": 3.6, "death": 3.9, "par": 365.0},
+        "dusty":    {"s1": 2.7, "s2": 3.0, "s3": 3.2, "pp": 2.7, "mid": 3.0, "death": 3.2, "par": 285.0},
         "green":    {"s1": 2.0, "s2": 2.4, "s3": 2.7, "pp": 2.0, "mid": 2.4, "death": 2.7, "par": 210.0},
-        "bouncy":   {"s1": 2.4, "s2": 2.8, "s3": 3.1, "pp": 2.4, "mid": 2.8, "death": 3.1, "par": 260.0},
-        "balanced": {"s1": 2.7, "s2": 3.0, "s3": 3.3, "pp": 2.7, "mid": 3.0, "death": 3.3, "par": 285.0},
+        "bouncy":   {"s1": 2.4, "s2": 2.8, "s3": 3.1, "pp": 2.4, "mid": 2.8, "death": 3.1, "par": 265.0},
+        "balanced": {"s1": 2.7, "s2": 3.0, "s3": 3.3, "pp": 2.7, "mid": 3.0, "death": 3.3, "par": 290.0},
     },
     "SL": {
-        "flat":     {"s1": 3.4, "s2": 3.8, "s3": 4.1, "pp": 3.4, "mid": 3.8, "death": 4.1, "par": 395.0},
-        "dusty":    {"s1": 2.6, "s2": 2.9, "s3": 3.1, "pp": 2.6, "mid": 2.9, "death": 3.1, "par": 260.0},
+        "flat":     {"s1": 3.4, "s2": 3.8, "s3": 4.1, "pp": 3.4, "mid": 3.8, "death": 4.1, "par": 400.0},
+        "dusty":    {"s1": 2.9, "s2": 3.2, "s3": 3.4, "pp": 2.9, "mid": 3.2, "death": 3.4, "par": 308.0},
         "green":    {"s1": 2.2, "s2": 2.5, "s3": 2.8, "pp": 2.2, "mid": 2.5, "death": 2.8, "par": 230.0},
-        "bouncy":   {"s1": 2.7, "s2": 3.0, "s3": 3.3, "pp": 2.7, "mid": 3.0, "death": 3.3, "par": 290.0},
-        "balanced": {"s1": 2.9, "s2": 3.2, "s3": 3.4, "pp": 2.9, "mid": 3.2, "death": 3.4, "par": 305.0},
+        "bouncy":   {"s1": 2.7, "s2": 3.0, "s3": 3.3, "pp": 2.7, "mid": 3.0, "death": 3.3, "par": 295.0},
+        "balanced": {"s1": 2.9, "s2": 3.2, "s3": 3.4, "pp": 2.9, "mid": 3.2, "death": 3.4, "par": 310.0},
     },
     "WI": {
-        "flat":     {"s1": 3.3, "s2": 3.7, "s3": 4.0, "pp": 3.3, "mid": 3.7, "death": 4.0, "par": 375.0},
-        "bouncy":   {"s1": 2.9, "s2": 3.2, "s3": 3.5, "pp": 2.9, "mid": 3.2, "death": 3.5, "par": 320.0},
+        "flat":     {"s1": 3.3, "s2": 3.7, "s3": 4.0, "pp": 3.3, "mid": 3.7, "death": 4.0, "par": 380.0},
+        "bouncy":   {"s1": 2.9, "s2": 3.2, "s3": 3.5, "pp": 2.9, "mid": 3.2, "death": 3.5, "par": 325.0},
         "green":    {"s1": 2.2, "s2": 2.6, "s3": 2.9, "pp": 2.2, "mid": 2.6, "death": 2.9, "par": 235.0},
-        "dusty":    {"s1": 2.3, "s2": 2.6, "s3": 2.8, "pp": 2.3, "mid": 2.6, "death": 2.8, "par": 230.0},
-        "balanced": {"s1": 2.8, "s2": 3.1, "s3": 3.4, "pp": 2.8, "mid": 3.1, "death": 3.4, "par": 295.0},
+        "dusty":    {"s1": 2.6, "s2": 2.9, "s3": 3.1, "pp": 2.6, "mid": 2.9, "death": 3.1, "par": 275.0},
+        "balanced": {"s1": 2.8, "s2": 3.1, "s3": 3.4, "pp": 2.8, "mid": 3.1, "death": 3.4, "par": 300.0},
     },
     "BAN": {
-        "flat":     {"s1": 3.2, "s2": 3.6, "s3": 3.9, "pp": 3.2, "mid": 3.6, "death": 3.9, "par": 365.0},
-        "dusty":    {"s1": 2.5, "s2": 2.8, "s3": 3.0, "pp": 2.5, "mid": 2.8, "death": 3.0, "par": 250.0},
+        "flat":     {"s1": 3.2, "s2": 3.6, "s3": 3.9, "pp": 3.2, "mid": 3.6, "death": 3.9, "par": 370.0},
+        "dusty":    {"s1": 2.7, "s2": 3.0, "s3": 3.2, "pp": 2.7, "mid": 3.0, "death": 3.2, "par": 285.0},
         "green":    {"s1": 2.0, "s2": 2.3, "s3": 2.6, "pp": 2.0, "mid": 2.3, "death": 2.6, "par": 205.0},
-        "bouncy":   {"s1": 2.3, "s2": 2.6, "s3": 2.9, "pp": 2.3, "mid": 2.6, "death": 2.9, "par": 240.0},
-        "balanced": {"s1": 2.7, "s2": 3.0, "s3": 3.2, "pp": 2.7, "mid": 3.0, "death": 3.2, "par": 280.0},
+        "bouncy":   {"s1": 2.3, "s2": 2.6, "s3": 2.9, "pp": 2.3, "mid": 2.6, "death": 2.9, "par": 245.0},
+        "balanced": {"s1": 2.7, "s2": 3.0, "s3": 3.2, "pp": 2.7, "mid": 3.0, "death": 3.2, "par": 285.0},
     },
     "IRE": {
-        "flat":     {"s1": 3.0, "s2": 3.4, "s3": 3.7, "pp": 3.0, "mid": 3.4, "death": 3.7, "par": 340.0},
+        "flat":     {"s1": 3.0, "s2": 3.4, "s3": 3.7, "pp": 3.0, "mid": 3.4, "death": 3.7, "par": 345.0},
         "green":    {"s1": 2.2, "s2": 2.5, "s3": 2.8, "pp": 2.2, "mid": 2.5, "death": 2.8, "par": 225.0},
-        "dusty":    {"s1": 2.0, "s2": 2.3, "s3": 2.5, "pp": 2.0, "mid": 2.3, "death": 2.5, "par": 200.0},
-        "bouncy":   {"s1": 2.4, "s2": 2.7, "s3": 3.0, "pp": 2.4, "mid": 2.7, "death": 3.0, "par": 250.0},
-        "balanced": {"s1": 2.6, "s2": 2.9, "s3": 3.2, "pp": 2.6, "mid": 2.9, "death": 3.2, "par": 270.0},
+        "dusty":    {"s1": 2.4, "s2": 2.7, "s3": 2.9, "pp": 2.4, "mid": 2.7, "death": 2.9, "par": 250.0},
+        "bouncy":   {"s1": 2.4, "s2": 2.7, "s3": 3.0, "pp": 2.4, "mid": 2.7, "death": 3.0, "par": 255.0},
+        "balanced": {"s1": 2.6, "s2": 2.9, "s3": 3.2, "pp": 2.6, "mid": 2.9, "death": 3.2, "par": 275.0},
     },
     "ZIM": {
-        "flat":     {"s1": 3.0, "s2": 3.4, "s3": 3.7, "pp": 3.0, "mid": 3.4, "death": 3.7, "par": 340.0},
-        "dusty":    {"s1": 2.2, "s2": 2.5, "s3": 2.7, "pp": 2.2, "mid": 2.5, "death": 2.7, "par": 220.0},
+        "flat":     {"s1": 3.0, "s2": 3.4, "s3": 3.7, "pp": 3.0, "mid": 3.4, "death": 3.7, "par": 345.0},
+        "dusty":    {"s1": 2.5, "s2": 2.8, "s3": 3.0, "pp": 2.5, "mid": 2.8, "death": 3.0, "par": 260.0},
         "green":    {"s1": 2.1, "s2": 2.4, "s3": 2.7, "pp": 2.1, "mid": 2.4, "death": 2.7, "par": 215.0},
         "bouncy":   {"s1": 2.5, "s2": 2.8, "s3": 3.1, "pp": 2.5, "mid": 2.8, "death": 3.1, "par": 260.0},
-        "balanced": {"s1": 2.6, "s2": 2.9, "s3": 3.2, "pp": 2.6, "mid": 2.9, "death": 3.2, "par": 275.0},
+        "balanced": {"s1": 2.6, "s2": 2.9, "s3": 3.2, "pp": 2.6, "mid": 2.9, "death": 3.2, "par": 280.0},
     }
 }
 
