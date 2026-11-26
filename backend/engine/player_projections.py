@@ -1928,7 +1928,7 @@ def predict_live_innings_score_monte_carlo(
     # 1. TEST MATCH 4-INNINGS MONTE CARLO PREDICTOR
     if fmt == "TEST":
         match_day = int(match_data.get("stumps_day") or (1 + int(curr_overs // 90)))
-        batting_tank_pct = float(match_data.get("batting_tank_pct") or 70.0)
+        batting_tank_pct = float(match_data.get("batting_tank_pct") or max(35.0, 100.0 * (wickets_left / 10.0)))
 
         # Separate Active Batters vs Dugout Batters
         active_batters = []
@@ -2139,7 +2139,7 @@ def predict_live_innings_score_monte_carlo(
                 ref_avg=35.0
             )
             role_w = unified_w
-            base_avg = 42.0 if pitch_type == "flat" else 33.0
+            base_avg = 48.0 if pitch_type == "flat" else (42.0 if pitch_type in ["bouncy", "balanced"] else 37.0)
             fit_mult = max(0.65, min(1.35, fit / 75.0))
 
             # Render 5-surface pitch adaptability & 22 attributes for dugout
@@ -2174,7 +2174,8 @@ def predict_live_innings_score_monte_carlo(
             sampled = np.random.gamma(shape=k_shape, scale=theta_scale, size=n_sims)
             sim_remaining += sampled
 
-        sim_scores = curr_score + sim_remaining
+        # Include expected Test innings extras (~1.8 runs per remaining wicket)
+        sim_scores = curr_score + sim_remaining + (wickets_left * 1.8)
         
         # Bayesian calibration with historical venue par (smooth transition as overs progress in 1st/2nd innings)
         test_venue_par = float(match_data.get("historical_venue_par") or 0.0)
@@ -2186,12 +2187,15 @@ def predict_live_innings_score_monte_carlo(
 
         if test_venue_par > 0 and int(match_data.get("current_innings") or 1) <= 2:
             test_progress = min(1.0, effective_overs / 120.0)
-            weight_model = 0.65 + 0.35 * test_progress
+            has_squad_data = len(batting_squad) >= 6
+            base_w = 0.65 if has_squad_data else 0.45
+            weight_model = base_w + (1.0 - base_w) * test_progress
             sim_scores = (sim_scores * weight_model) + (test_venue_par * (1.0 - weight_model))
 
         raw_median = float(np.median(sim_scores))
         target_equil = compute_target_intent_equilibrium(curr_score, effective_overs, curr_wkts, pitch_type, fmt, 1.0)
-        blended = raw_median * 0.65 + target_equil * 0.35
+        eq_w = 0.20 if (curr_wkts <= 3 and test_venue_par > 0) else 0.30
+        blended = raw_median * (1.0 - eq_w) + target_equil * eq_w
         clamped = apply_pitch_corridor_envelope(blended, pitch_type, fmt, curr_wkts, effective_overs)
         proj_final = max(curr_score, int(round(clamped)))
         proj_low = max(curr_score, int(round(proj_final - 35)))

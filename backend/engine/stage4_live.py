@@ -1392,7 +1392,9 @@ def run_live_vectorized_monte_carlo(
         bat_c = normalize_team_code(team_a if team_a_batting else team_b)
         bowl_c = normalize_team_code(team_b if team_a_batting else team_a)
         phase_rates = get_country_pitch_phase_rates(bat_c, fmt, pitch_type, opponent_code=bowl_c)
-        rr_pp, rr_mid, rr_death, chase_par = phase_rates["pp"], phase_rates["mid"], phase_rates["death"], phase_rates["par"]
+        chase_phase_rates = get_country_pitch_phase_rates(bowl_c, fmt, pitch_type, opponent_code=bat_c)
+        rr_pp, rr_mid, rr_death = phase_rates["pp"], phase_rates["mid"], phase_rates["death"]
+        chase_par = chase_phase_rates["par"]
 
         if fmt == "ODI":
             pp_cutoff = max(2.0, round(revised_match_overs * 0.20, 1))
