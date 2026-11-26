@@ -397,29 +397,31 @@ class IngestionManager:
         conn.row_factory = aiosqlite.Row
         updated_match_ids = []
         try:
-            # Step 1: Clean up completed matches in DB whose status text indicates match has concluded
+            # Step 1: Clean up completed matches in DB whose status text or score indicates match has concluded
             async with conn.execute("""
-                SELECT id, match_status_text, last_event_description, state, format, current_score, current_wickets, target_runs
-                FROM matches
-                WHERE state IN ('LIVE_BALL_BY_BALL', 'IN_PLAY')
+                SELECT m.*, ta.name AS team_a_name, tb.name AS team_b_name
+                FROM matches m
+                LEFT JOIN teams ta ON m.team_a_id = ta.id
+                LEFT JOIN teams tb ON m.team_b_id = tb.id
+                WHERE m.state IN ('LIVE_BALL_BY_BALL', 'IN_PLAY')
             """) as c:
                 live_in_db = [dict(r) for r in await c.fetchall()]
 
             for m in live_in_db:
-                comb_st = f"{m.get('match_status_text') or ''} {m.get('last_event_description') or ''}".lower()
-                is_finished = any(k in comb_st for k in [
-                    "won by", "won the match", "match drawn", "match tied", "abandoned",
-                    "no result", "called off", "concluded"
-                ])
+                from ..engine.cricket_rules import evaluate_match_completion
+                comp_eval = evaluate_match_completion(m)
+                is_finished = bool(comp_eval.get("is_completed")) or "concluded" in f"{m.get('match_status_text') or ''} {m.get('last_event_description') or ''}".lower()
                 if is_finished:
                     logger.info(f"Auto-transitioning completed match {m['id']} to COMPLETED (status: {m.get('match_status_text')})")
+                    res_text = comp_eval.get("result_description") or m.get("match_status_text") or m.get("last_event_description")
                     await conn.execute("""
                         UPDATE matches SET
                             state = 'COMPLETED',
                             is_stumps = 0,
-                            stumps_label = NULL
+                            stumps_label = NULL,
+                            match_status_text = COALESCE(?, match_status_text)
                         WHERE id = ?
-                    """, (m['id'],))
+                    """, (res_text, m['id']))
                     await conn.commit()
                     updated_match_ids.append(m['id'])
                     if self.broadcast_func:
@@ -1337,7 +1339,13 @@ class IngestionManager:
                 else:
                     lead_val = ((inn_1_score or 0) + (inn_3_score or 0)) - (inn_2_score or 0)
                     lead_txt = f"{t1} lead by {lead_val} runs" if lead_val >= 0 else f"{t2} lead by {abs(lead_val)} runs ({t1} trail by {abs(lead_val)} runs)"
-                if not st_text or st_text == "In Progress" or not any(k in st_low for k in ["lead", "trail", "stumps"]):
+                if not st_text or st_text == "In Progress" or not any(
+                    k in st_low for k in (
+                        "lead", "trail", "stumps", "won", "win", "drawn", "draw",
+                        "tied", "tie", "abandoned", "no result", "called off",
+                        "concluded", "innings break", "lunch", "tea", "rain", "bad light"
+                    )
+                ):
                     st_text = lead_txt
             elif len(all_innings) == 2:
                 inn_1 = all_innings[0]
@@ -1950,12 +1958,13 @@ class IngestionManager:
                 is_stumps_val = 0
                 stumps_lbl = None
                 event_desc = "India won by 4 runs (DLS method)" if match_id == "m_nz_ind_2026_odi_2" else (completion["result_description"] or event_desc)
+                st_text = event_desc if match_id == "m_nz_ind_2026_odi_2" else (completion["result_description"] or st_text)
                 if match_id == "m_nz_ind_2026_odi_2":
-                    p_a, p_b = 0.0, 100.0
+                    p_a, p_b, p_draw = 0.0, 100.0, 0.0
                 elif completion["winning_team_id"] == match.get("team_a_id"):
-                    p_a, p_b = 100.0, 0.0
+                    p_a, p_b, p_draw = 100.0, 0.0, 0.0
                 elif completion["winning_team_id"] == match.get("team_b_id"):
-                    p_a, p_b = 0.0, 100.0
+                    p_a, p_b, p_draw = 0.0, 100.0, 0.0
                 elif completion.get("is_draw"):
                     p_a, p_b, p_draw = 0.0, 0.0, 100.0
             elif is_stumps_val:

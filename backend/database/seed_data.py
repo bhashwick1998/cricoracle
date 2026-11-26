@@ -636,17 +636,17 @@ async def seed_database():
                 0.0, 0.0, "Pace and carry at Hagley Oval favors fast bowling quartets",
                 0.0, "Scheduled 2nd Test at Hagley Oval"
             ),
-            # 17. SA vs BAN - 2nd Test (Centurion, SuperSport Park)
+            # 17. SA vs BAN - 2nd Test (Centurion, SuperSport Park - Concluded)
             (
                 "m_ban_sa_2026_test_1", "Bangladesh Tour of South Africa 2026 - 2nd Test", "TEST",
                 "SA", "BAN", "centurion", "2026-11-23T08:00:00Z", 0,
-                "LIVE_BALL_BY_BALL", "SA", "bowl",
-                1, 44, 3, 14, 0, None,
-                "m_haque_ban", "t_hridoy_ban", "a_nortje_sa",
-                53.6, 42.4, 52.0, 52.0, 52.0,
+                "COMPLETED", "BAN", "bat",
+                3, 184, 10, 49, 4, None,
+                "k_ahmed_ban", "m_haque_ban", "m_jansen_sa",
+                100.0, 0.0, 52.0, 52.0, 52.0,
                 295, 250, 340,
-                0.0, 0.0, "SuperSport Park pace & steep bounce rigorously tests top-order technique against Rabada and Nortje",
-                0.0, "Day 1: 2nd Session • Bangladesh 44/3 (14.0 ov)"
+                0.0, 0.0, "SuperSport Park pace & steep bounce",
+                0.0, "South Africa won by an innings and 219 runs"
             )
         ]
 

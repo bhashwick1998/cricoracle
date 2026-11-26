@@ -55,28 +55,27 @@ class CricDataManager:
             logger.info(f"Serving CricData from cache (age: {round(now - self._last_fetch_time, 1)}s < {self.cache_ttl}s TTL)")
             return self._cached_data
 
-        keys_to_try = [self.api_key]
-        if self.fallback_api_key and self.fallback_api_key != self.api_key:
-            keys_to_try.append(self.fallback_api_key)
+        paid_key = (os.environ.get("CRICAPI_KEY_PAID") or self.api_key or PRIMARY_CRICAPI_KEY).strip()
+        if self.api_key and self.api_key != PRIMARY_CRICAPI_KEY:
+            paid_key = self.api_key.strip()
 
-        for attempt_key in keys_to_try:
-            url = f"https://api.cricapi.com/v1/cricScore?apikey={attempt_key}"
-            logger.info(f"Hitting CricketData.org API (cricScore) using key ending in ...{attempt_key[-6:]}")
-            req = urllib.request.Request(url, headers={"User-Agent": "CricOracle/2.0 (Backend Server)"})
-            try:
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    if data.get("status") == "success":
-                        self._cached_data = data
-                        self._last_fetch_time = now
-                        self._save_disk_cache(data)
-                        info = data.get("info", {})
-                        logger.info(f"CricData API success! Hits today: {info.get('hitsToday')} / {info.get('hitsLimit')}")
-                        return data
-                    else:
-                        logger.warning(f"CricData API returned status: {data.get('status')} with key ending in ...{attempt_key[-6:]}")
-            except Exception as e:
-                logger.warning(f"Error calling CricData API with key ending in ...{attempt_key[-6:]}: {e}")
+        url = f"https://api.cricapi.com/v1/cricScore?apikey={paid_key}"
+        logger.info(f"Hitting CricketData.org API (cricScore) using paid key ending in ...{paid_key[-6:]}")
+        req = urllib.request.Request(url, headers={"User-Agent": "CricOracle/2.0 (Backend Server)"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if data.get("status") == "success":
+                    self._cached_data = data
+                    self._last_fetch_time = now
+                    self._save_disk_cache(data)
+                    info = data.get("info", {})
+                    logger.info(f"CricData API success! Hits today: {info.get('hitsToday')} / {info.get('hitsLimit')}")
+                    return data
+                else:
+                    logger.warning(f"CricData API returned status: {data.get('status')} ({data.get('reason')}) with paid key ending in ...{paid_key[-6:]}")
+        except Exception as e:
+            logger.warning(f"Error calling CricData API with paid key ending in ...{paid_key[-6:]}: {e}")
 
         return self._cached_data or {}
 

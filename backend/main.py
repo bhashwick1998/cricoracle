@@ -3239,8 +3239,8 @@ def get_cricapi_playing_xi(cricapi_id: str, force: bool = False):
 @app.get("/api/cricapi/live")
 def get_cricapi_live_scores(force: bool = False):
     """
-    Fetches official senior international live scores from CricketData.org (cricScore single-hit).
-    Cached with 35-second TTL to maximize freshness within the 2,000 hits/day quota.
+    Fetches official senior international live scores from CricketData.org exclusively via CRICAPI_KEY_PAID.
+    Cached with 60s active / 90s idle / 5m break TTL to fit comfortably inside the 2,000 hits/day paid quota.
     """
     return cricapi_provider.fetch_live_senior_scores(force=force)
 
@@ -3260,42 +3260,16 @@ def api_parse_cricapi_match_state(payload: Dict[str, Any]):
 @app.post("/api/cricapi/sync-live")
 async def sync_cricapi_live_to_matches():
     """
-    Syncs live senior international matches from CricketData.org into the local database,
-    updating scores, overs, wickets, and Stage 4 live predictions with unconstrained raw WPA.
+    Syncs live senior international matches from CricketData.org (paid key) into SQLite,
+    inserting new live matches, updating scores/overs/wickets, and recalculating Stage 4 win probabilities.
     """
-    live_matches = cricapi_provider.fetch_live_senior_scores()
+    cricapi_provider.fetch_live_senior_scores(force=True)
     conn = await get_db()
     try:
-        updated = []
-        for m in live_matches:
-            c1, c2 = m.get("team_a_code"), m.get("team_b_code")
-            if set([c1, c2]) == {"AUS", "ENG"}:
-                match_id = "m_aus_eng_2026_odi_3"
-                st_text = m.get("status_text", "")
-                aus_sc = m.get("team_a_score" if c1 == "AUS" else "team_b_score", {})
-                eng_sc = m.get("team_b_score" if c1 == "AUS" else "team_a_score", {})
-                if aus_sc.get("runs") and aus_sc.get("runs") > 0:
-                    await conn.execute("""
-                        UPDATE matches SET
-                            current_score = ?,
-                            current_wickets = ?,
-                            current_overs = ?,
-                            current_balls = ?,
-                            innings_2_score = ?,
-                            innings_2_wickets = ?,
-                            innings_2_overs = ?,
-                            match_status_text = ?
-                        WHERE id = ?
-                    """, (
-                        aus_sc["runs"], aus_sc["wickets"], aus_sc["overs"], aus_sc["balls"],
-                        aus_sc["runs"], aus_sc["wickets"], f"{aus_sc['overs']}.{aus_sc['balls']}",
-                        f"{st_text} ({aus_sc['runs']}/{aus_sc['wickets']}, {aus_sc['overs']}.{aus_sc['balls']} ov)",
-                        match_id
-                    ))
-                    await conn.commit()
-                    updated.append(match_id)
+        updated = await cricapi_provider.sync_live_senior_mens_matches(conn)
         if updated:
             invalidate_match_response_cache(None)
+        live_matches = getattr(cricapi_provider, "_cached_live_scores", []) or []
         return {"status": "success", "updated_matches": updated, "live_count": len(live_matches)}
     finally:
         await conn.close()

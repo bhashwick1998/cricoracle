@@ -36,11 +36,25 @@ class CricApiSquadProvider:
         self.api_key = self.primary_key
         self.call_count_today = 0
         self.exhausted_keys = set()
+        self._paid_exhausted_until: Dict[str, float] = {}
         self.last_reset_day = datetime.now(timezone.utc).date()
         self.cached_match_squads: Dict[str, Dict[str, Any]] = {}
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         }
+
+    def get_paid_live_api_key(self) -> str:
+        """
+        Always returns the paid CricAPI key (CRICAPI_KEY_PAID) for live match scores.
+        Never rotates live score fetching onto the free fallback key.
+        """
+        if self.primary_key and self.primary_key != PRIMARY_CRICAPI_KEY:
+            return self.primary_key.strip()
+        env_paid = (os.environ.get("CRICAPI_KEY_PAID") or "").strip()
+        if env_paid:
+            self.primary_key = env_paid
+            return env_paid
+        return (self.primary_key or PRIMARY_CRICAPI_KEY).strip()
 
     def get_active_api_key(self) -> str:
         """Returns the primary key, or fallback key if primary is exhausted."""
@@ -52,15 +66,18 @@ class CricApiSquadProvider:
             return self.fallback_key
         return self.primary_key
 
-    def mark_key_exhausted(self, key: str, reason: str = "quota reached"):
-        """Marks a key as exhausted for the current day and logs the rotation."""
+    def mark_key_exhausted(self, key: str, reason: str = "quota reached", cooldown_seconds: float = 300.0):
+        """Marks a key as exhausted and applies a cooldown before retrying."""
         self.exhausted_keys.add(key)
+        if not hasattr(self, "_paid_exhausted_until"):
+            self._paid_exhausted_until = {}
+        self._paid_exhausted_until[key] = time.time() + cooldown_seconds
         logger.warning(f"CricAPI key ...{key[-6:]} marked exhausted ({reason}).")
         if key == self.primary_key and self.fallback_key:
-            logger.info(f"Failing over to fallback CricAPI key ...{self.fallback_key[-6:]}")
+            logger.debug(f"Non-live helpers may fail over to fallback key ...{self.fallback_key[-6:]}; live scores remain pinned to paid key.")
             self.api_key = self.fallback_key
 
-    def _check_and_increment_quota(self) -> bool:
+    def _check_and_increment_quota(self, key: Optional[str] = None, force: bool = False) -> bool:
         """
         Quota Guard: Checks daily usage and resets at UTC midnight.
         Returns True if call is permitted; False if quota threshold reached.
@@ -69,14 +86,25 @@ class CricApiSquadProvider:
         if today != self.last_reset_day:
             self.call_count_today = 0
             self.exhausted_keys.clear()
+            if hasattr(self, "_paid_exhausted_until"):
+                self._paid_exhausted_until.clear()
             self.api_key = self.primary_key
             self.last_reset_day = today
             logger.info("CricAPI quota counter reset for new UTC day.")
 
-        active_k = self.get_active_api_key()
-        if active_k in self.exhausted_keys and len(self.exhausted_keys) >= 2:
-            logger.warning("All CricAPI keys exhausted today. Preserving system stability.")
-            return False
+        target_k = key if key is not None else self.get_active_api_key()
+        if key is not None:
+            if not force and target_k in self.exhausted_keys:
+                until = getattr(self, "_paid_exhausted_until", {}).get(target_k, 0.0)
+                if time.time() < until:
+                    logger.warning(
+                        f"Paid CricAPI key ...{target_k[-6:]} is in quota cooldown. Serving cached live scores."
+                    )
+                    return False
+        else:
+            if target_k in self.exhausted_keys and len(self.exhausted_keys) >= 2:
+                logger.warning("All CricAPI keys exhausted today. Preserving system stability.")
+                return False
 
         if self.call_count_today >= MAX_DAILY_CALLS:
             logger.warning(
@@ -85,7 +113,7 @@ class CricApiSquadProvider:
             return False
 
         self.call_count_today += 1
-        logger.info(f"CricAPI call approved (key ...{active_k[-6:]}). Daily usage: {self.call_count_today}/{MAX_DAILY_CALLS}")
+        logger.info(f"CricAPI call approved (key ...{target_k[-6:]}). Daily usage: {self.call_count_today}/{MAX_DAILY_CALLS}")
         return True
 
     def is_match_about_to_start(self, scheduled_start_iso: str, window_minutes: int = 45) -> bool:
@@ -474,14 +502,16 @@ class CricApiSquadProvider:
 
     def parse_score_string(self, score_str: str, is_completed: bool = False, is_declared: bool = False) -> Dict[str, Any]:
         """
-        Parses scores like '220/9 (43.5)', '328/10 (48.3)', or '91 (33.3)' into runs, wickets, overs, balls.
-        Correctly recognizes all-out conditions where the wickets number is omitted in cricket convention (e.g. '91 (33.3 ov)').
+        Parses scores like '220/9 (43.5)', '328/10 (48.3)', '91 (33.3)', or compound Test strings '91 & 184/4 (50.0)'.
+        Returns the latest/active innings runs, wickets, overs, and balls.
         """
         runs, wickets, overs, balls = 0, 0, 0, 0
         if not score_str:
             return {"runs": 0, "wickets": 0, "overs": 0, "balls": 0}
         try:
             s_clean = score_str.strip()
+            if "&" in s_clean:
+                s_clean = s_clean.split("&")[-1].strip()
             s_low = s_clean.lower()
             is_all_out = any(k in s_low for k in ["all out", "all-out", "allout"])
 
@@ -520,43 +550,74 @@ class CricApiSquadProvider:
 
     def fetch_live_senior_scores(self, force: bool = False) -> List[Dict[str, Any]]:
         """
-        Fetches live senior international scores.
+        Fetches live senior international scores exclusively using CRICAPI_KEY_PAID
+        (/v1/cricScore single-hit endpoint). Never falls back to the free key for live scores.
 
-        PRIMARY: Uses /v1/currentMatches (Fantasy API endpoint, 2,000 hits/day quota).
-        FALLBACK: Uses /v1/cricScore (Generic API endpoint, 100 hits/day) if Fantasy fails.
-
-        Caches for 35 seconds in active play, extended to 5 minutes during breaks.
-        Falls back to in-memory cache on any network or quota error.
+        Caches for 60 seconds in active play (<= 1,440 hits/day < 2,000 paid tier),
+        90 seconds when no senior matches are live, and 5 minutes during breaks.
         """
         now = time.time()
-        if not force and hasattr(self, "_cached_live_scores_time"):
-            if (now - self._cached_live_scores_time) < 90 and getattr(self, "_cached_live_scores", None):
-                return getattr(self, "_cached_live_scores", [])
-
         SENIOR_INTL = {"PAK", "SL", "IND", "NZ", "AUS", "ENG", "SA", "RSA", "WI", "BAN", "AFG", "ZIM", "IRE"}
+        CODE_NORMALIZE = {"RSA": "SA", "IR": "IRE", "NET": "NED"}
+        EXCLUSION_KEYWORDS = (
+            "U19", "UNDER-19", "UNDER 19", "WOMEN", " W [", " LIONS",
+            " A [", " A VS", " EMERGING", " LEGENDS", " MASTERS"
+        )
+        FINISHED_KEYWORDS = (
+            "won by", "win by", "won the match", "take the game by", "takes the game by",
+            "drawn", "match draw", "tied", "match tie", "abandoned", "no result",
+            "called off", "concluded"
+        )
 
         def parse_matches_list(raw_matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-            live_matches = []
+            live_matches: List[Dict[str, Any]] = []
+            finished_matches: List[Dict[str, Any]] = []
             for m in raw_matches:
                 t1 = (m.get("t1") or "").upper()
                 t2 = (m.get("t2") or "").upper()
+                ser_up = (m.get("series") or "").upper()
+                if any(w in t1 or w in t2 or w in ser_up for w in EXCLUSION_KEYWORDS):
+                    continue
+                if t1.rstrip().endswith(" A") or t2.rstrip().endswith(" A"):
+                    continue
+
                 m1 = re.search(r"\[([A-Z]{2,4})\]", t1) or re.search(r"\b([A-Z]{2,3})\b", t1)
                 m2 = re.search(r"\[([A-Z]{2,4})\]", t2) or re.search(r"\b([A-Z]{2,3})\b", t2)
-                c1 = m1.group(1) if m1 else t1[:3]
-                c2 = m2.group(1) if m2 else t2[:3]
+                c1_raw = m1.group(1) if m1 else t1[:3]
+                c2_raw = m2.group(1) if m2 else t2[:3]
+                c1 = CODE_NORMALIZE.get(c1_raw, c1_raw)
+                c2 = CODE_NORMALIZE.get(c2_raw, c2_raw)
 
-                is_senior_a = c1 in SENIOR_INTL and not any(w in t1 for w in ["U19", "WOMEN", " LIONS", " A ["])
-                is_senior_b = c2 in SENIOR_INTL and not any(w in t2 for w in ["U19", "WOMEN", " LIONS", " A ["])
-
-                if is_senior_a and is_senior_b:
-                    ms = m.get("ms")
+                if c1 in SENIOR_INTL and c2 in SENIOR_INTL:
+                    ms = (m.get("ms") or "").strip().lower()
                     status_text = m.get("status") or ""
                     st_low = status_text.lower()
-                    if any(k in st_low for k in ["won by", "drawn", "tied", "abandoned", "no result", "starts at"]):
+
+                    is_result = (ms == "result") or any(k in st_low for k in FINISHED_KEYWORDS)
+                    if is_result:
+                        finished_matches.append({
+                            "cricapi_id": m.get("id"),
+                            "series_name": m.get("series"),
+                            "team_a_code": c1,
+                            "team_b_code": c2,
+                            "team_a_name": m.get("t1"),
+                            "team_b_name": m.get("t2"),
+                            "status_text": status_text,
+                            "match_type": m.get("matchType"),
+                            "date_time_gmt": m.get("dateTimeGMT"),
+                        })
                         continue
+
+                    if ms == "fixture" or any(k in st_low for k in ("starts at", "match yet to begin", "toss at")):
+                        continue
+
                     is_live = bool(
                         ms == "live"
-                        or any(k in st_low for k in ["need ", "opt to ", "day 1", "day 2", "day 3", "day 4", "day 5", "trail by", "lead by", "stumps", "session"])
+                        or any(k in st_low for k in (
+                            "need ", "opt to ", "day 1", "day 2", "day 3", "day 4", "day 5",
+                            "trail by", "lead by", "stumps", "session", "rain", "wet outfield",
+                            "lunch", "tea", "drinks", "innings break"
+                        ))
                     )
                     if is_live:
                         t1_score = self.parse_score_string(m.get("t1s", ""))
@@ -573,74 +634,155 @@ class CricApiSquadProvider:
                             "raw_t1s": m.get("t1s"),
                             "raw_t2s": m.get("t2s"),
                             "status_text": status_text,
-                            "match_type": m.get("matchType")
+                            "match_type": m.get("matchType"),
+                            "date_time_gmt": m.get("dateTimeGMT"),
+                            "ms": ms,
                         })
+            self._cached_finished_scores = finished_matches
             return live_matches
 
-        # Check in-memory cache TTL (35 seconds to maximize freshness within 2,000 hits/day quota)
-        # Extended to 5 minutes if ALL active matches are in a break (saves ~8-10 hits per break period)
-        if not force and getattr(self, "_cached_live_scores", None):
-            cached_t = getattr(self, "_cached_live_scores_time", 0.0)
-            cached_scores = self._cached_live_scores
-            # If every live match is in a break, extend cache TTL to 5 minutes
+        cached_scores = getattr(self, "_cached_live_scores", None)
+        cached_t = getattr(self, "_cached_live_scores_time", 0.0)
+        if not force and cached_scores is not None:
             all_in_break = bool(cached_scores) and all(
                 self.is_match_in_break(m.get("status_text", "")) for m in cached_scores
             )
-            cache_ttl = 300.0 if all_in_break else 35.0
+            if all_in_break:
+                cache_ttl = 300.0
+            elif not cached_scores:
+                cache_ttl = 90.0
+            else:
+                cache_ttl = 60.0
             if (now - cached_t) < cache_ttl:
                 if all_in_break:
                     logger.debug("All live matches are in a break. Using cached scores (5-min break TTL).")
-                return self._cached_live_scores
+                return cached_scores
 
-        if not self._check_and_increment_quota():
-            logger.warning("CricAPI quota guard active. Using cached live scores.")
+        paid_k = self.get_paid_live_api_key()
+        if not self._check_and_increment_quota(key=paid_k, force=force):
             self._last_fetch_succeeded = False
-            return getattr(self, "_cached_live_scores", [])
-
-        active_k = self.get_active_api_key()
-        keys_to_attempt = [active_k]
-        if self.fallback_key and self.fallback_key not in keys_to_attempt:
-            keys_to_attempt.append(self.fallback_key)
+            if cached_scores is not None and (now - cached_t) < 600.0:
+                return cached_scores
+            return []
 
         self._last_fetch_succeeded = False
-        for attempt_k in keys_to_attempt:
-            url = f"https://api.cricapi.com/v1/cricScore?apikey={attempt_k}"
-            try:
-                with httpx.Client(timeout=8.0, headers=self.headers) as client:
-                    resp = client.get(url)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        info = data.get("info", {})
-                        if data.get("status") == "success":
-                            raw_matches = data.get("data", [])
-                            live_matches = parse_matches_list(raw_matches)
-                            self._cached_live_scores = live_matches
-                            self._cached_live_scores_time = now
-                            self._last_fetch_succeeded = True
-                            logger.info(f"Successfully fetched and cached {len(live_matches)} live matches from CricAPI (key ...{attempt_k[-6:]}, hits: {info.get('hitsToday')}/{info.get('hitsLimit')}).")
-                            return live_matches
-                        else:
-                            # Quota or key issue
-                            reason = data.get("reason") or "status not success"
-                            self.mark_key_exhausted(attempt_k, reason)
-                    elif resp.status_code in (401, 402, 429):
-                        self.mark_key_exhausted(attempt_k, f"HTTP {resp.status_code}")
-            except Exception as e:
-                logger.error(f"Error calling live CricAPI scores with key ...{attempt_k[-6:]}: {e}")
+        url = f"https://api.cricapi.com/v1/cricScore?apikey={paid_k}"
+        try:
+            with httpx.Client(timeout=8.0, headers=self.headers) as client:
+                resp = client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    info = data.get("info", {})
+                    if data.get("status") == "success":
+                        self.exhausted_keys.discard(paid_k)
+                        if hasattr(self, "_paid_exhausted_until"):
+                            self._paid_exhausted_until.pop(paid_k, None)
+                        raw_matches = data.get("data", [])
+                        live_matches = parse_matches_list(raw_matches)
+                        self._cached_live_scores = live_matches
+                        self._cached_live_scores_time = now
+                        self._last_fetch_succeeded = True
+                        logger.info(
+                            f"Successfully fetched and cached {len(live_matches)} live matches from CricAPI "
+                            f"(paid key ...{paid_k[-6:]}, hits: {info.get('hitsToday')}/{info.get('hitsLimit')})."
+                        )
+                        return live_matches
+                    else:
+                        reason = data.get("reason") or "status not success"
+                        self.mark_key_exhausted(paid_k, reason, cooldown_seconds=300.0)
+                elif resp.status_code in (401, 402, 429):
+                    self.mark_key_exhausted(paid_k, f"HTTP {resp.status_code}", cooldown_seconds=300.0)
+                else:
+                    logger.warning(f"Live CricAPI cricScore returned HTTP {resp.status_code} (paid key ...{paid_k[-6:]}).")
+        except Exception as e:
+            logger.error(f"Error calling live CricAPI scores with paid key ...{paid_k[-6:]}: {e}")
 
-        return getattr(self, "_cached_live_scores", [])
+        if cached_scores is not None and (now - cached_t) < 600.0:
+            return cached_scores
+        return []
+
+    async def _ensure_and_insert_live_match(
+        self,
+        conn,
+        m: Dict[str, Any],
+        c1: str,
+        c2: str,
+        fmt: str,
+        cricapi_mid: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Creates a LIVE_BALL_BY_BALL match record when CricAPI reports a new live match."""
+        team_colors = {
+            "IND": "#0284c7", "AUS": "#EAB308", "ENG": "#DC2626", "SA": "#16A34A",
+            "PAK": "#059669", "NZ": "#27272A", "WI": "#831843", "SL": "#1D4ED8",
+            "BAN": "#047857", "AFG": "#0056B3", "ZIM": "#DC2626", "IRE": "#15803D",
+        }
+        home_venues = {
+            "IND": "wankhede", "AUS": "mcg", "ENG": "lords", "SA": "centurion",
+            "NZ": "wellington", "PAK": "rawalpindi", "SL": "premadasa",
+            "BAN": "mirpur", "WI": "dubai_dsc", "AFG": "sharjah",
+            "ZIM": "sharjah", "IRE": "lords",
+        }
+        for code, raw_name in ((c1, m.get("team_a_name")), (c2, m.get("team_b_name"))):
+            clean_name = re.sub(r"\s*\[.*?\]\s*", "", str(raw_name or "")).strip() or code
+            await conn.execute("""
+                INSERT OR IGNORE INTO teams (id, name, short_name, color)
+                VALUES (?, ?, ?, ?)
+            """, (code, clean_name, code, team_colors.get(code, "#3B82F6")))
+
+        async with conn.execute("SELECT id, name, city FROM venues") as cur:
+            venue_rows = await cur.fetchall()
+        if not venue_rows:
+            await conn.execute("""
+                INSERT OR IGNORE INTO venues (id, name, city, country, region_cluster, pitch_type)
+                VALUES ('wellington', 'International Ground', 'Wellington', 'International', 'sena', 'balanced')
+            """)
+            v_id = "wellington"
+        else:
+            venue_ids = [r[0] for r in venue_rows]
+            ser_low = str(m.get("series_name") or "").lower()
+            v_id = next(
+                (r[0] for r in venue_rows if r[2] and str(r[2]).lower() in ser_low),
+                None,
+            )
+            if not v_id:
+                candidate = home_venues.get(c1) or home_venues.get(c2)
+                v_id = candidate if candidate in venue_ids else venue_ids[0]
+
+        series_name = m.get("series_name") or f"{c1} vs {c2} {fmt}"
+        scheduled = m.get("date_time_gmt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        status_text = m.get("status_text") or f"Live {fmt} via CricAPI"
+        p_draw_init = 33.3 if fmt == "TEST" else 0.0
+        par_init = 340 if fmt == "TEST" else (275 if fmt == "ODI" else 170)
+
+        await conn.execute("""
+            INSERT OR IGNORE INTO matches (
+                id, series_name, format, team_a_id, team_b_id, venue_id,
+                scheduled_start, is_day_night, state, p_team_a, p_team_b, p_draw,
+                p1_macro, p2_squad, p0_pre_match, par_score_projected,
+                par_score_min, par_score_max, delta_squad_shift, delta_toss_shift,
+                match_status_text, last_wpa_swing, last_event_description
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?,
+                ?, 1, 'LIVE_BALL_BY_BALL', 50.0, 50.0, ?,
+                50.0, 50.0, 50.0, ?,
+                ?, ?, 0.0, 0.0,
+                ?, 0.0, ?
+            )
+        """, (
+            cricapi_mid, series_name, fmt, c1, c2, v_id,
+            scheduled, p_draw_init, par_init,
+            par_init - 25, par_init + 25,
+            status_text, status_text,
+        ))
+        async with conn.execute("SELECT * FROM matches WHERE id = ?", (cricapi_mid,)) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
 
     async def sync_live_senior_mens_matches(self, conn) -> List[str]:
         """
         Automatically discovers and synchronizes live senior men's international matches
-        between the Top 20 ICC teams from CricketData.org into the SQLite database.
-        Always updates scores, overs, wickets dynamically from the API feed.
-
-        API Hit Saving Strategy:
-        - During known match breaks (Lunch / Tea / Drinks / Innings Break / Stumps),
-          polling is throttled to once every 5 minutes (instead of every 35 seconds),
-          saving ~100-250 API hits per Test match day during breaks.
-        - The 2,000 hits/day plan allows ~57 polls/hour in active play.
+        between the Top 20 ICC teams from CricketData.org into the SQLite database using CRICAPI_KEY_PAID.
+        Always updates existing matches and auto-inserts newly discovered live matches.
         """
         TOP_20_MAP = {
             "IND": "IND", "AUS": "AUS", "ENG": "ENG", "SA": "SA", "RSA": "SA",
@@ -667,15 +809,61 @@ class CricApiSquadProvider:
             t2_sc = m.get("team_b_score", {})
             st_low = status_text.lower()
 
-            # --- Break-Aware API Hit Saving ---
-            # During lunch / tea / innings break / stumps / drinks, suppress DB update
-            # but allow once-per-5-min check to detect end of break efficiently.
-            if self.is_match_in_break(status_text):
+            mt_low = str(m.get("match_type") or "").strip().lower()
+            ser_low = str(m.get("series_name") or "").strip().lower()
+            if "test" in mt_low or "test" in ser_low:
+                fmt = "TEST"
+            elif "t20" in mt_low or "t20" in ser_low:
+                fmt = "T20I"
+            else:
+                fmt = "ODI"
+
+            raw_cid = re.sub(r"[^a-zA-Z0-9_-]", "", str(m.get("cricapi_id") or ""))
+            cricapi_mid = (
+                f"m_cricapi_{c1.lower()}_{c2.lower()}_{raw_cid[:16]}"
+                if raw_cid else f"m_cricapi_{c1.lower()}_{c2.lower()}_{fmt.lower()}"
+            )
+
+            is_finished = any(k in st_low for k in [
+                "won by", "win by", "won the match", "take the game by", "takes the game by",
+                "match drawn", "drawn", "match tied", "tied", "abandoned", "no result", "concluded"
+            ])
+
+            # 1. Exact check by deterministic CricAPI match ID (never re-open a completed match)
+            db_m = None
+            newly_created = False
+            async with conn.execute("SELECT * FROM matches WHERE id = ?", (cricapi_mid,)) as cur:
+                exact_row = await cur.fetchone()
+            if exact_row:
+                exact_dict = dict(exact_row)
+                if exact_dict.get("state") == "COMPLETED":
+                    continue
+                db_m = exact_dict
+
+            # 2. Match existing non-completed DB fixture for same team pair and format
+            if not db_m:
+                async with conn.execute("""
+                    SELECT * FROM matches
+                    WHERE ((team_a_id = ? AND team_b_id = ?) OR (team_a_id = ? AND team_b_id = ?))
+                      AND state != 'COMPLETED'
+                      AND UPPER(format) = ?
+                    ORDER BY CASE WHEN state = 'LIVE_BALL_BY_BALL' THEN 0 ELSE 1 END, scheduled_start ASC LIMIT 1
+                """, (c1, c2, c2, c1, fmt)) as cur:
+                    row = await cur.fetchone()
+                    if row:
+                        db_m = dict(row)
+
+            # 3. Auto-insert brand-new live match from CricAPI so it is shown live
+            if not db_m and not is_finished:
+                db_m = await self._ensure_and_insert_live_match(conn, m, c1, c2, fmt, cricapi_mid)
+                newly_created = bool(db_m)
+
+            # --- Break-Aware API Hit Saving (only throttle already-live existing rows) ---
+            if db_m and not newly_created and db_m.get("state") == "LIVE_BALL_BY_BALL" and self.is_match_in_break(status_text):
                 break_key = f"_break_poll_{c1}_{c2}"
                 last_break_poll = getattr(self, break_key, 0.0)
-                import time as _time
-                now_ts = _time.time()
-                if (now_ts - last_break_poll) < 300.0:  # 5-minute throttle during breaks
+                now_ts = time.time()
+                if (now_ts - last_break_poll) < 300.0:
                     logger.debug(
                         f"Match {c1} vs {c2} is in break ({status_text[:40]}). "
                         "Skipping sync to conserve API hits (throttled to 5-min cadence)."
@@ -683,21 +871,7 @@ class CricApiSquadProvider:
                     continue
                 setattr(self, break_key, now_ts)
 
-            is_finished = any(k in st_low for k in [
-                "won by", "won the match", "match drawn", "match tied", "abandoned", "no result", "concluded"
-            ])
-
-            # Find matching fixture in database
-            async with conn.execute("""
-                SELECT * FROM matches
-                WHERE ((team_a_id = ? AND team_b_id = ?) OR (team_a_id = ? AND team_b_id = ?))
-                  AND state != 'COMPLETED'
-                ORDER BY CASE WHEN state = 'LIVE_BALL_BY_BALL' THEN 0 ELSE 1 END, scheduled_start ASC LIMIT 1
-            """, (c1, c2, c2, c1)) as cur:
-                db_m = await cur.fetchone()
-
             if db_m:
-                db_m = dict(db_m)
                 mid = db_m["id"]
                 if is_finished:
                     logger.info(f"CricAPI match concluded: {mid} ({status_text}). Marking COMPLETED.")
@@ -860,6 +1034,7 @@ class CricApiSquadProvider:
                             overs_lost = ?,
                             weather_condition = ?,
                             match_status_text = ?,
+                            last_event_description = COALESCE(NULLIF(NULLIF(last_event_description, ''), 'Match scheduled'), ?),
                             is_stumps = ?,
                             stumps_day = ?,
                             stumps_label = ?,
@@ -874,7 +1049,7 @@ class CricApiSquadProvider:
                         WHERE id = ?
                     """, (
                         inn_val, runs, wkts, ovs, balls, tgt_runs, dls_tgt, ov_lost, weather_cond,
-                        status_text, is_stumps, s_day, s_lbl,
+                        status_text, status_text, is_stumps, s_day, s_lbl,
                         i1_team, i1_runs, i1_wkts, i1_ovs,
                         i2_team, i2_runs, i2_wkts, i2_ovs,
                         mid
@@ -892,12 +1067,12 @@ class CricApiSquadProvider:
                     wicket_fell    = (wkts > prev_wkts)  # Strictly monotone wicket counter
                     innings_changed = (inn_val != int(db_m.get("current_innings") or 1))
 
-                    if score_changed or wicket_fell or innings_changed:
+                    if newly_created or score_changed or wicket_fell or innings_changed:
                         try:
-                            from ..engine.stage4_live import calculate_stage4_live
-                            from ..engine.pitch_history_model import get_historical_venue_profile
-                            from ..engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability
-                            from ..engine.live_pitch_classifier import LivePitchClassifier
+                            from ...engine.stage4_live import calculate_stage4_live
+                            from ...engine.pitch_history_model import get_historical_venue_profile
+                            from ...engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability
+                            from ...engine.live_pitch_classifier import LivePitchClassifier
 
                             match_format = db_m.get("format", "TEST")
                             v_id = db_m.get("venue_id", "")
@@ -990,7 +1165,7 @@ class CricApiSquadProvider:
 
                     updated_matches.append(mid)
 
-        # Prune any LIVE_BALL_BY_BALL match in DB that CricAPI no longer reports as live
+        # Prune/complete any LIVE_BALL_BY_BALL match in DB that CricAPI no longer reports as live
         if getattr(self, "_last_fetch_succeeded", False):
             active_pairs = set()
             for m in live_scores:
@@ -1000,20 +1175,64 @@ class CricApiSquadProvider:
                     active_pairs.add((c1, c2))
                     active_pairs.add((c2, c1))
 
-            async with conn.execute("SELECT id, team_a_id, team_b_id FROM matches WHERE state IN ('LIVE_BALL_BY_BALL', 'IN_PLAY')") as cur:
+            finished_by_pair: Dict[tuple, Dict[str, Any]] = {}
+            for fm in getattr(self, "_cached_finished_scores", []) or []:
+                fc1 = TOP_20_MAP.get(fm.get("team_a_code", ""))
+                fc2 = TOP_20_MAP.get(fm.get("team_b_code", ""))
+                if fc1 and fc2:
+                    finished_by_pair[(fc1, fc2)] = fm
+                    finished_by_pair[(fc2, fc1)] = fm
+
+            async with conn.execute("""
+                SELECT m.*, ta.name AS team_a_name, tb.name AS team_b_name
+                FROM matches m
+                LEFT JOIN teams ta ON m.team_a_id = ta.id
+                LEFT JOIN teams tb ON m.team_b_id = tb.id
+                WHERE m.state IN ('LIVE_BALL_BY_BALL', 'IN_PLAY')
+            """) as cur:
                 db_live_rows = await cur.fetchall()
-            for row in db_live_rows:
-                r_id, r_a, r_b = row[0], row[1], row[2]
-                if (r_a, r_b) not in active_pairs:
-                    logger.info(f"Match {r_id} ({r_a} vs {r_b}) is no longer live on CricAPI. Marking COMPLETED.")
-                    await conn.execute("""
-                        UPDATE matches SET
-                            state = 'COMPLETED',
-                            is_stumps = 0,
-                            stumps_label = NULL
-                        WHERE id = ?
-                    """, (r_id,))
-                    updated_matches.append(r_id)
+
+            if db_live_rows:
+                from ...engine.cricket_rules import evaluate_match_completion
+                for row in db_live_rows:
+                    row_dict = dict(row)
+                    r_id = row_dict["id"]
+                    r_a = row_dict["team_a_id"]
+                    r_b = row_dict["team_b_id"]
+                    if (r_a, r_b) not in active_pairs:
+                        fin = finished_by_pair.get((r_a, r_b))
+                        if fin and fin.get("status_text"):
+                            row_dict["match_status_text"] = fin["status_text"]
+                        comp = evaluate_match_completion(row_dict)
+                        st_txt = comp.get("result_description") or row_dict.get("match_status_text")
+                        win_id = comp.get("winning_team_id")
+                        res_low = str(st_txt or "").lower()
+                        if win_id and win_id == r_a:
+                            p_a_end, p_b_end, p_d_end = 100.0, 0.0, 0.0
+                        elif win_id and win_id == r_b:
+                            p_a_end, p_b_end, p_d_end = 0.0, 100.0, 0.0
+                        elif any(k in res_low for k in ("draw", "drawn")):
+                            p_a_end, p_b_end, p_d_end = 0.0, 0.0, 100.0
+                        elif any(k in res_low for k in ("tied", "tie")):
+                            p_a_end, p_b_end, p_d_end = 50.0, 50.0, 0.0
+                        else:
+                            p_a_end = row_dict.get("p_team_a", 50.0)
+                            p_b_end = row_dict.get("p_team_b", 50.0)
+                            p_d_end = 0.0
+                        logger.info(f"Match {r_id} ({r_a} vs {r_b}) is no longer live on CricAPI. Marking COMPLETED ({st_txt}).")
+                        await conn.execute("""
+                            UPDATE matches SET
+                                state = 'COMPLETED',
+                                is_stumps = 0,
+                                stumps_label = NULL,
+                                match_status_text = COALESCE(?, match_status_text),
+                                last_event_description = COALESCE(?, last_event_description),
+                                p_team_a = ?,
+                                p_team_b = ?,
+                                p_draw = ?
+                            WHERE id = ?
+                        """, (st_txt, st_txt, p_a_end, p_b_end, p_d_end, r_id))
+                        updated_matches.append(r_id)
 
         await conn.commit()
         return updated_matches

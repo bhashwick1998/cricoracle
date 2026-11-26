@@ -276,10 +276,14 @@ class CricbuzzScoreApi:
                                                 s["innings_index"] = len(cands) + 1
                                                 cands.append(s)
 
+                                            is_concluded_status = bool(
+                                                match_status
+                                                and any(k in match_status.lower() for k in ("won by", "all out", "innings and"))
+                                            )
                                             cands.append({
                                                 "team": tm_c,
                                                 "runs": int(r2),
-                                                "wickets": int(w2) if w2 is not None else 0,
+                                                "wickets": int(w2) if w2 is not None else (10 if is_concluded_status else 0),
                                                 "overs": float(ov2) if ov2 else None,
                                                 "innings_index": len(cands) + 1
                                             })
@@ -389,7 +393,7 @@ class CricbuzzScoreApi:
                                         commentary = m.group(1).strip()
                                         break
                                     elif re.match(r"^\d+\.\d+\s*[A-Za-z\s]+to[A-Za-z\s]+", t):
-                                        commentary = t[:120].strip()
+                                        commentary = t[:280].strip()
                                         break
 
                             # 6. Parse Pitch Report from commentary or match facts

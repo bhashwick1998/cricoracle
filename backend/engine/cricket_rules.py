@@ -131,6 +131,55 @@ def get_format_rules(format_code: str, scheduled_overs: Optional[float] = None) 
         rules["powerplay_summary"] = pp.get("summary")
     return rules
 
+_CONCLUSION_PHRASES = (
+    "won by", "won the match", "win by", "take the game by", "takes the game by",
+    "match drawn", "match tied", "abandoned", "no result", "called off",
+)
+
+_TEAM_ALIASES = {
+    "SA": ("south africa", "sa", "rsa", "proteas"),
+    "BAN": ("bangladesh", "ban", "tigers"),
+    "IND": ("india", "ind", "bharat"),
+    "AUS": ("australia", "aus"),
+    "ENG": ("england", "eng"),
+    "NZ": ("new zealand", "nz", "blackcaps"),
+    "PAK": ("pakistan", "pak"),
+    "SL": ("sri lanka", "sl"),
+    "WI": ("west indies", "wi"),
+    "AFG": ("afghanistan", "afg"),
+    "ZIM": ("zimbabwe", "zim"),
+    "IRE": ("ireland", "ire"),
+}
+
+
+def _resolve_winning_team_from_text(
+    text: str, t_a_id: str, t_a_name: str, t_b_id: str, t_b_name: str
+) -> tuple[Optional[str], Optional[str]]:
+    """Resolves winning team from result phrasing before falling back to isolated team tokens."""
+    txt_low = (text or "").lower()
+    win_subject = re.search(
+        r"(?:^|[.!]\s*|\b)([a-z\s]{2,30}?)\s+(?:won\s+by|won\s+the\s+match|win\s+by|wins\s+by|takes?\s+the\s+game)",
+        txt_low,
+    )
+    probe = win_subject.group(1).strip() if win_subject else txt_low
+
+    a_tokens = tuple(dict.fromkeys([t_a_name.lower(), t_a_id.lower(), *_TEAM_ALIASES.get(str(t_a_id).upper(), ())]))
+    b_tokens = tuple(dict.fromkeys([t_b_name.lower(), t_b_id.lower(), *_TEAM_ALIASES.get(str(t_b_id).upper(), ())]))
+
+    for target_text in (probe, txt_low):
+        a_hit = any(re.search(rf"\b{re.escape(tok)}\b", target_text) for tok in a_tokens if tok)
+        b_hit = any(re.search(rf"\b{re.escape(tok)}\b", target_text) for tok in b_tokens if tok)
+        if a_hit and not b_hit:
+            return t_a_id, t_a_name
+        if b_hit and not a_hit:
+            return t_b_id, t_b_name
+        if a_hit and b_hit and win_subject:
+            a_pos = min((target_text.find(tok) for tok in a_tokens if tok and tok in target_text), default=9999)
+            b_pos = min((target_text.find(tok) for tok in b_tokens if tok and tok in target_text), default=9999)
+            return (t_a_id, t_a_name) if a_pos <= b_pos else (t_b_id, t_b_name)
+    return None, None
+
+
 def evaluate_match_completion(match: Dict[str, Any]) -> Dict[str, Any]:
     """
     Evaluates whether a match is officially completed according to official ICC rules.
@@ -152,9 +201,7 @@ def evaluate_match_completion(match: Dict[str, Any]) -> Dict[str, Any]:
     series_name = str(match.get("series_name") or "").lower()
     mid_low = str(match.get("id") or "").lower()
 
-    has_explicit_conclusion = any(
-        k in combined_status for k in ["won by", "won the match", "match drawn", "match tied", "abandoned", "no result", "called off"]
-    )
+    has_explicit_conclusion = any(k in combined_status for k in _CONCLUSION_PHRASES)
 
     # Guard -1: If match is already marked COMPLETED in state or status explicitly declares winner/result
     if state == "COMPLETED" or has_explicit_conclusion:
@@ -167,15 +214,25 @@ def evaluate_match_completion(match: Dict[str, Any]) -> Dict[str, Any]:
         win_id = match.get("winning_team_id")
         win_name = match.get("winning_team_name")
         if not win_id and not (is_tie or is_draw):
-            if any(k in combined_status for k in [t_a_name.lower(), t_a_id.lower(), f"{t_a_id.lower()} won", f"{t_a_name.lower()} won"]):
-                win_id = t_a_id
-                win_name = t_a_name
-            elif any(k in combined_status for k in [t_b_name.lower(), t_b_id.lower(), f"{t_b_id.lower()} won", f"{t_b_name.lower()} won"]):
-                win_id = t_b_id
-                win_name = t_b_name
+            win_id, win_name = _resolve_winning_team_from_text(combined_status, t_a_id, t_a_name, t_b_id, t_b_name)
+        desc = match.get("result_description")
+        if not desc:
+            if any(k in match_status for k in _CONCLUSION_PHRASES):
+                desc = match.get("match_status_text")
+            elif win_name and "by an innings" in combined_status and "won by" not in combined_status:
+                inn1 = match.get("innings_1_score")
+                inn2 = match.get("innings_2_score")
+                inn3 = match.get("innings_3_score")
+                if inn1 is not None and inn2 is not None and inn3 is not None:
+                    margin = abs(max(int(inn1), int(inn2)) - (min(int(inn1), int(inn2)) + int(inn3)))
+                    desc = f"{win_name} won by an innings and {margin} runs"
+                else:
+                    desc = f"{win_name} won by an innings"
+            else:
+                desc = match.get("match_status_text") or (f"{win_name} won the match" if win_name else "Match Completed")
         return {
             "is_completed": True,
-            "result_description": match.get("result_description") or match.get("match_status_text") or (f"{win_name} won the match" if win_name else "Match Completed"),
+            "result_description": desc,
             "winning_team_id": None if (is_tie or is_draw) else win_id,
             "winning_team_name": None if (is_tie or is_draw) else win_name,
             "margin": match.get("margin"),
@@ -594,19 +651,27 @@ def evaluate_match_completion(match: Dict[str, Any]) -> Dict[str, Any]:
 
     # 2. Test Match Completion Regulations
     elif fmt == "TEST":
-        # Case A: Test match concludes in 3rd innings if follow-on was enforced and team is all out trailing (Innings victory)
+        # Case A: Test match concludes in 3rd innings via an innings defeat (follow-on OR 1st-innings heavy lead)
         if cur_inn == 3 and cur_wkts >= 10:
             inn1_score = match.get("innings_1_score")
             inn2_score = match.get("innings_2_score")
-            batting_team_id = match.get("batting_team_id") or match.get("innings_2_team_id") or t_b_id
+            inn1_team_id = match.get("innings_1_team_id") or t_a_id
             inn2_team_id = match.get("innings_2_team_id") or t_b_id
+            batting_team_id = match.get("batting_team_id") or match.get("innings_3_team_id") or inn2_team_id
 
-            # If team batting in innings 3 is the team that batted in innings 2 (follow-on enforced)
-            if batting_team_id == inn2_team_id and inn1_score is not None and inn2_score is not None:
-                combined_inn2_inn3 = int(inn2_score) + cur_score
-                if combined_inn2_inn3 < int(inn1_score):
-                    deficit = int(inn1_score) - combined_inn2_inn3
-                    bowling_team_id = t_a_id if batting_team_id == t_b_id else t_b_id
+            if inn1_score is not None and inn2_score is not None:
+                deficit = 0
+                bowling_team_id = None
+                if batting_team_id == inn2_team_id and (int(inn2_score) + cur_score) < int(inn1_score):
+                    # Follow-on enforced: team 2 all out behind team 1's 1st innings
+                    deficit = int(inn1_score) - (int(inn2_score) + cur_score)
+                    bowling_team_id = inn1_team_id
+                elif batting_team_id == inn1_team_id and (int(inn1_score) + cur_score) < int(inn2_score):
+                    # Team 1 bowled out in 3rd innings still behind team 2's 1st innings lead
+                    deficit = int(inn2_score) - (int(inn1_score) + cur_score)
+                    bowling_team_id = inn2_team_id
+
+                if deficit > 0 and bowling_team_id:
                     bowling_team_name = t_a_name if bowling_team_id == t_a_id else t_b_name
                     m_str = f"an innings and {deficit} runs" if deficit != 1 else "an innings and 1 run"
                     return {
