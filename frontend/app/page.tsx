@@ -279,7 +279,7 @@ export default function HomePage() {
       />
 
       {/* Broadcast Score & Odds Ticker */}
-      <LiveScoreTicker matches={matches} />
+      <LiveScoreTicker matches={matches} loading={loading} />
 
       <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-8 w-full flex-1">
 

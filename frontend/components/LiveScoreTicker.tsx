@@ -8,19 +8,34 @@ import { Flame, Radio, Sparkles, ChevronRight } from "lucide-react";
 
 interface LiveScoreTickerProps {
   matches: MatchData[];
+  loading?: boolean;
 }
 
-export default function LiveScoreTicker({ matches }: LiveScoreTickerProps) {
+export default function LiveScoreTicker({ matches, loading = false }: LiveScoreTickerProps) {
   if (!matches || matches.length === 0) {
     return (
       <div className="w-full bg-[#0a0f1d] border-b border-slate-800/80 py-2.5 px-6 text-xs text-slate-500 select-none">
         <div className="flex items-center gap-2">
           <span className="flex h-2 w-2 relative">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+            {loading && (
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+            )}
+            <span
+              className={`relative inline-flex rounded-full h-2 w-2 ${
+                loading ? "bg-cyan-500" : "bg-emerald-500"
+              }`}
+            ></span>
           </span>
-          <span className="text-[10px] font-black tracking-wider uppercase bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
-            LIVE MATCH ODDS • CONNECTING TO CRICORACLE TELEMETRY STREAM...
+          <span
+            className={`text-[10px] font-black tracking-wider uppercase ${
+              loading
+                ? "bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent"
+                : "text-slate-400"
+            }`}
+          >
+            {loading
+              ? "LIVE MATCH ODDS • CONNECTING TO CRICORACLE TELEMETRY STREAM..."
+              : "MONITORING CRICAPI • NO LIVE MATCHES IN PLAY"}
           </span>
         </div>
       </div>
