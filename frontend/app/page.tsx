@@ -5,6 +5,7 @@ import Navbar from "@/components/Navbar";
 import MatchCard, { MatchData } from "@/components/MatchCard";
 import LiveScoreTicker from "@/components/LiveScoreTicker";
 import MatchScheduleTable from "@/components/MatchScheduleTable";
+import { apiUrl, getWsUrl, getPollIntervalMs } from "@/lib/apiConfig";
 import {
   Layers,
   Radio,
@@ -40,57 +41,42 @@ export default function HomePage() {
   const [wsConnected, setWsConnected] = useState(false);
   const [sandboxMode, setSandboxMode] = useState<boolean>(false);
 
-  // Fetch matches from API
+  // Fetch matches from CDN-cacheable backend API (respecting s-maxage=15 + ETag)
   const fetchMatches = useCallback(async () => {
-    const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-    const directBase = isLocal
-      ? `http://${window.location.hostname}:8000`
-      : "https://cricoracle-backend.onrender.com";
+    const primaryUrl = apiUrl("/api/matches");
+    const wsActive = Boolean(getWsUrl());
     try {
-      let res = await fetch(`/api/matches?_t=${Date.now()}`, {
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache" }
-      });
-      // Fallback directly to backend if proxy rewrite returns non-200
-      if (!res.ok) {
-        res = await fetch(`${directBase}/api/matches?_t=${Date.now()}`, {
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache" }
-        });
+      let res = await fetch(primaryUrl);
+      if (!res.ok && primaryUrl !== "/api/matches") {
+        res = await fetch("/api/matches");
       }
       if (res.ok) {
         const data = await res.json();
         setMatches(Array.isArray(data) ? data : []);
+        if (!wsActive) setWsConnected(true);
+      } else if (!wsActive) {
+        setWsConnected(false);
       }
     } catch (err) {
-      console.error("Failed to fetch matches via proxy, trying direct backend:", err);
-      try {
-        const directRes = await fetch(`${directBase}/api/matches?_t=${Date.now()}`);
-        if (directRes.ok) {
-          const data = await directRes.json();
-          setMatches(Array.isArray(data) ? data : []);
-        }
-      } catch (directErr) {
-        console.error("Direct fetch failed:", directErr);
-      }
+      console.error("Failed to fetch matches:", err);
+      if (!wsActive) setWsConnected(false);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // WebSocket Connection
+  // Optional WebSocket (disabled by default on public crowds; inline-only, zero HTTP refetch) + jittered CDN polling
   useEffect(() => {
     fetchMatches();
 
-    const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-    const wsUrl = isLocal
-      ? `ws://${window.location.hostname}:8000/ws/matches`
-      : `wss://cricoracle-backend.onrender.com/ws/matches`;
-
+    const wsUrl = getWsUrl();
     let socket: WebSocket | null = null;
     let reconnectTimeout: any = null;
+    let pollTimeout: any = null;
+    let disposed = false;
 
     const connectWs = () => {
+      if (!wsUrl || disposed) return;
       try {
         socket = new WebSocket(wsUrl);
 
@@ -111,8 +97,6 @@ export default function HomePage() {
               setMatches((prev) =>
                 prev.map((m) => (m.id === data.match.id ? { ...m, ...data.match } : m))
               );
-            } else if (data.type === "SYNC_COMPLETED" || data.type === "RESET_ALL") {
-              fetchMatches();
             }
           } catch (e) {
             console.error("Failed to parse ws event:", e);
@@ -121,29 +105,50 @@ export default function HomePage() {
 
         socket.onclose = () => {
           setWsConnected(false);
-          reconnectTimeout = setTimeout(connectWs, 3000);
+          if (!disposed) reconnectTimeout = setTimeout(connectWs, 5000);
         };
 
         socket.onerror = () => {
           setWsConnected(false);
           socket?.close();
         };
-      } catch (err) {
+      } catch {
         setWsConnected(false);
-        reconnectTimeout = setTimeout(connectWs, 4000);
+        if (!disposed) reconnectTimeout = setTimeout(connectWs, 5000);
       }
     };
 
-    connectWs();
-    // Relaxed background polling cadence to prevent proxy socket saturation on Render
-    const interval = setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      fetchMatches();
-    }, 6000);
+    if (wsUrl) {
+      connectWs();
+    }
+
+    const scheduleNextPoll = () => {
+      if (disposed) return;
+      pollTimeout = setTimeout(async () => {
+        if (typeof document === "undefined" || !document.hidden) {
+          await fetchMatches();
+        }
+        scheduleNextPoll();
+      }, getPollIntervalMs(15000, 3000));
+    };
+    scheduleNextPoll();
+
+    const onVisibilityChange = () => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        fetchMatches();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
 
     return () => {
-      clearInterval(interval);
+      disposed = true;
+      if (pollTimeout) clearTimeout(pollTimeout);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
       if (socket) socket.close();
     };
   }, [fetchMatches]);
@@ -151,7 +156,7 @@ export default function HomePage() {
   const handleSyncSources = async () => {
     setIsSyncing(true);
     try {
-      await fetch("/api/scraper/sync", { method: "POST" });
+      await fetch(apiUrl("/api/scraper/sync"), { method: "POST" });
       await fetchMatches();
     } finally {
       setIsSyncing(false);
@@ -160,7 +165,7 @@ export default function HomePage() {
 
   const handleResetData = async () => {
     try {
-      await fetch("/api/simulator/reset", { method: "POST" });
+      await fetch(apiUrl("/api/simulator/reset"), { method: "POST" });
       await fetchMatches();
     } catch (e) {
       console.error(e);
@@ -168,7 +173,7 @@ export default function HomePage() {
   };
 
   const handleUrlIngest = async (url: string) => {
-    await fetch("/api/scraper/url", {
+    await fetch(apiUrl("/api/scraper/url"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
@@ -178,7 +183,7 @@ export default function HomePage() {
 
   const handleStateChange = async (matchId: string, newState: string) => {
     try {
-      const res = await fetch(`/api/matches/${matchId}/state`, {
+      const res = await fetch(apiUrl(`/api/matches/${matchId}/state`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ state: newState }),
@@ -196,7 +201,7 @@ export default function HomePage() {
 
   const handleStepDelivery = async (matchId: string) => {
     try {
-      const res = await fetch(`/api/matches/${matchId}/delivery`, {
+      const res = await fetch(apiUrl(`/api/matches/${matchId}/delivery`), {
         method: "POST",
       });
       if (res.ok) {

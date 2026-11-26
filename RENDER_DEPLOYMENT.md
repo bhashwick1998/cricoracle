@@ -1,70 +1,66 @@
-# CricOracle — Render.com Deployment & Optimization Guide
+# CricOracle — Free-Tier Public Crowd Deployment Guide
 
-This repository is configured for automated deployment to [Render.com](https://render.com) via GitHub using the included `render.yaml` Infrastructure-as-Code Blueprint.
+This setup is tuned to stay within **Render Free (`750` instance hours/month, `5 GB` outbound bandwidth/month)** even under public match traffic:
 
----
-
-## 1. Fast One-Click Deployment via GitHub Blueprint
-
-1. Push your repository to your GitHub account (`git push origin main`).
-2. Log in to [dashboard.render.com](https://dashboard.render.com).
-3. Click **New +** and select **Blueprint**.
-4. Connect your GitHub repository `cricketpred`.
-5. Render will automatically detect `render.yaml` and configure two services:
-   - **`cricoracle-backend`** (Python / FastAPI):
-     - Build: `pip install -r requirements.txt`
-     - Start: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
-     - Health Check: `/health`
-   - **`cricoracle-frontend`** (Node.js / Next.js):
-     - Root Directory: `frontend`
-     - Build: `npm install && npm run build`
-     - Start: `npm start -- -p $PORT`
-     - Automatically wired to `cricoracle-backend` via Render's service discovery.
-6. Click **Apply**. Both services will build and go live.
+- **Backend only on Render Free (`cricoracle-backend`)**: `1` service running 24/7 = `744 hrs/month` (`<= 750 hrs`).
+- **Frontend on Vercel Hobby or Cloudflare Pages**: Eliminates the second Node service (halving Render hours) and keeps all JS/CSS bundles off Render's `5 GB` quota.
+- **Cloudflare Free CDN in front of Backend (`s-maxage=15`)**: Absorbs live crowd polling (`GET /api/matches`, `GET /api/matches/{id}/live`) at the edge so Render only serves ~1 refresh per `15s` regardless of concurrent viewers.
+- **Payload Split + GZip + `ETag` (`304`)**:
+  - Initial open loads deduplicated `GET /api/matches/{id}` (`score_projections` sent once, duplicate `concussion_info` bench copies removed).
+  - Ongoing polls fetch only `GET /api/matches/{id}/live` (omits static squads, matchup tensors, 22-attribute breakdowns, and pre-match stage trees).
+  - `GZipMiddleware` compresses JSON `>10x` and `ETag` returns `304 Not Modified` when state hasn't changed.
+- **No WebSocket Refetch / Opt-In WS**: `NEXT_PUBLIC_ENABLE_WS=false` by default so public viewers use CDN-cached `15s–18s` HTTP polling (paused when tabs are hidden).
 
 ---
 
-## 2. Automated Cricsheet Match Ingestion & Parameter Optimization
+## Step 1: Push Code to Your New GitHub Account
+1. Create a new repository on your new GitHub account (e.g., `cricoracle`).
+2. Add the new remote locally and push `main`:
+   ```bash
+   git remote add new-origin https://github.com/<YOUR_GITHUB_USERNAME>/<YOUR_REPO>.git
+   git push -u new-origin main
+   ```
 
-CricOracle includes a continuous calibration pipeline in `backend/engine/cricsheet_auto_updater.py` that downloads newly ended international cricket matches from Cricsheet, updates parameters, and improves predictive accuracy.
+## Step 2: Deploy Backend to Your New Render.com Account
+1. Log in to [dashboard.render.com](https://dashboard.render.com) with your new Render account (connect your new GitHub account when prompted).
+2. Click **New +** -> **Blueprint**, select your new GitHub repo.
+3. Render reads [`render.yaml`](render.yaml) and configures **one** free service: **`cricoracle-backend`**.
+4. Enter your secret value for **`CRICAPI_KEY_PAID`** when prompted, then click **Apply**.
+5. Once live, note your Render service hostname (e.g., `cricoracle-backend-xxxx.onrender.com`) and verify `https://<your-render-host>/health` returns `{"status": "online", ...}`.
 
-### Methodology:
-1. **Automated Polling & Extraction**:
-   - The engine automatically downloads Cricsheet's official recent matches archive (`https://cricsheet.org/downloads/recent.zip`).
-   - Strictly filters for Senior Men's International fixtures (Test, ODI, T20I) between official international teams.
-2. **Telemetry Ingestion & Database Recalibration**:
-   - **Venue Profiles**: Calculates empirical moving average 1st-innings par scores, boundary size impacts, and pace vs. spin wicket ratios.
-   - **Team Elo**: Updates dynamic team Elo ratings based on match results and victory margins.
-   - **Player Phase Stats**: Recalibrates player powerplay, middle, and death phase ratings with a 65% recency weight.
-3. **Regularized Bayesian Parameter Optimization**:
-   - Runs `ScoreParameterOptimizer` using L-BFGS-B bounded optimization across 9 core physical score prediction levers (`settled_early_mult`, `settled_set_mult`, `ctrl_longevity_bonus`, `ctrl_struggle_penalty`, `finisher_death_mult`, `kalman_gain_scale`, `dew_max_runs`, `geom_sensitivity`, `venue_par_weight_bias`).
-   - Out-of-time chronological testing achieves **~31.7% MAE error reduction** and 82.4% empirical confidence interval coverage.
-   - Persists optimal vectors to `backend/data/optimized_parameters.json`.
-4. **Cadence & On-Demand Recalibration**:
-   - Ingestion scheduler runs every 24 hours automatically.
-   - Can also be triggered via `POST /api/admin/recalibrate-parameters`.
-   - Inspect active parameters via `GET /api/parameters/optimized`.
+## Step 3: Put Cloudflare Free CDN in Front of the Backend (`s-maxage=15`)
+*(Required for public crowds — without Cloudflare DNS proxy, browsers hit `.onrender.com` directly and bypass CDN edge caching.)*
+1. Add your custom domain (e.g., `your-domain.com`) to **Cloudflare Free** and update your domain registrar's nameservers to Cloudflare.
+2. In **Render Dashboard -> `cricoracle-backend` -> Settings -> Custom Domains**, add `api.your-domain.com` and verify the CNAME target shown by Render.
+3. In **Cloudflare DNS**:
+   - Add a **CNAME** record: `api` -> `<your-render-host>.onrender.com`, Proxy status: **Proxied (Orange Cloud)**.
+4. In **Cloudflare SSL/TLS**:
+   - Set mode to **Full (strict)**.
+5. In **Cloudflare Caching -> Configuration**:
+   - Set Caching Level to **Standard**.
+6. In **Cloudflare Caching -> Cache Rules**, create a rule **`Respect CricOracle API Origin Cache Headers`**:
+   - Match: **Hostname equals `api.your-domain.com`** AND **URI Path starts with `/api/`**.
+   - **Cache eligibility**: **Eligible for cache**.
+   - **Edge TTL**: **Use cache-control header if present, bypass cache if not** *(respects FastAPI's `s-maxage=15` for live match feeds, `s-maxage=300` for analytics/static data, and `no-store` for `POST` & `/api/system/*`)*.
+   - **Browser TTL**: **Respect origin**.
 
----
+## Step 4: Deploy Frontend (`frontend/`) on Vercel Hobby or Cloudflare Pages
+1. On Vercel (or Cloudflare Pages), create a new project connected to your new GitHub repo.
+2. Set **Root Directory** to `frontend`.
+3. Set Environment Variables (see [`frontend/.env.example`](frontend/.env.example)):
+   - `NEXT_PUBLIC_API_URL` = `https://api.your-domain.com`
+   - `NEXT_PUBLIC_SITE_URL` = `https://your-domain.com`
+   - `NEXT_PUBLIC_ENABLE_WS` = `false`
+4. Deploy, then add your apex/frontend custom domain (`your-domain.com`) in Vercel/Cloudflare Pages.
+5. *(Optional hardening)*: Back in Render **`cricoracle-backend` -> Environment**, set `CORS_ALLOWED_ORIGINS=https://your-domain.com`.
 
-## 3. Search Engine Optimization (SEO) & Google Discovery
-
-The Next.js frontend has been optimized for Google search crawlers:
-- **`sitemap.xml`**: Dynamically generated via `frontend/app/sitemap.ts` listing all active, upcoming, and completed match URLs with change frequencies.
-- **`robots.txt`**: Automatically generated via `frontend/app/robots.ts` granting full access to Googlebot.
-- **Rich Structured Data (JSON-LD)**:
-  - Homepage: `WebApplication`, `SportsOrganization`, and `WebSite` Schema.org definitions.
-  - Match Pages: Dynamic `SportsEvent` Schema.org markup detailing teams, tournament, venue, and live score states.
-- **OpenGraph & Twitter Cards**: Native social media preview cards with canonical URL tags.
-
----
-
-## 4. UI Production Cleanup
-
-All development simulation controls have been removed from the user-facing view:
-- Removed: `↺ Replay Ball 1`
-- Removed: `Sync Real Live Score`
-- Removed: `Auto Stream`
-- Removed: `+1 Live Ball`
-- Removed: `Sync External Squad`
-- Replaced with: Live Telemetry Indicator status pill (`Live Telemetry Active` / `Telemetry Ingestion Armed`).
+## Step 5: Verify Production Caching & Bandwidth Behavior
+1. Check CDN cache headers via curl or browser DevTools on `https://api.your-domain.com/api/matches`:
+   - Confirm `Cache-Control: public, max-age=5, s-maxage=15, stale-while-revalidate=15`
+   - Confirm `Content-Encoding: gzip` and `ETag: W/"..."`
+   - Confirm `cf-cache-status: HIT` on the second request within 15 seconds.
+2. Open a match page on `https://your-domain.com/match/<id>` with DevTools **Network** open:
+   - Initial request hits `GET /api/matches/<id>` (`view: "full"`).
+   - Background polls every `~15–18s` hit `GET /api/matches/<id>/live` (`view: "live"`, much smaller payload) and stop automatically when the tab is hidden or the match finishes.
+   - Filter **WS** in DevTools: zero WebSocket connections should be opened when `NEXT_PUBLIC_ENABLE_WS=false`.
+3. Note on ephemeral Free Tier disk: Free Render instances do not persist `backend/cricoracle.db` across restarts/sleeps. Automated startup sync and cache refreshers ([`render_cache_updater.py`](backend/engine/render_cache_updater.py)) rebuild stale local caches automatically on boot.

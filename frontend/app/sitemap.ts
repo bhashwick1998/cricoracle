@@ -1,13 +1,15 @@
 import { MetadataRoute } from "next";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://cricoracle.onrender.com";
+  const baseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
   const apiUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   let matchRoutes: MetadataRoute.Sitemap = [];
 
   try {
-    const res = await fetch(`${apiUrl}/api/matches`, { next: { revalidate: 60 } });
+    const res = await fetch(`${apiUrl}/api/matches`, { next: { revalidate: 3600 } });
     if (res.ok) {
       const matches = await res.json();
       if (Array.isArray(matches)) {

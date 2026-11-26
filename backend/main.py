@@ -9,16 +9,19 @@ Provides REST API & WebSocket Realtime streaming for:
 
 import os
 import json
+import time
+import hashlib
 import logging
 import math
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body, Request, Query
+from fastapi.responses import PlainTextResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from .database.db import get_db, init_db
@@ -194,7 +197,41 @@ class ConnectionManager:
 
 ws_manager = ConnectionManager()
 
+# Short-TTL in-memory response cache to protect single Free worker from concurrent cache-miss spikes
+_RESPONSE_CACHE: Dict[str, Tuple[float, Any]] = {}
+_RESPONSE_CACHE_MAX_ENTRIES = 64
+
+
+def _get_cached_response(key: str, ttl_seconds: float) -> Optional[Any]:
+    entry = _RESPONSE_CACHE.get(key)
+    if not entry:
+        return None
+    ts, payload = entry
+    if (time.monotonic() - ts) > ttl_seconds:
+        _RESPONSE_CACHE.pop(key, None)
+        return None
+    return payload
+
+
+def _set_cached_response(key: str, payload: Any) -> Any:
+    if len(_RESPONSE_CACHE) >= _RESPONSE_CACHE_MAX_ENTRIES:
+        oldest_key = min(_RESPONSE_CACHE.items(), key=lambda item: item[1][0])[0]
+        _RESPONSE_CACHE.pop(oldest_key, None)
+    _RESPONSE_CACHE[key] = (time.monotonic(), payload)
+    return payload
+
+
+def invalidate_match_response_cache(match_id: Optional[str] = None) -> None:
+    if match_id is None:
+        _RESPONSE_CACHE.clear()
+        return
+    target_prefix = f"match:{match_id}:"
+    for key in [k for k in _RESPONSE_CACHE if k.startswith("matches:") or k.startswith(target_prefix)]:
+        _RESPONSE_CACHE.pop(key, None)
+
+
 async def ws_broadcast_adapter(match_id: str, payload: Dict[str, Any]):
+    invalidate_match_response_cache(match_id)
     payload["match_id"] = match_id
     await ws_manager.broadcast(payload)
 
@@ -285,6 +322,8 @@ async def lifespan(app: FastAPI):
     async def bg_initial_discovery():
         try:
             discovered = await ingestion_manager.auto_discover_and_sync_live_matches()
+            if discovered:
+                invalidate_match_response_cache(None)
             logger.info(f"Startup live match auto-discovery completed: {len(discovered)} matches updated.")
         except Exception as disc_err:
             logger.error(f"Error during startup live match auto-discovery: {disc_err}")
@@ -299,22 +338,97 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CricOracle API", version="1.0.0", lifespan=lifespan)
 
+_STATIC_CACHE_PATHS = {
+    "/api/model-accuracy",
+    "/api/parameters/optimized",
+    "/api/top-performers-model/accuracy",
+    "/api/score-parameters/optimization-benchmark",
+    "/api/models/learning-ledger",
+}
+
+
+def _resolve_api_cache_control(request: Request) -> str:
+    path = request.url.path
+    if request.method not in ("GET", "HEAD"):
+        return "no-cache, no-store, must-revalidate, max-age=0"
+    if not path.startswith("/api/") or path.startswith("/api/system/") or path == "/api/health":
+        return "no-cache, no-store, must-revalidate, max-age=0"
+    if request.query_params.get("force", "").lower() == "true":
+        return "no-cache, no-store, must-revalidate, max-age=0"
+    if (
+        path in _STATIC_CACHE_PATHS
+        or path.startswith("/api/analytics/")
+        or path.endswith("/static")
+        or request.query_params.get("view") == "static"
+    ):
+        return "public, max-age=60, s-maxage=300, stale-while-revalidate=300"
+    return "public, max-age=5, s-maxage=15, stale-while-revalidate=15"
+
+
+@app.middleware("http")
+async def cdn_cache_and_etag_middleware(request: Request, call_next):
+    response = await call_next(request)
+    cache_control = _resolve_api_cache_control(request)
+
+    if cache_control.startswith("no-cache"):
+        if request.url.path.startswith("/api/") or request.url.path == "/health":
+            response.headers["Cache-Control"] = cache_control
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+    content_type = response.headers.get("content-type", "")
+    if response.status_code == 200 and "application/json" in content_type:
+        body = b"".join([chunk async for chunk in response.body_iterator])
+        etag = f'W/"{hashlib.sha256(body).hexdigest()[:16]}"'
+        headers = {
+            k: v
+            for k, v in response.headers.items()
+            if k.lower() not in ("content-length", "cache-control", "pragma", "expires", "etag")
+        }
+        headers["Cache-Control"] = cache_control
+        headers["ETag"] = etag
+        headers["Vary"] = "Accept-Encoding"
+
+        if_none_match = request.headers.get("if-none-match", "")
+        if if_none_match:
+            client_tags = [tag.strip() for tag in if_none_match.split(",")]
+            if "*" in client_tags or etag in client_tags or etag.removeprefix("W/") in client_tags:
+                return Response(
+                    status_code=304,
+                    headers={
+                        "Cache-Control": cache_control,
+                        "ETag": etag,
+                        "Vary": "Accept-Encoding",
+                    },
+                )
+
+        return Response(
+            content=body,
+            status_code=response.status_code,
+            headers=headers,
+            media_type=response.media_type,
+        )
+
+    response.headers["Cache-Control"] = cache_control
+    response.headers["Vary"] = "Accept-Encoding"
+    return response
+
+
+# Outer wrappers execute first (CORSMiddleware outermost, then GZipMiddleware, then ETag/Cache middleware)
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+_raw_cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "*").strip()
+_cors_origins = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()] if _raw_cors_origins != "*" else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["ETag", "Cache-Control"],
 )
-
-@app.middleware("http")
-async def add_no_cache_headers(request, call_next):
-    response = await call_next(request)
-    if request.url.path.startswith("/api/"):
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-    return response
 
 # Request Models
 class StateTransitionRequest(BaseModel):
@@ -383,6 +497,7 @@ async def recalibrate_parameters():
     try:
         from .engine.cricsheet_auto_updater import trigger_cricsheet_parameter_recalibration
         result = await trigger_cricsheet_parameter_recalibration()
+        invalidate_match_response_cache(None)
         return result
     except Exception as e:
         logger.error(f"Error during Cricsheet parameter recalibration: {e}")
@@ -398,6 +513,11 @@ async def get_optimized_parameters():
 
 @app.get("/api/matches")
 async def get_matches(state: Optional[str] = None):
+    cache_key = f"matches:{state or 'default'}"
+    cached = _get_cached_response(cache_key, ttl_seconds=10.0)
+    if cached is not None:
+        return cached
+
     conn = await get_db()
     try:
         TOP_20_TEAMS_TUPLE = (
@@ -1086,13 +1206,124 @@ async def get_matches(state: Optional[str] = None):
             except Exception:
                 pass
 
-        return filtered_matches
+        return _set_cached_response(cache_key, filtered_matches)
 
     finally:
         await conn.close()
 
+_LIVE_STRIPPED_MATCH_KEYS = (
+    "team_a_22_attributes",
+    "team_b_22_attributes",
+    "positional_comparisons",
+    "positional_tallies",
+    "bowling_vulnerabilities",
+    "duel_simulations",
+    "scenario_score_projections",
+)
+
+
+def _build_live_score_projections_view(score_projections: Any) -> Any:
+    if not isinstance(score_projections, dict):
+        return score_projections
+    slim = {
+        "format": score_projections.get("format"),
+        "state": score_projections.get("state"),
+        "stage_name": score_projections.get("stage_name"),
+        "stage_level": score_projections.get("stage_level"),
+        "is_live_match": score_projections.get("is_live_match"),
+        "ground_pitch_archetype": score_projections.get("ground_pitch_archetype"),
+        "base_venue_par": score_projections.get("base_venue_par"),
+        "live_projection": score_projections.get("live_projection"),
+        "live_test_innings_progression": score_projections.get("live_test_innings_progression"),
+        "live_whiteball_progression": score_projections.get("live_whiteball_progression"),
+        "current_playing_team_projection": score_projections.get("current_playing_team_projection"),
+        "dls_live_probability_sensitivity": score_projections.get("dls_live_probability_sensitivity"),
+    }
+    fsp = score_projections.get("four_stage_progression")
+    if isinstance(fsp, dict) and "stage_4_live" in fsp:
+        slim["four_stage_progression"] = {"stage_4_live": fsp["stage_4_live"]}
+    sp_perf = score_projections.get("stage_performers")
+    if isinstance(sp_perf, dict) and "stage_4_live" in sp_perf:
+        slim["stage_performers"] = {"stage_4_live": sp_perf["stage_4_live"]}
+    return slim
+
+
+def _build_split_match_response(full_payload: Dict[str, Any], view: str) -> Dict[str, Any]:
+    view_mode = (view or "full").lower()
+    if view_mode == "live":
+        raw_match = full_payload.get("match") or {}
+        live_match = {k: v for k, v in raw_match.items() if k not in _LIVE_STRIPPED_MATCH_KEYS}
+        return {
+            "view": "live",
+            "match": live_match,
+            "deliveries": full_payload.get("deliveries", []),
+            "next_ball_distribution": full_payload.get("next_ball_distribution", {}),
+            "active_striker": full_payload.get("active_striker"),
+            "active_bowler": full_payload.get("active_bowler"),
+            "live_pitch_evaluation": full_payload.get("live_pitch_evaluation"),
+            "crease_matchups": full_payload.get("crease_matchups"),
+            "weather_report": full_payload.get("weather_report"),
+            "player_projections": full_payload.get("player_projections"),
+            "score_projections": _build_live_score_projections_view(full_payload.get("score_projections")),
+            "stumps_intelligence": full_payload.get("stumps_intelligence"),
+            "nlp_intelligence": full_payload.get("nlp_intelligence"),
+            "quality_resource_tanks": full_payload.get("quality_resource_tanks"),
+            "winwiz_intelligence": full_payload.get("winwiz_intelligence"),
+            "top_performers": full_payload.get("top_performers"),
+        }
+
+    if view_mode == "static":
+        raw_match = full_payload.get("match") or {}
+        static_match_subset = {
+            k: raw_match[k]
+            for k in (
+                "id",
+                "format",
+                "state",
+                "team_a_22_attributes",
+                "team_b_22_attributes",
+                "positional_comparisons",
+                "positional_tallies",
+                "bowling_vulnerabilities",
+                "duel_simulations",
+                "pitch_quality_index",
+                "seasonal_ground_profile",
+            )
+            if k in raw_match
+        }
+        return {
+            "view": "static",
+            "match": static_match_subset,
+            "venue_historical_profile": full_payload.get("venue_historical_profile"),
+            "team_a_squad": full_payload.get("team_a_squad", []),
+            "team_b_squad": full_payload.get("team_b_squad", []),
+            "matchup_tensor": full_payload.get("matchup_tensor", []),
+            "biggest_matchup_adv": full_payload.get("biggest_matchup_adv"),
+            "concussion_info": full_payload.get("concussion_info"),
+            "venue_format_pitch_profile": full_payload.get("venue_format_pitch_profile"),
+        }
+
+    return full_payload
+
+
+@app.get("/api/matches/{match_id}/live")
+async def get_match_live_detail(match_id: str):
+    return await get_match_detail(match_id, view="live")
+
+
+@app.get("/api/matches/{match_id}/static")
+async def get_match_static_detail(match_id: str):
+    return await get_match_detail(match_id, view="static")
+
+
 @app.get("/api/matches/{match_id}")
-async def get_match_detail(match_id: str):
+async def get_match_detail(match_id: str, view: str = Query(default="full", pattern="^(full|live|static)$")):
+    view_mode = (view or "full").lower()
+    full_cache_key = f"match:{match_id}:full"
+    cached_full = _get_cached_response(full_cache_key, ttl_seconds=120.0 if view_mode == "static" else 10.0)
+    if cached_full is not None:
+        return _build_split_match_response(cached_full, view_mode)
+
     conn = await get_db()
     try:
         # Match info
@@ -1595,12 +1826,8 @@ async def get_match_detail(match_id: str):
             substitution_history = [dict(r) for r in await cur_cs.fetchall()]
 
         concussion_info = {
-            "team_a_bench": bench_a,
-            "team_b_bench": bench_b,
             "team_a_bench_count": len(bench_a),
             "team_b_bench_count": len(bench_b),
-            "sample_a_ranked": rank_concussion_substitutes(confirmed_a[0], bench_a, ground_archetype) if confirmed_a and bench_a else [],
-            "sample_b_ranked": rank_concussion_substitutes(confirmed_b[0], bench_b, ground_archetype) if confirmed_b and bench_b else [],
             "history": substitution_history
         }
 
@@ -2233,7 +2460,11 @@ async def get_match_detail(match_id: str):
         nlp_narrative = f"{match_data.get('match_status_text', '')} {match_data.get('last_event_description', '')} {match_data.get('pitch_report', '')}"
         nlp_intelligence = cricket_nlp_engine.parse_match_narrative(nlp_narrative, context=match_data)
 
-        return {
+        # Drop internal intermediate copy now that player_projections has finished reading it
+        match_data.pop("scenario_score_projections", None)
+
+        full_payload = {
+            "view": "full",
             "match": match_data,
             "venue_historical_profile": v_profile,
             "team_a_squad": team_a_players,
@@ -2251,7 +2482,6 @@ async def get_match_detail(match_id: str):
             "venue_format_pitch_profile": match_data.get("venue_format_pitch_profile"),
             "player_projections": player_projections,
             "score_projections": score_projections,
-            "scenario_score_projections": score_projections,
             "stumps_intelligence": stumps_intel,
             "nlp_intelligence": nlp_intelligence,
             "quality_resource_tanks": match_data.get("quality_resource_tanks", tanks_eval if 'tanks_eval' in locals() else None),
@@ -2267,6 +2497,8 @@ async def get_match_detail(match_id: str):
                 "team_b_bowler": player_projections["team_b"]["probable_highest_wicket_bowler"],
             }
         }
+        _set_cached_response(full_cache_key, full_payload)
+        return _build_split_match_response(full_payload, view_mode)
     finally:
         await conn.close()
 
@@ -2309,6 +2541,7 @@ async def transition_state(match_id: str, req: StateTransitionRequest):
         raise HTTPException(status_code=400, detail=f"Invalid state. Must be one of {valid_states}")
 
     updated = await ingestion_manager.transition_match_state(match_id, req.state)
+    invalidate_match_response_cache(match_id)
     return {"status": "ok", "match": updated}
 
 @app.post("/api/matches/{match_id}/sync-squad")
@@ -2318,6 +2551,7 @@ async def sync_match_squad(match_id: str):
     resolves player entities, inserts into match_squads, and recalculates Stage 2 predictions.
     """
     res = await ingestion_manager.sync_squads_for_match(match_id)
+    invalidate_match_response_cache(match_id)
     return res
 
 @app.post("/api/matches/{match_id}/ingest-squad-text")
@@ -2327,6 +2561,7 @@ async def ingest_squad_text(match_id: str, req: SquadTextIngestRequest):
     for a team, registers players, populates match_squads, and propagates to tour matches.
     """
     res = await ingestion_manager.ingest_declared_squad_text(match_id, req.team_id, req.raw_text)
+    invalidate_match_response_cache(match_id)
     return res
 
 # ==========================================
@@ -2371,6 +2606,7 @@ async def sync_match_live_score(match_id: str):
     updates state, and re-evaluates Stage 4 Live win probability.
     """
     res = await ingestion_manager.sync_live_match(match_id)
+    invalidate_match_response_cache(match_id)
     return res
 
 @app.get("/api/matches/{match_id}/concussion-candidates")
@@ -2488,6 +2724,7 @@ async def apply_concussion_sub(match_id: str, req: ConcussionSubRequest):
         """, (new_p_a, new_p_b, last_desc, match_id))
 
         await conn.commit()
+        invalidate_match_response_cache(match_id)
 
         return {
             "status": "ok",
@@ -2636,6 +2873,7 @@ async def update_match_weather(match_id: str, req: WeatherUpdateRequest):
             match_id
         ))
         await conn.commit()
+        invalidate_match_response_cache(match_id)
 
         return {
             "status": "ok",
@@ -2677,6 +2915,7 @@ async def bind_cricbuzz_match(match_id: str, req: BindCricbuzzRequest):
     resolves player entities into database, updates match, and recalculates Live ML WinViz.
     """
     res = await ingestion_manager.scrape_and_apply_cricbuzz(match_id, req.cricbuzz_id)
+    invalidate_match_response_cache(match_id)
     return res
 
 @app.post("/api/matches/{match_id}/delivery")
@@ -2686,6 +2925,7 @@ async def step_delivery(match_id: str):
     and broadcasts updated probabilities.
     """
     res = await ingestion_manager.trigger_next_delivery(match_id)
+    invalidate_match_response_cache(match_id)
     return res
 
 @app.post("/api/matches/{match_id}/reset-to-ball-one")
@@ -2694,6 +2934,7 @@ async def reset_match_to_ball_one(match_id: str):
     Rewinds match to Ball 1 of 1st innings so the user can stream delivery-by-delivery from the very start.
     """
     res = await ingestion_manager.reset_match_to_ball_one(match_id)
+    invalidate_match_response_cache(match_id)
     await ws_manager.broadcast({"type": "MATCH_RESET", "match_id": match_id})
     return res
 
@@ -2703,6 +2944,7 @@ async def trigger_scraper_sync():
     Forces immediate poll of schedules, squads, Playing XIs and scores from sources.
     """
     fixtures = await ingestion_manager.sync_upcoming_fixtures()
+    invalidate_match_response_cache(None)
     await ws_manager.broadcast({"type": "SYNC_COMPLETED", "fixtures_count": len(fixtures)})
     return {"status": "ok", "message": f"Successfully synced {len(fixtures)} international fixtures."}
 
@@ -2712,6 +2954,7 @@ async def ingest_url(req: ScrapeUrlRequest):
     Extracts match details from pasted URL and adds/updates match.
     """
     res = await ingestion_manager.ingest_url(req.url)
+    invalidate_match_response_cache(None)
     await ws_manager.broadcast({"type": "URL_INGESTED", "data": res})
     return {"status": "ok", "extracted": res}
 
@@ -2721,6 +2964,7 @@ async def reset_seed_data():
     Resets all matches and deliveries back to fresh seeded benchmark.
     """
     await seed_database()
+    invalidate_match_response_cache(None)
     await ws_manager.broadcast({"type": "RESET_ALL"})
     return {"status": "ok", "message": "Database reset to benchmark multi-stage matches."}
 
@@ -2732,6 +2976,7 @@ async def api_propagate_series_squads():
     conn = await get_db()
     try:
         propagated = await propagate_series_squads_async(conn)
+        invalidate_match_response_cache(None)
         return {
             "status": "success",
             "propagated_count": len(propagated),
@@ -3036,6 +3281,8 @@ async def sync_cricapi_live_to_matches():
                     ))
                     await conn.commit()
                     updated.append(match_id)
+        if updated:
+            invalidate_match_response_cache(None)
         return {"status": "success", "updated_matches": updated, "live_count": len(live_matches)}
     finally:
         await conn.close()

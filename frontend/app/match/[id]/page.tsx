@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
 import { getTeamMeta, formatDateTime, formatKickoffCountdown } from "@/lib/teamUtils";
+import { apiUrl, getWsUrl, getPollIntervalMs, mergeMatchLiveDelta } from "@/lib/apiConfig";
 import {
   ArrowLeft,
   Flame,
@@ -82,7 +83,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   const fetchLearningLedger = async () => {
     setLearningLedgerLoading(true);
     try {
-      const res = await fetch("/api/models/learning-ledger");
+      const res = await fetch(apiUrl("/api/models/learning-ledger"));
       if (res.ok) {
         const json = await res.json();
         setLearningLedgerData(json);
@@ -106,8 +107,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
 
   const isFetchingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const debounceTimerRef = useRef<any>(null);
   const hasInitializedTabsRef = useRef(false);
+  const hasLoadedFullRef = useRef(false);
+  const loadedStateRef = useRef<string | null>(null);
   const [concussionNotes, setConcussionNotes] = useState<string>("");
   const [stateTransitioning, setStateTransitioning] = useState(false);
   const [syncingSquad, setSyncingSquad] = useState(false);
@@ -200,7 +202,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
         payload.player_name = playerToSend.trim();
         payload.expected_runs = parseFloat(expToSend) || 40.0;
       }
-      const res = await fetch("/api/analytics/nlp-parse", {
+      const res = await fetch(apiUrl("/api/analytics/nlp-parse"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -219,7 +221,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   const fetchAccuracy = async () => {
     setAccuracyLoading(true);
     try {
-      const res = await fetch("/api/model-accuracy");
+      const res = await fetch(apiUrl("/api/model-accuracy"));
       if (res.ok) {
         const json = await res.json();
         setAccuracyData(json);
@@ -237,8 +239,8 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     setBindSuccess(null);
     try {
       const [jsonRes, textRes] = await Promise.all([
-        fetch(`/api/live-score?score=${targetId}`),
-        fetch(`/api/live-score?score=${targetId}&text=true`)
+        fetch(apiUrl(`/api/live-score?score=${targetId}`)),
+        fetch(apiUrl(`/api/live-score?score=${targetId}&text=true`))
       ]);
       const json = await jsonRes.json();
       const text = await textRes.text();
@@ -254,7 +256,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   const handleBindCricbuzz = async () => {
     setCricbuzzLoading(true);
     try {
-      const res = await fetch(`/api/matches/${id}/bind-cricbuzz`, {
+      const res = await fetch(apiUrl(`/api/matches/${id}/bind-cricbuzz`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cricbuzz_id: cricbuzzId })
@@ -264,7 +266,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
         setBindSuccess(`Scraped ${json.scraped?.score} and updated Live WinViz probabilities!`);
         setCricbuzzData(json.scraped);
         setCricbuzzTreeView(json.tree_view);
-        await fetchMatchDetail();
+        await fetchMatchDetail(false, true);
       }
     } catch (e) {
       console.error(e);
@@ -276,9 +278,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   const handleSyncSquad = async () => {
     setSyncingSquad(true);
     try {
-      const res = await fetch(`/api/matches/${id}/sync-squad`, { method: "POST" });
+      const res = await fetch(apiUrl(`/api/matches/${id}/sync-squad`), { method: "POST" });
       if (res.ok) {
-        await fetchMatchDetail();
+        await fetchMatchDetail(false, true);
       }
     } catch (e) {
       console.error("Failed to sync squad from external sources:", e);
@@ -290,9 +292,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   const handleSyncLiveScore = async () => {
     setSyncingLive(true);
     try {
-      const res = await fetch(`/api/matches/${id}/sync-live`, { method: "POST" });
+      const res = await fetch(apiUrl(`/api/matches/${id}/sync-live`), { method: "POST" });
       if (res.ok) {
-        await fetchMatchDetail();
+        await fetchMatchDetail(false, true);
       }
     } catch (e) {
       console.error("Failed to sync live score from external sources:", e);
@@ -305,7 +307,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     setWeatherSimLoading(true);
     setWeatherFeedback(null);
     try {
-      const res = await fetch(`/api/matches/${id}/weather`, {
+      const res = await fetch(apiUrl(`/api/matches/${id}/weather`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -317,7 +319,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
       const json = await res.json();
       if (json.status === "ok") {
         setWeatherFeedback(`Weather simulated: ${json.weather_report?.condition} (${oversLost} ov lost). Recalculated match probabilities!`);
-        await fetchMatchDetail();
+        await fetchMatchDetail(false, true);
       }
     } catch (e) {
       console.error("Weather update failed:", e);
@@ -331,7 +333,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     setConcussionLoadingCandidates(true);
     setConcussionSuccess(null);
     try {
-      const res = await fetch(`/api/matches/${id}/concussion-candidates?player_id=${playerId}`);
+      const res = await fetch(apiUrl(`/api/matches/${id}/concussion-candidates?player_id=${playerId}`));
       if (res.ok) {
         const json = await res.json();
         setConcussionCandidates(json.ranked_substitutes || []);
@@ -347,7 +349,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     setConcussionSubmitting(true);
     setConcussionSuccess(null);
     try {
-      const res = await fetch(`/api/matches/${id}/concussion-sub`, {
+      const res = await fetch(apiUrl(`/api/matches/${id}/concussion-sub`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -360,7 +362,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
       const json = await res.json();
       if (json.status === "ok") {
         setConcussionSuccess(json.message);
-        await fetchMatchDetail();
+        await fetchMatchDetail(false, true);
         if (injuredId) {
           handleFetchConcussionCandidates(injuredId);
         }
@@ -374,9 +376,10 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     }
   };
 
-  const fetchMatchDetail = async (silent = false) => {
+  const fetchMatchDetail = async (silent = false, forceFull = false) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
+    let shouldReloadFullAfterLive = false;
 
     try {
       if (abortControllerRef.current) {
@@ -385,26 +388,33 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
-      let res = await fetch(`/api/matches/${id}?_t=${Date.now()}`, {
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache" },
-        signal: controller.signal
-      });
-      // Fallback directly to public backend if proxy rewrite returns non-200
-      if (!res.ok) {
-        res = await fetch(`https://cricoracle-backend.onrender.com/api/matches/${id}?_t=${Date.now()}`, {
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache" },
-          signal: controller.signal
-        });
+      const liveOnly = !forceFull && hasLoadedFullRef.current;
+      const endpointPath = liveOnly ? `/api/matches/${id}/live` : `/api/matches/${id}`;
+      const primaryUrl = apiUrl(endpointPath);
+
+      let res = await fetch(primaryUrl, { signal: controller.signal });
+      if (!res.ok && primaryUrl !== endpointPath) {
+        res = await fetch(endpointPath, { signal: controller.signal });
       }
       if (res.ok) {
         const json = await res.json();
-        setData(json);
-        if (!hasInitializedTabsRef.current && json.match?.state) {
+        const nextState = json?.match?.state || null;
+
+        if (liveOnly) {
+          if (nextState && loadedStateRef.current && nextState !== loadedStateRef.current) {
+            loadedStateRef.current = nextState;
+            shouldReloadFullAfterLive = true;
+          }
+          setData((prev: any) => mergeMatchLiveDelta(prev, json));
+        } else {
+          hasLoadedFullRef.current = true;
+          loadedStateRef.current = nextState;
+          setData(json);
+        }
+
+        if (!hasInitializedTabsRef.current && nextState) {
           hasInitializedTabsRef.current = true;
-          const st = json.match.state;
-          if (st === "LIVE_BALL_BY_BALL" || st === "COMPLETED") {
+          if (nextState === "LIVE_BALL_BY_BALL" || nextState === "COMPLETED") {
             setSelectedStageTab("stage_4_live");
           } else {
             setSelectedStageTab("stage_3_xi_toss");
@@ -424,71 +434,92 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     } finally {
       isFetchingRef.current = false;
       setLoading(false);
+      if (shouldReloadFullAfterLive) {
+        fetchMatchDetail(true, true);
+      }
     }
   };
 
   useEffect(() => {
-    fetchMatchDetail();
+    hasLoadedFullRef.current = false;
+    loadedStateRef.current = null;
+    fetchMatchDetail(false, true);
     fetchAccuracy();
 
-    const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-    const wsUrl = isLocal
-      ? `ws://${window.location.hostname}:8000/ws/matches`
-      : `wss://cricoracle-backend.onrender.com/ws/matches`;
-
+    const wsUrl = getWsUrl();
     let socket: WebSocket | null = null;
     let reconnectTimer: any = null;
-
-    const triggerDebouncedFetch = () => {
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = setTimeout(() => {
-        fetchMatchDetail(true);
-      }, 350);
-    };
+    let pollTimer: any = null;
+    let disposed = false;
 
     const connectWs = () => {
+      if (!wsUrl || disposed) return;
       try {
         socket = new WebSocket(wsUrl);
         socket.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
             const isRelevant = !msg.match_id || msg.match_id === id;
-            if (
-              isRelevant && (
-                msg.type === "SYNC_COMPLETED" ||
-                msg.type === "STATE_CHANGE" ||
-                msg.type === "NEW_DELIVERY" ||
-                msg.type === "CRICBUZZ_LIVE_INGESTED" ||
-                msg.type === "LIVE_TELEMETRY_SYNCED" ||
-                msg.match_id === id
-              )
-            ) {
-              triggerDebouncedFetch();
+            // Zero HTTP refetch on WebSocket pushes; merge inline match deltas only
+            if (isRelevant && msg.match) {
+              setData((prev: any) =>
+                prev ? { ...prev, match: { ...prev.match, ...msg.match } } : prev
+              );
             }
-          } catch (e) {
+          } catch {
             // Silently ignore WS parse issues
           }
         };
         socket.onclose = () => {
-          reconnectTimer = setTimeout(connectWs, 3000);
+          if (!disposed) reconnectTimer = setTimeout(connectWs, 5000);
         };
         socket.onerror = () => {
           socket?.close();
         };
-      } catch (err) {
-        reconnectTimer = setTimeout(connectWs, 3000);
+      } catch {
+        if (!disposed) reconnectTimer = setTimeout(connectWs, 5000);
       }
     };
 
-    connectWs();
+    if (wsUrl) {
+      connectWs();
+    }
 
-    // Autonomous polling fallback every 4 seconds to ensure uninterrupted live updates
-    const interval = setInterval(() => fetchMatchDetail(true), 4000);
+    // Jittered CDN-cacheable lightweight live polling (~15-18s matching s-maxage=15; paused on hidden tabs)
+    const scheduleNextPoll = () => {
+      if (disposed) return;
+      pollTimer = setTimeout(async () => {
+        if (
+          (typeof document === "undefined" || !document.hidden) &&
+          loadedStateRef.current !== "COMPLETED"
+        ) {
+          await fetchMatchDetail(true, false);
+        }
+        scheduleNextPoll();
+      }, getPollIntervalMs(15000, 3000));
+    };
+    scheduleNextPoll();
+
+    const onVisibilityChange = () => {
+      if (
+        typeof document !== "undefined" &&
+        !document.hidden &&
+        loadedStateRef.current !== "COMPLETED"
+      ) {
+        fetchMatchDetail(true, false);
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
 
     return () => {
-      clearInterval(interval);
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      disposed = true;
+      if (pollTimer) clearTimeout(pollTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
       if (abortControllerRef.current) abortControllerRef.current.abort();
       if (socket) socket.close();
     };
@@ -501,12 +532,12 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     if (isAutoSim && matchState !== "COMPLETED") {
       timer = setInterval(async () => {
         try {
-          const res = await fetch(`/api/matches/${id}/delivery`, { method: "POST" });
+          const res = await fetch(apiUrl(`/api/matches/${id}/delivery`), { method: "POST" });
           const resData = await res.json();
           if (resData?.match?.state === "COMPLETED" || resData?.status === "match_already_completed") {
             setIsAutoSim(false);
           }
-          fetchMatchDetail();
+          fetchMatchDetail(false, true);
         } catch (e) {
           console.error(e);
         }
@@ -523,12 +554,12 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     if (data?.match?.state === "COMPLETED") return;
     setStepLoading(true);
     try {
-      const res = await fetch(`/api/matches/${id}/delivery`, { method: "POST" });
+      const res = await fetch(apiUrl(`/api/matches/${id}/delivery`), { method: "POST" });
       const resData = await res.json();
       if (resData?.match?.state === "COMPLETED" || resData?.status === "match_already_completed") {
         setIsAutoSim(false);
       }
-      await fetchMatchDetail();
+      await fetchMatchDetail(false, true);
     } finally {
       setStepLoading(false);
     }
@@ -537,8 +568,8 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   const handleResetToBallOne = async () => {
     try {
       setIsAutoSim(false);
-      await fetch(`/api/matches/${id}/reset-to-ball-one`, { method: "POST" });
-      await fetchMatchDetail();
+      await fetch(apiUrl(`/api/matches/${id}/reset-to-ball-one`), { method: "POST" });
+      await fetchMatchDetail(false, true);
     } catch (e) {
       console.error("Failed to reset match to ball one:", e);
     }
@@ -552,12 +583,12 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
       } else {
         setSelectedStageTab("stage_3_xi_toss");
       }
-      await fetch(`/api/matches/${id}/state`, {
+      await fetch(apiUrl(`/api/matches/${id}/state`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ state: newState })
       });
-      await fetchMatchDetail();
+      await fetchMatchDetail(false, true);
     } catch (e) {
       console.error(e);
     } finally {

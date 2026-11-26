@@ -1,6 +1,9 @@
 services:
   # -------------------------------------------------------------
   # CricOracle Backend API (FastAPI + Ingestion Engine + ML Levers)
+  # Single free service uses <= 744 hrs/mo (fits inside 750 free hrs/mo)
+  # Put Cloudflare Free CDN (orange cloud) in front for s-maxage=15 caching
+  # Host frontend/ on Vercel Hobby or Cloudflare Pages to avoid 2x hour & proxy burn
   # -------------------------------------------------------------
   - type: web
     name: cricoracle-backend
@@ -8,7 +11,7 @@ services:
     plan: free
     region: oregon
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
     autoDeploy: true
     envVars:
@@ -16,27 +19,11 @@ services:
         value: 3.11.9
       - key: PORT
         value: 10000
-
-  # -------------------------------------------------------------
-  # CricOracle Frontend Console (Next.js 16 + React 19 + Tailwind)
-  # -------------------------------------------------------------
-  - type: web
-    name: cricoracle-frontend
-    runtime: node
-    plan: free
-    region: oregon
-    rootDir: frontend
-    buildCommand: npm install && NODE_OPTIONS="--experimental-require-module" npm run build
-    startCommand: npm start -- -p $PORT
-    autoDeploy: true
-    envVars:
-      - key: NODE_VERSION
-        value: 22.12.0
-      - key: NODE_OPTIONS
-        value: --experimental-require-module
-      - key: BACKEND_URL
-        value: https://cricoracle-backend.onrender.com
-      - key: NEXT_PUBLIC_API_URL
-        value: https://cricoracle-backend.onrender.com
-      - key: NEXT_PUBLIC_SITE_URL
-        value: https://cricoracle-frontend.onrender.com
+      - key: CRICAPI_KEY_PAID
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        value: "*"
+      - key: RENDER_CACHE_REFRESH_HOURS
+        value: "12"
+      - key: CRICSHEET_CACHE_REFRESH_HOURS
+        value: "24"
