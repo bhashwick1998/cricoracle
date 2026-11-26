@@ -11,9 +11,16 @@ class TestCdnAndPayloadSplit(unittest.TestCase):
         invalidate_match_response_cache(None)
 
     def test_full_match_deduplicated_gzip_etag_and_304(self):
+        res_no_origin = self.client.get(
+            "/api/matches/m_aus_eng_2026_odi_1",
+            headers={"Accept-Encoding": "gzip"},
+        )
+        self.assertEqual(res_no_origin.status_code, 200)
+        self.assertEqual(res_no_origin.headers.get("access-control-allow-origin"), "*")
+
         res = self.client.get(
             "/api/matches/m_aus_eng_2026_odi_1",
-            headers={"Accept-Encoding": "gzip", "Origin": "https://example.com"},
+            headers={"Accept-Encoding": "gzip", "Origin": "https://www.cricoracle.site"},
         )
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.headers.get("content-encoding"), "gzip")

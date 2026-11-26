@@ -348,6 +348,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CricOracle API", version="1.0.0", lifespan=lifespan)
 
+_raw_cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "*").strip()
+_cors_origins = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()] if _raw_cors_origins != "*" else ["*"]
+
 _STATIC_CACHE_PATHS = {
     "/api/model-accuracy",
     "/api/parameters/optimized",
@@ -398,7 +401,10 @@ async def cdn_cache_and_etag_middleware(request: Request, call_next):
         }
         headers["Cache-Control"] = cache_control
         headers["ETag"] = etag
-        headers["Vary"] = "Accept-Encoding"
+        if len(body) < 500:
+            headers["Vary"] = "Accept-Encoding"
+        if len(_cors_origins) == 1:
+            headers["Access-Control-Allow-Origin"] = _cors_origins[0]
 
         if_none_match = request.headers.get("if-none-match", "")
         if if_none_match:
@@ -427,9 +433,6 @@ async def cdn_cache_and_etag_middleware(request: Request, call_next):
 
 # Outer wrappers execute first (CORSMiddleware outermost, then GZipMiddleware, then ETag/Cache middleware)
 app.add_middleware(GZipMiddleware, minimum_size=500)
-
-_raw_cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "*").strip()
-_cors_origins = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()] if _raw_cors_origins != "*" else ["*"]
 
 app.add_middleware(
     CORSMiddleware,
