@@ -307,29 +307,40 @@ async def lifespan(app: FastAPI):
             await conn.execute("DELETE FROM match_deliveries WHERE match_id IN (SELECT id FROM matches WHERE state = 'COMPLETED')")
             await conn.execute("DELETE FROM match_squads WHERE match_id IN (SELECT id FROM matches WHERE state = 'COMPLETED')")
             await conn.execute("DELETE FROM matches WHERE state = 'COMPLETED'")
-
-            # Synchronize player catalog from https://cricket-analytics-ghpv.onrender.com/ and guarantee full 11 Playing XI
-            from .engine.cricket_analytics_matcher import sync_cricket_analytics_players_to_db, ensure_full_playing_xi_for_match
-            try:
-                synced_p = await sync_cricket_analytics_players_to_db(conn)
-                logger.info(f"Startup player sync with Cricket Analytics: {synced_p} players verified.")
-                async with conn.execute("SELECT id FROM matches WHERE state IN ('LIVE_BALL_BY_BALL', 'XI_AND_TOSS_LOCKED')") as live_c:
-                    for lm in await live_c.fetchall():
-                        await ensure_full_playing_xi_for_match(conn, lm[0])
-            except Exception as match_err:
-                logger.warning(f"Error during player sync / Playing XI enforcement: {match_err}")
-
             await conn.commit()
-
-            propagated = await propagate_series_squads_async(conn)
-            logger.info(f"Startup series squad propagation: {len(propagated)} matches updated.")
         finally:
             await conn.close()
     except Exception as prop_err:
-        logger.error(f"Error during startup squad propagation: {prop_err}")
+        logger.error(f"Error during fast startup initialization: {prop_err}")
+
     await ingestion_manager.start()
-    # Run initial live match auto-discovery in background so port opens immediately for Render health checks
+
+    # Run heavier player catalog sync, squad propagation, and initial live match discovery
+    # asynchronously after port bind so Render cold starts answer health checks immediately.
     async def bg_initial_discovery():
+        try:
+            from .engine.cricket_analytics_matcher import sync_cricket_analytics_players_to_db, ensure_full_playing_xi_for_match
+            bg_conn = await get_db()
+            try:
+                async with bg_conn.execute("SELECT count(*) FROM players") as p_cur:
+                    p_count = (await p_cur.fetchone())[0]
+                if p_count < 350:
+                    synced_p = await sync_cricket_analytics_players_to_db(bg_conn)
+                    logger.info(f"Background player sync with Cricket Analytics: {synced_p} players verified.")
+                async with bg_conn.execute("SELECT id FROM matches WHERE state IN ('LIVE_BALL_BY_BALL', 'XI_AND_TOSS_LOCKED')") as live_c:
+                    for lm in await live_c.fetchall():
+                        await ensure_full_playing_xi_for_match(bg_conn, lm[0])
+                await bg_conn.commit()
+
+                propagated = await propagate_series_squads_async(bg_conn)
+                if propagated:
+                    invalidate_match_response_cache(None)
+                logger.info(f"Background series squad propagation: {len(propagated)} matches updated.")
+            finally:
+                await bg_conn.close()
+        except Exception as sync_err:
+            logger.warning(f"Error during background player sync / squad propagation: {sync_err}")
+
         try:
             discovered = await ingestion_manager.auto_discover_and_sync_live_matches()
             if discovered:
@@ -374,8 +385,8 @@ def _resolve_api_cache_control(request: Request) -> str:
         or path.endswith("/static")
         or request.query_params.get("view") == "static"
     ):
-        return "public, max-age=60, s-maxage=300, stale-while-revalidate=300"
-    return "public, max-age=5, s-maxage=15, stale-while-revalidate=15"
+        return "public, max-age=60, s-maxage=300, stale-while-revalidate=300, stale-if-error=600"
+    return "public, max-age=5, s-maxage=15, stale-while-revalidate=60, stale-if-error=300"
 
 
 @app.middleware("http")

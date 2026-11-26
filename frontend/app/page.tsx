@@ -32,6 +32,7 @@ import {
 export default function HomePage() {
   const [matches, setMatches] = useState<MatchData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [wakingBackend, setWakingBackend] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("LIVE");
   const [formatFilter, setFormatFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -40,11 +41,21 @@ export default function HomePage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [sandboxMode, setSandboxMode] = useState<boolean>(false);
+  const wakeRetryRef = React.useRef<{ timer: ReturnType<typeof setTimeout> | null; attempts: number; disposed: boolean }>({
+    timer: null,
+    attempts: 0,
+    disposed: false,
+  });
 
   // Fetch matches from CDN-cacheable backend API (respecting s-maxage=15 + ETag)
   const fetchMatches = useCallback(async () => {
+    if (wakeRetryRef.current.timer) {
+      clearTimeout(wakeRetryRef.current.timer);
+      wakeRetryRef.current.timer = null;
+    }
     const primaryUrl = apiUrl("/api/matches");
     const wsActive = Boolean(getWsUrl());
+    let keepWakingSpinner = false;
     try {
       let res = await fetch(primaryUrl);
       if (!res.ok && primaryUrl !== "/api/matches") {
@@ -53,15 +64,35 @@ export default function HomePage() {
       if (res.ok) {
         const data = await res.json();
         setMatches(Array.isArray(data) ? data : []);
+        setWakingBackend(false);
+        wakeRetryRef.current.attempts = 0;
         if (!wsActive) setWsConnected(true);
-      } else if (!wsActive) {
-        setWsConnected(false);
+      } else {
+        if (!wsActive) setWsConnected(false);
+        if (res.status >= 500 && wakeRetryRef.current.attempts < 20 && !wakeRetryRef.current.disposed) {
+          keepWakingSpinner = true;
+          wakeRetryRef.current.attempts += 1;
+          setWakingBackend(true);
+          wakeRetryRef.current.timer = setTimeout(fetchMatches, 3000);
+        } else {
+          setWakingBackend(false);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch matches:", err);
       if (!wsActive) setWsConnected(false);
+      if (wakeRetryRef.current.attempts < 20 && !wakeRetryRef.current.disposed) {
+        keepWakingSpinner = true;
+        wakeRetryRef.current.attempts += 1;
+        setWakingBackend(true);
+        wakeRetryRef.current.timer = setTimeout(fetchMatches, 3000);
+      } else {
+        setWakingBackend(false);
+      }
     } finally {
-      setLoading(false);
+      if (!keepWakingSpinner) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -142,8 +173,11 @@ export default function HomePage() {
       document.addEventListener("visibilitychange", onVisibilityChange);
     }
 
+    wakeRetryRef.current.disposed = false;
     return () => {
       disposed = true;
+      wakeRetryRef.current.disposed = true;
+      if (wakeRetryRef.current.timer) clearTimeout(wakeRetryRef.current.timer);
       if (pollTimeout) clearTimeout(pollTimeout);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (typeof document !== "undefined") {
@@ -279,7 +313,7 @@ export default function HomePage() {
       />
 
       {/* Broadcast Score & Odds Ticker */}
-      <LiveScoreTicker matches={matches} loading={loading} />
+      <LiveScoreTicker matches={matches} loading={loading} wakingBackend={wakingBackend} />
 
       <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-8 w-full flex-1">
 
@@ -471,7 +505,17 @@ export default function HomePage() {
         </div>
 
         {/* Matches Display (Grid vs Table) */}
-        {loading ? (
+        {wakingBackend && matches.length === 0 ? (
+          <div className="text-center py-16 bg-slate-900/40 rounded-3xl border border-cyan-500/30">
+            <Radio className="w-12 h-12 text-cyan-400 mx-auto mb-3 animate-pulse" />
+            <h3 className="text-base font-bold text-cyan-300">
+              Waking CricOracle telemetry server...
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Initial wake-up after idle sleep takes ~30 seconds. Retrying automatically every 3 seconds.
+            </p>
+          </div>
+        ) : loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3, 4, 5, 6].map((i) => (
               <div

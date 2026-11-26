@@ -74,6 +74,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   const { id } = use(params);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [wakingBackend, setWakingBackend] = useState(false);
   const [stepLoading, setStepLoading] = useState(false);
   const [isAutoSim, setIsAutoSim] = useState(false);
   const [activeTab, setActiveTab] = useState<"telemetry" | "projections" | "weather_dls" | "live_pitch" | "matchups" | "squads" | "accuracy" | "pitch" | "cricbuzz" | "nlp" | "self_learning">("telemetry");
@@ -110,6 +111,11 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   const hasInitializedTabsRef = useRef(false);
   const hasLoadedFullRef = useRef(false);
   const loadedStateRef = useRef<string | null>(null);
+  const wakeRetryRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; attempts: number; disposed: boolean }>({
+    timer: null,
+    attempts: 0,
+    disposed: false,
+  });
   const [concussionNotes, setConcussionNotes] = useState<string>("");
   const [stateTransitioning, setStateTransitioning] = useState(false);
   const [syncingSquad, setSyncingSquad] = useState(false);
@@ -378,8 +384,13 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
 
   const fetchMatchDetail = async (silent = false, forceFull = false) => {
     if (isFetchingRef.current) return;
+    if (wakeRetryRef.current.timer) {
+      clearTimeout(wakeRetryRef.current.timer);
+      wakeRetryRef.current.timer = null;
+    }
     isFetchingRef.current = true;
     let shouldReloadFullAfterLive = false;
+    let keepWakingWait = false;
 
     try {
       if (abortControllerRef.current) {
@@ -397,6 +408,8 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
         res = await fetch(endpointPath, { signal: controller.signal });
       }
       if (res.ok) {
+        setWakingBackend(false);
+        wakeRetryRef.current.attempts = 0;
         const json = await res.json();
         const nextState = json?.match?.state || null;
 
@@ -424,16 +437,42 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
             setSelectedInningsTab(`innings_${curInn}` as any);
           }
         }
+      } else if (
+        !hasLoadedFullRef.current &&
+        res.status >= 500 &&
+        wakeRetryRef.current.attempts < 20 &&
+        !wakeRetryRef.current.disposed
+      ) {
+        keepWakingWait = true;
+        wakeRetryRef.current.attempts += 1;
+        setWakingBackend(true);
+        wakeRetryRef.current.timer = setTimeout(() => fetchMatchDetail(false, true), 3000);
+      } else {
+        setWakingBackend(false);
       }
     } catch (e: any) {
       if (e?.name !== "AbortError") {
-        if (!silent) {
-          console.warn("Notice: match telemetry update scheduled retry:", e?.message || "Connection retry");
+        if (
+          !hasLoadedFullRef.current &&
+          wakeRetryRef.current.attempts < 20 &&
+          !wakeRetryRef.current.disposed
+        ) {
+          keepWakingWait = true;
+          wakeRetryRef.current.attempts += 1;
+          setWakingBackend(true);
+          wakeRetryRef.current.timer = setTimeout(() => fetchMatchDetail(false, true), 3000);
+        } else {
+          setWakingBackend(false);
+          if (!silent) {
+            console.warn("Notice: match telemetry update scheduled retry:", e?.message || "Connection retry");
+          }
         }
       }
     } finally {
       isFetchingRef.current = false;
-      setLoading(false);
+      if (!keepWakingWait) {
+        setLoading(false);
+      }
       if (shouldReloadFullAfterLive) {
         fetchMatchDetail(true, true);
       }
@@ -443,6 +482,8 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
   useEffect(() => {
     hasLoadedFullRef.current = false;
     loadedStateRef.current = null;
+    wakeRetryRef.current.disposed = false;
+    wakeRetryRef.current.attempts = 0;
     fetchMatchDetail(false, true);
     fetchAccuracy();
 
@@ -515,6 +556,8 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
 
     return () => {
       disposed = true;
+      wakeRetryRef.current.disposed = true;
+      if (wakeRetryRef.current.timer) clearTimeout(wakeRetryRef.current.timer);
       if (pollTimer) clearTimeout(pollTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (typeof document !== "undefined") {
@@ -596,12 +639,23 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
     }
   };
 
-  if (loading) {
+  if (loading || wakingBackend) {
     return (
       <div className="min-h-screen bg-[#070b14] flex items-center justify-center text-slate-400">
-        <div className="flex items-center gap-3">
-          <Activity className="w-6 h-6 text-cyan-400 animate-spin" />
-          <span className="font-semibold text-sm">Connecting to CricOracle Telemetry Stream...</span>
+        <div className="flex flex-col items-center gap-2 text-center px-6">
+          <div className="flex items-center gap-3">
+            <Activity className="w-6 h-6 text-cyan-400 animate-spin" />
+            <span className="font-semibold text-sm text-slate-200">
+              {wakingBackend
+                ? "Waking CricOracle Telemetry Server..."
+                : "Connecting to CricOracle Telemetry Stream..."}
+            </span>
+          </div>
+          {wakingBackend && (
+            <span className="text-xs text-slate-500">
+              Initial cold boot after idle sleep takes ~30s. Retrying automatically...
+            </span>
+          )}
         </div>
       </div>
     );

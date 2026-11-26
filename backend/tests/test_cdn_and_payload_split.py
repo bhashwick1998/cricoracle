@@ -28,7 +28,7 @@ class TestCdnAndPayloadSplit(unittest.TestCase):
         self.assertNotIn("origin", (res.headers.get("vary") or "").lower())
         self.assertEqual(
             res.headers.get("cache-control"),
-            "public, max-age=5, s-maxage=15, stale-while-revalidate=15",
+            "public, max-age=5, s-maxage=15, stale-while-revalidate=60, stale-if-error=300",
         )
         etag = res.headers.get("etag")
         self.assertTrue(etag and etag.startswith('W/"'))
@@ -76,7 +76,7 @@ class TestCdnAndPayloadSplit(unittest.TestCase):
         self.assertIn("matchup_tensor", static_body)
         self.assertEqual(
             static_res.headers.get("cache-control"),
-            "public, max-age=60, s-maxage=300, stale-while-revalidate=300",
+            "public, max-age=60, s-maxage=300, stale-while-revalidate=300, stale-if-error=600",
         )
 
     def test_system_and_post_remain_no_store(self):
