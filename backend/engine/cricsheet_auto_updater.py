@@ -41,7 +41,8 @@ from ..ml.parameter_optimizer import (
 
 logger = logging.getLogger("cricoracle.cricsheet_updater")
 
-CRICSHEET_RECENT_ZIP_URL = "https://cricsheet.org/downloads/recent.zip"
+CRICSHEET_RECENT_ZIP_URL = "https://cricsheet.org/downloads/recently_played_30_male_json.zip"
+CRICSHEET_FALLBACK_ZIP_URL = "https://cricsheet.org/downloads/recently_played_7_male_json.zip"
 OPTIMIZED_PARAMS_PATH = Path(__file__).parent.parent / "data" / "optimized_parameters.json"
 CRICSHEET_CACHE_DIR = Path(__file__).parent.parent / "data" / "cricsheet_cache"
 
@@ -75,27 +76,30 @@ class CricsheetAutoOptimizer:
         Falls back to local cache or synthetic calibration fixtures if offline.
         """
         matches_data = []
-        try:
-            logger.info(f"Downloading recent matches from {CRICSHEET_RECENT_ZIP_URL}...")
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                resp = await client.get(CRICSHEET_RECENT_ZIP_URL)
-                if resp.status_code == 200:
-                    with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
-                        json_files = [f for f in z.namelist() if f.endswith(".json") and not f.startswith("__")]
-                        logger.info(f"Extracted {len(json_files)} match files from Cricsheet recent archive.")
-                        for fname in json_files[:max_matches]:
-                            try:
-                                with z.open(fname) as jf:
-                                    m_json = json.load(jf)
-                                    matches_data.append(m_json)
-                                    # Cache locally for offline resilience
-                                    cache_file = CRICSHEET_CACHE_DIR / Path(fname).name
-                                    with open(cache_file, "w", encoding="utf-8") as out_f:
-                                        json.dump(m_json, out_f)
-                            except Exception as parse_e:
-                                logger.debug(f"Could not parse {fname}: {parse_e}")
-        except Exception as dl_e:
-            logger.warning(f"Live Cricsheet download skipped or failed ({dl_e}). Reading from local cache.")
+        for zip_url in (CRICSHEET_RECENT_ZIP_URL, CRICSHEET_FALLBACK_ZIP_URL):
+            try:
+                logger.info(f"Downloading recent matches from {zip_url}...")
+                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                    resp = await client.get(zip_url, headers={"User-Agent": "Mozilla/5.0 CricOracle/2.0"})
+                    if resp.status_code == 200:
+                        with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+                            json_files = [f for f in z.namelist() if f.endswith(".json") and not f.startswith("__")]
+                            logger.info(f"Extracted {len(json_files)} match files from Cricsheet recent archive.")
+                            limit = max_matches if max_matches and max_matches > 0 else len(json_files)
+                            for fname in json_files[:max(limit, 250)]:
+                                try:
+                                    with z.open(fname) as jf:
+                                        m_json = json.load(jf)
+                                        matches_data.append(m_json)
+                                        cache_file = CRICSHEET_CACHE_DIR / Path(fname).name
+                                        with open(cache_file, "w", encoding="utf-8") as out_f:
+                                            json.dump(m_json, out_f)
+                                except Exception as parse_e:
+                                    logger.debug(f"Could not parse {fname}: {parse_e}")
+                        if matches_data:
+                            break
+            except Exception as dl_e:
+                logger.warning(f"Live Cricsheet download failed for {zip_url} ({dl_e}).")
 
         # Read any existing local cache files if live download returned few/none
         if len(matches_data) < 5:
@@ -123,9 +127,9 @@ class CricsheetAutoOptimizer:
             m_type = info.get("match_type", "").upper()
             if m_type in ["T20", "IT20"]:
                 fmt = "T20I"
-            elif m_type in ["ODI", "MDM"]:
+            elif m_type in ["ODI", "ODM"]:
                 fmt = "ODI"
-            elif m_type in ["TEST", "MDM_TEST"]:
+            elif m_type in ["TEST", "MDM", "MDM_TEST"]:
                 fmt = "TEST"
             else:
                 continue
@@ -167,6 +171,11 @@ class CricsheetAutoOptimizer:
         teams_updated = 0
 
         try:
+            async with conn.execute("PRAGMA table_info(venues)") as v_cur:
+                venue_cols = {r[1] for r in await v_cur.fetchall()}
+            if "avg_first_innings_score_test" not in venue_cols:
+                await conn.execute("ALTER TABLE venues ADD COLUMN avg_first_innings_score_test INTEGER DEFAULT 310")
+
             for m in filtered_matches:
                 fmt = m["format"]
                 team_a = m["team_a"]
@@ -227,34 +236,55 @@ class CricsheetAutoOptimizer:
         # Generate base multi-year dataset (2021-2026) and enrich with newly downloaded matches
         synthetic_matches = generate_historical_calibration_matches(seed=101)
 
-        # Convert recent Cricsheet matches into calibration format
+        # Convert recent Cricsheet matches into calibration format using real innings checkpoints
         augmented_matches = list(synthetic_matches)
         for idx, m in enumerate(filtered_matches):
-            inn1_runs = 180
+            fmt = m["format"]
+            max_ov = 20.0 if fmt == "T20I" else (50.0 if fmt == "ODI" else 90.0)
+            target_ckpt_ov = max(4.0, round(max_ov * 0.35, 1))
+            inn1_runs = 0
+            snap_ov = target_ckpt_ov
+            snap_score = 0
+            snap_wkts = 0
+            captured = False
+
             if m.get("innings"):
-                inn1_runs = sum(
-                    d.get("runs", {}).get("total", 0)
-                    for ov in m["innings"][0].get("overs", [])
-                    for d in ov.get("deliveries", [])
-                )
+                overs_list = m["innings"][0].get("overs", [])
+                for ov_entry in overs_list:
+                    ov_num = float(ov_entry.get("over", 0)) + 1.0
+                    for d in ov_entry.get("deliveries", []):
+                        inn1_runs += d.get("runs", {}).get("total", 0)
+                        if not captured and "wickets" in d:
+                            snap_wkts += len(d["wickets"])
+                    if not captured and ov_num >= target_ckpt_ov:
+                        snap_ov = ov_num
+                        snap_score = inn1_runs
+                        captured = True
+
             if inn1_runs < 50:
-                inn1_runs = 175 if m["format"] == "T20I" else (275 if m["format"] == "ODI" else 330)
+                inn1_runs = 175 if fmt == "T20I" else (275 if fmt == "ODI" else 330)
+                snap_score = int(inn1_runs * 0.35)
+            elif not captured:
+                snap_ov = max(2.0, target_ckpt_ov)
+                snap_score = int(inn1_runs * 0.35)
 
             augmented_matches.append({
-                "match_id": 90000 + idx,
-                "format": m["format"],
-                "year": 2026,
-                "base_venue_par": float(inn1_runs),
-                "actual_final_score": inn1_runs,
-                "overs": 10.0 if m["format"] == "T20I" else (25.0 if m["format"] == "ODI" else 45.0),
-                "balls_faced": 25,
+                "match_id": f"CS_{fmt}_{90000 + idx}",
+                "year": int(str(m.get("date", "2026"))[:4] or 2026),
+                "format": fmt,
+                "max_overs": max_ov,
+                "venue_par": float(inn1_runs),
+                "boundary_avg_m": 68.0,
+                "pitch_type": "balanced",
+                "snapshot_overs": float(snap_ov),
+                "current_score": int(snap_score),
+                "current_wkts": min(8, int(snap_wkts)),
                 "control_pct": 0.82,
-                "finishers_in_dugout": 2,
-                "is_day_night": 1 if m["format"] != "TEST" else 0,
+                "striker_balls_faced": 25,
+                "finishers_count": 2,
+                "is_day_night": 1 if fmt != "TEST" else 0,
                 "dew_active": 0,
-                "avg_boundary_m": 68.0,
-                "current_score": int(inn1_runs * 0.52),
-                "wickets": 3
+                "actual_final_score": int(inn1_runs),
             })
 
         optimizer = ScoreParameterOptimizer(lambda_reg=0.04)

@@ -289,9 +289,12 @@ async def lifespan(app: FastAPI):
         except Exception as disc_err:
             logger.error(f"Error during startup live match auto-discovery: {disc_err}")
 
+    from .engine.render_cache_updater import start_background_cache_scheduler, stop_background_cache_scheduler
+    start_background_cache_scheduler()
     asyncio.create_task(bg_initial_discovery())
     yield
     # Shutdown
+    await stop_background_cache_scheduler()
     await ingestion_manager.stop()
 
 app = FastAPI(title="CricOracle API", version="1.0.0", lifespan=lifespan)
@@ -3109,3 +3112,10 @@ def simulate_live_match_api(req: LiveMatchSimRequest):
         "input": req.dict(),
         "simulation": res
     }
+
+
+@app.get("/api/system/cache-status")
+async def get_system_cache_status():
+    """Returns automated Render analytics and Cricsheet cache freshness status."""
+    from .engine.render_cache_updater import get_cache_refresh_status
+    return {"success": True, **get_cache_refresh_status()}

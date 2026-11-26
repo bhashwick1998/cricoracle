@@ -11,7 +11,8 @@
     "rotation_pct": 16.9,
     "batter_power_rating": 53.3,
     "bowler_power_rating": 64.9,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "08548b13_a089f93f_TEST": {
     "batter_id": "08548b13",
@@ -25,7 +26,8 @@
     "rotation_pct": 31.9,
     "batter_power_rating": 53.4,
     "bowler_power_rating": 64.9,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "08548b13_a089f93f_T20": {
     "batter_id": "08548b13",
@@ -34,12 +36,13 @@
     "bowler_name": "Mohammad Abbas",
     "expected_runs_per_over": 10.4,
     "wicket_risk_pct": 11.4,
-    "dot_pct": 31.1,
+    "dot_pct": 31.2,
     "boundary_pct": 26.3,
     "rotation_pct": 40.6,
     "batter_power_rating": 46.7,
     "bowler_power_rating": 10.0,
-    "tactical_edge": "BATTER"
+    "tactical_edge": "BATTER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "ba607b88_45a7e761_T20": {
     "batter_id": "ba607b88",
@@ -47,13 +50,14 @@
     "batter_name": "V Kohli",
     "bowler_name": "Shaheen Shah Afridi",
     "expected_runs_per_over": 7.9,
-    "wicket_risk_pct": 28.7,
+    "wicket_risk_pct": 28.6,
     "dot_pct": 39.9,
     "boundary_pct": 18.3,
     "rotation_pct": 36.3,
-    "batter_power_rating": 64.3,
-    "bowler_power_rating": 74.8,
-    "tactical_edge": "BOWLER"
+    "batter_power_rating": 64.4,
+    "bowler_power_rating": 74.7,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "08548b13_a089f93f_ODI": {
     "batter_id": "08548b13",
@@ -61,13 +65,14 @@
     "batter_name": "PHKD Mendis",
     "bowler_name": "Mohammad Abbas",
     "expected_runs_per_over": 6.6,
-    "wicket_risk_pct": 32.2,
+    "wicket_risk_pct": 32.3,
     "dot_pct": 45.7,
-    "boundary_pct": 14.7,
+    "boundary_pct": 14.6,
     "rotation_pct": 33.4,
-    "batter_power_rating": 49.6,
-    "bowler_power_rating": 54.4,
-    "tactical_edge": "NEUTRAL"
+    "batter_power_rating": 49.5,
+    "bowler_power_rating": 54.5,
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "2e171977_45a7e761_T20": {
     "batter_id": "2e171977",
@@ -79,9 +84,10 @@
     "dot_pct": 48.2,
     "boundary_pct": 14.0,
     "rotation_pct": 27.0,
-    "batter_power_rating": 46.6,
-    "bowler_power_rating": 74.8,
-    "tactical_edge": "BOWLER"
+    "batter_power_rating": 46.5,
+    "bowler_power_rating": 74.7,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "ba607b88_24bb1c2f_T20": {
     "batter_id": "ba607b88",
@@ -89,13 +95,14 @@
     "batter_name": "V Kohli",
     "bowler_name": "Haris Rauf",
     "expected_runs_per_over": 7.1,
-    "wicket_risk_pct": 23.3,
-    "dot_pct": 40.3,
-    "boundary_pct": 13.9,
+    "wicket_risk_pct": 23.2,
+    "dot_pct": 40.2,
+    "boundary_pct": 14.0,
     "rotation_pct": 41.5,
-    "batter_power_rating": 64.3,
-    "bowler_power_rating": 71.5,
-    "tactical_edge": "BOWLER"
+    "batter_power_rating": 64.4,
+    "bowler_power_rating": 71.4,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "7d608e12_a089f93f_TEST": {
     "batter_id": "7d608e12",
@@ -109,7 +116,8 @@
     "rotation_pct": 26.7,
     "batter_power_rating": 52.8,
     "bowler_power_rating": 64.9,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "ba607b88_45a7e761_ODI": {
     "batter_id": "ba607b88",
@@ -122,8 +130,9 @@
     "boundary_pct": 10.6,
     "rotation_pct": 48.8,
     "batter_power_rating": 60.6,
-    "bowler_power_rating": 68.7,
-    "tactical_edge": "BOWLER"
+    "bowler_power_rating": 68.6,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "b17e2f24_dadbdb68_ODI": {
     "batter_id": "b17e2f24",
@@ -137,7 +146,8 @@
     "rotation_pct": 33.6,
     "batter_power_rating": 58.9,
     "bowler_power_rating": 63.0,
-    "tactical_edge": "NEUTRAL"
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "8dd02a98_a089f93f_TEST": {
     "batter_id": "8dd02a98",
@@ -151,7 +161,8 @@
     "rotation_pct": 17.7,
     "batter_power_rating": 51.4,
     "bowler_power_rating": 64.9,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "7d608e12_89c16049_TEST": {
     "batter_id": "7d608e12",
@@ -162,10 +173,11 @@
     "wicket_risk_pct": 11.4,
     "dot_pct": 53.6,
     "boundary_pct": 10.0,
-    "rotation_pct": 34.5,
+    "rotation_pct": 34.4,
     "batter_power_rating": 52.8,
-    "bowler_power_rating": 49.6,
-    "tactical_edge": "NEUTRAL"
+    "bowler_power_rating": 49.7,
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "5d1e7582_89c16049_TEST": {
     "batter_id": "5d1e7582",
@@ -173,13 +185,14 @@
     "batter_name": "BKG Mendis",
     "bowler_name": "Agha Salman",
     "expected_runs_per_over": 5.4,
-    "wicket_risk_pct": 11.2,
+    "wicket_risk_pct": 11.3,
     "dot_pct": 52.8,
     "boundary_pct": 9.7,
     "rotation_pct": 35.6,
     "batter_power_rating": 53.3,
-    "bowler_power_rating": 49.6,
-    "tactical_edge": "NEUTRAL"
+    "bowler_power_rating": 49.7,
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "89f1d2d6_4751caa3_TEST": {
     "batter_id": "89f1d2d6",
@@ -187,13 +200,14 @@
     "batter_name": "Azan Awais",
     "bowler_name": "CBRLS Kumara",
     "expected_runs_per_over": 6.3,
-    "wicket_risk_pct": 34.8,
-    "dot_pct": 47.0,
+    "wicket_risk_pct": 34.9,
+    "dot_pct": 47.1,
     "boundary_pct": 13.6,
     "rotation_pct": 32.5,
-    "batter_power_rating": 47.4,
+    "batter_power_rating": 47.3,
     "bowler_power_rating": 56.1,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "89f1d2d6_afe830a2_TEST": {
     "batter_id": "89f1d2d6",
@@ -201,13 +215,14 @@
     "batter_name": "Azan Awais",
     "bowler_name": "RMMP Rathnayake",
     "expected_runs_per_over": 6.4,
-    "wicket_risk_pct": 34.0,
+    "wicket_risk_pct": 34.1,
     "dot_pct": 46.6,
     "boundary_pct": 13.9,
     "rotation_pct": 32.8,
-    "batter_power_rating": 47.4,
+    "batter_power_rating": 47.3,
     "bowler_power_rating": 54.9,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "89f1d2d6_de3d549a_TEST": {
     "batter_id": "89f1d2d6",
@@ -215,13 +230,14 @@
     "batter_name": "Azan Awais",
     "bowler_name": "AM Fernando",
     "expected_runs_per_over": 6.0,
-    "wicket_risk_pct": 36.6,
+    "wicket_risk_pct": 36.7,
     "dot_pct": 48.0,
     "boundary_pct": 12.8,
     "rotation_pct": 31.9,
-    "batter_power_rating": 47.4,
+    "batter_power_rating": 47.3,
     "bowler_power_rating": 58.8,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "8afe73e2_2e171977_ODI": {
     "batter_id": "8afe73e2",
@@ -229,13 +245,14 @@
     "batter_name": "WA Young",
     "bowler_name": "AR Patel",
     "expected_runs_per_over": 5.0,
-    "wicket_risk_pct": 22.5,
-    "dot_pct": 52.3,
+    "wicket_risk_pct": 22.4,
+    "dot_pct": 52.2,
     "boundary_pct": 8.1,
     "rotation_pct": 35.5,
-    "batter_power_rating": 50.6,
-    "bowler_power_rating": 59.4,
-    "tactical_edge": "BOWLER"
+    "batter_power_rating": 50.5,
+    "bowler_power_rating": 59.3,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "8afe73e2_abb7c76c_ODI": {
     "batter_id": "8afe73e2",
@@ -243,13 +260,14 @@
     "batter_name": "WA Young",
     "bowler_name": "Abrar Ahmed",
     "expected_runs_per_over": 4.3,
-    "wicket_risk_pct": 18.7,
+    "wicket_risk_pct": 18.8,
     "dot_pct": 57.5,
     "boundary_pct": 6.4,
     "rotation_pct": 32.8,
-    "batter_power_rating": 50.6,
+    "batter_power_rating": 50.5,
     "bowler_power_rating": 69.3,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "8afe73e2_8d2c70ad_ODI": {
     "batter_id": "8afe73e2",
@@ -261,9 +279,10 @@
     "dot_pct": 40.1,
     "boundary_pct": 9.4,
     "rotation_pct": 44.6,
-    "batter_power_rating": 50.6,
+    "batter_power_rating": 50.5,
     "bowler_power_rating": 68.7,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "e38bce7a_2e171977_ODI": {
     "batter_id": "e38bce7a",
@@ -275,9 +294,10 @@
     "dot_pct": 46.7,
     "boundary_pct": 13.8,
     "rotation_pct": 32.7,
-    "batter_power_rating": 51.6,
-    "bowler_power_rating": 59.4,
-    "tactical_edge": "BOWLER"
+    "batter_power_rating": 51.5,
+    "bowler_power_rating": 59.3,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:29:09.173828+00:00"
   },
   "8a75e999_de3d549a_TEST": {
     "batter_id": "8a75e999",
@@ -291,7 +311,8 @@
     "rotation_pct": 36.8,
     "batter_power_rating": 56.0,
     "bowler_power_rating": 58.8,
-    "tactical_edge": "NEUTRAL"
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "e4a0deae_abb7c76c_ODI": {
     "batter_id": "e4a0deae",
@@ -299,41 +320,44 @@
     "batter_name": "MJ Santner",
     "bowler_name": "Abrar Ahmed",
     "expected_runs_per_over": 5.2,
-    "wicket_risk_pct": 41.9,
+    "wicket_risk_pct": 42.0,
     "dot_pct": 50.9,
     "boundary_pct": 10.5,
-    "rotation_pct": 30.0,
-    "batter_power_rating": 49.6,
+    "rotation_pct": 29.9,
+    "batter_power_rating": 49.5,
     "bowler_power_rating": 69.3,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "d07c1b2f_de3d549a_TEST": {
     "batter_id": "d07c1b2f",
     "bowler_id": "de3d549a",
     "batter_name": "Saud Shakeel",
     "bowler_name": "AM Fernando",
-    "expected_runs_per_over": 5.9,
-    "wicket_risk_pct": 37.0,
-    "dot_pct": 55.5,
-    "boundary_pct": 15.1,
-    "rotation_pct": 21.9,
+    "expected_runs_per_over": 4.9,
+    "wicket_risk_pct": 26.4,
+    "dot_pct": 57.9,
+    "boundary_pct": 10.2,
+    "rotation_pct": 27.0,
     "batter_power_rating": 51.4,
     "bowler_power_rating": 58.8,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "d07c1b2f_4751caa3_TEST": {
     "batter_id": "d07c1b2f",
     "bowler_id": "4751caa3",
     "batter_name": "Saud Shakeel",
     "bowler_name": "CBRLS Kumara",
-    "expected_runs_per_over": 6.7,
-    "wicket_risk_pct": 32.1,
-    "dot_pct": 45.6,
-    "boundary_pct": 14.7,
-    "rotation_pct": 33.4,
+    "expected_runs_per_over": 5.1,
+    "wicket_risk_pct": 35.0,
+    "dot_pct": 56.6,
+    "boundary_pct": 11.4,
+    "rotation_pct": 25.0,
     "batter_power_rating": 51.4,
     "bowler_power_rating": 56.1,
-    "tactical_edge": "NEUTRAL"
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "8a75e999_4751caa3_TEST": {
     "batter_id": "8a75e999",
@@ -341,13 +365,14 @@
     "batter_name": "Babar Azam",
     "bowler_name": "CBRLS Kumara",
     "expected_runs_per_over": 6.1,
-    "wicket_risk_pct": 12.5,
-    "dot_pct": 56.2,
-    "boundary_pct": 14.7,
-    "rotation_pct": 26.9,
+    "wicket_risk_pct": 16.0,
+    "dot_pct": 56.5,
+    "boundary_pct": 15.0,
+    "rotation_pct": 25.7,
     "batter_power_rating": 56.0,
     "bowler_power_rating": 56.1,
-    "tactical_edge": "NEUTRAL"
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "d07c1b2f_de7d833e_TEST": {
     "batter_id": "d07c1b2f",
@@ -360,8 +385,9 @@
     "boundary_pct": 8.3,
     "rotation_pct": 33.5,
     "batter_power_rating": 51.4,
-    "bowler_power_rating": 54.9,
-    "tactical_edge": "NEUTRAL"
+    "bowler_power_rating": 55.0,
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "8a75e999_de7d833e_TEST": {
     "batter_id": "8a75e999",
@@ -374,8 +400,9 @@
     "boundary_pct": 10.2,
     "rotation_pct": 25.9,
     "batter_power_rating": 56.0,
-    "bowler_power_rating": 54.9,
-    "tactical_edge": "NEUTRAL"
+    "bowler_power_rating": 55.0,
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "68c56d09_8d2c70ad_ODI": {
     "batter_id": "68c56d09",
@@ -389,21 +416,23 @@
     "rotation_pct": 28.0,
     "batter_power_rating": 40.4,
     "bowler_power_rating": 68.7,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "d07c1b2f_afe830a2_TEST": {
     "batter_id": "d07c1b2f",
     "bowler_id": "afe830a2",
     "batter_name": "Saud Shakeel",
     "bowler_name": "RMMP Rathnayake",
-    "expected_runs_per_over": 6.8,
-    "wicket_risk_pct": 31.3,
-    "dot_pct": 45.2,
-    "boundary_pct": 15.0,
-    "rotation_pct": 33.7,
+    "expected_runs_per_over": 4.5,
+    "wicket_risk_pct": 18.0,
+    "dot_pct": 60.0,
+    "boundary_pct": 8.0,
+    "rotation_pct": 28.8,
     "batter_power_rating": 51.4,
     "bowler_power_rating": 54.9,
-    "tactical_edge": "NEUTRAL"
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "89c16049_afe830a2_TEST": {
     "batter_id": "89c16049",
@@ -412,12 +441,13 @@
     "bowler_name": "RMMP Rathnayake",
     "expected_runs_per_over": 7.0,
     "wicket_risk_pct": 29.9,
-    "dot_pct": 44.5,
-    "boundary_pct": 15.6,
-    "rotation_pct": 34.2,
-    "batter_power_rating": 53.4,
+    "dot_pct": 44.6,
+    "boundary_pct": 15.5,
+    "rotation_pct": 34.1,
+    "batter_power_rating": 53.3,
     "bowler_power_rating": 54.9,
-    "tactical_edge": "NEUTRAL"
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "d07c1b2f_4bbfddd5_TEST": {
     "batter_id": "d07c1b2f",
@@ -425,13 +455,14 @@
     "batter_name": "Saud Shakeel",
     "bowler_name": "GS Dinusha",
     "expected_runs_per_over": 7.5,
-    "wicket_risk_pct": 25.8,
+    "wicket_risk_pct": 25.9,
     "dot_pct": 42.6,
     "boundary_pct": 17.1,
     "rotation_pct": 35.4,
     "batter_power_rating": 51.4,
     "bowler_power_rating": 47.4,
-    "tactical_edge": "NEUTRAL"
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "d07c1b2f_7d608e12_TEST": {
     "batter_id": "d07c1b2f",
@@ -445,7 +476,8 @@
     "rotation_pct": 23.9,
     "batter_power_rating": 51.4,
     "bowler_power_rating": 50.8,
-    "tactical_edge": "NEUTRAL"
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "69e23303_42b34cb1_TEST": {
     "batter_id": "69e23303",
@@ -459,7 +491,8 @@
     "rotation_pct": 32.3,
     "batter_power_rating": 41.4,
     "bowler_power_rating": 51.0,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "69e23303_449f4e3c_TEST": {
     "batter_id": "69e23303",
@@ -473,7 +506,8 @@
     "rotation_pct": 30.9,
     "batter_power_rating": 41.4,
     "bowler_power_rating": 56.9,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "ba607b88_3fb19989_ODI": {
     "batter_id": "ba607b88",
@@ -487,7 +521,8 @@
     "rotation_pct": 40.4,
     "batter_power_rating": 60.6,
     "bowler_power_rating": 72.3,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "ba607b88_ded9240e_ODI": {
     "batter_id": "ba607b88",
@@ -501,7 +536,8 @@
     "rotation_pct": 40.0,
     "batter_power_rating": 60.6,
     "bowler_power_rating": 66.8,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "ba607b88_e84ac20c_ODI": {
     "batter_id": "ba607b88",
@@ -515,7 +551,8 @@
     "rotation_pct": 25.6,
     "batter_power_rating": 60.6,
     "bowler_power_rating": 67.0,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "372455c4_ded9240e_ODI": {
     "batter_id": "372455c4",
@@ -523,13 +560,14 @@
     "batter_name": "Q de Kock",
     "bowler_name": "PJ Cummins",
     "expected_runs_per_over": 7.3,
-    "wicket_risk_pct": 14.6,
+    "wicket_risk_pct": 14.5,
     "dot_pct": 43.4,
     "boundary_pct": 15.7,
     "rotation_pct": 38.2,
-    "batter_power_rating": 60.7,
+    "batter_power_rating": 60.8,
     "bowler_power_rating": 66.8,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "8a75e999_8d2c70ad_ODI": {
     "batter_id": "8a75e999",
@@ -543,7 +581,8 @@
     "rotation_pct": 37.6,
     "batter_power_rating": 56.2,
     "bowler_power_rating": 68.7,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "ba607b88_0b60eb09_ODI": {
     "batter_id": "ba607b88",
@@ -551,13 +590,14 @@
     "batter_name": "V Kohli",
     "bowler_name": "KA Maharaj",
     "expected_runs_per_over": 5.4,
-    "wicket_risk_pct": 18.8,
-    "dot_pct": 44.1,
-    "boundary_pct": 6.4,
+    "wicket_risk_pct": 18.7,
+    "dot_pct": 44.0,
+    "boundary_pct": 6.5,
     "rotation_pct": 46.1,
     "batter_power_rating": 60.6,
-    "bowler_power_rating": 64.5,
-    "tactical_edge": "NEUTRAL"
+    "bowler_power_rating": 64.4,
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:31:46.425252+00:00"
   },
   "12b610c2_e84ac20c_ODI": {
     "batter_id": "12b610c2",
@@ -569,9 +609,10 @@
     "dot_pct": 50.6,
     "boundary_pct": 24.8,
     "rotation_pct": 20.7,
-    "batter_power_rating": 56.2,
+    "batter_power_rating": 56.1,
     "bowler_power_rating": 67.0,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "99b75528_e84ac20c_ODI": {
     "batter_id": "99b75528",
@@ -585,7 +626,8 @@
     "rotation_pct": 46.7,
     "batter_power_rating": 61.8,
     "bowler_power_rating": 67.0,
-    "tactical_edge": "NEUTRAL"
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "afe830a2_45a7e761_ODI": {
     "batter_id": "afe830a2",
@@ -598,22 +640,24 @@
     "boundary_pct": 8.1,
     "rotation_pct": 28.0,
     "batter_power_rating": 40.4,
-    "bowler_power_rating": 68.7,
-    "tactical_edge": "BOWLER"
+    "bowler_power_rating": 68.6,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "372455c4_5574750c_ODI": {
     "batter_id": "372455c4",
     "bowler_id": "5574750c",
     "batter_name": "Q de Kock",
     "bowler_name": "JC Archer",
-    "expected_runs_per_over": 6.4,
-    "wicket_risk_pct": 14.3,
-    "dot_pct": 54.4,
-    "boundary_pct": 15.4,
-    "rotation_pct": 27.7,
-    "batter_power_rating": 60.7,
-    "bowler_power_rating": 66.1,
-    "tactical_edge": "NEUTRAL"
+    "expected_runs_per_over": 6.5,
+    "wicket_risk_pct": 13.9,
+    "dot_pct": 54.2,
+    "boundary_pct": 15.5,
+    "rotation_pct": 27.8,
+    "batter_power_rating": 60.8,
+    "bowler_power_rating": 65.0,
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "372455c4_b07c8cdc_T20": {
     "batter_id": "372455c4",
@@ -622,12 +666,13 @@
     "bowler_name": "Amite Hasan",
     "expected_runs_per_over": 11.2,
     "wicket_risk_pct": 11.4,
-    "dot_pct": 27.8,
+    "dot_pct": 27.7,
     "boundary_pct": 29.0,
-    "rotation_pct": 41.2,
+    "rotation_pct": 41.3,
     "batter_power_rating": 56.4,
     "bowler_power_rating": 10.0,
-    "tactical_edge": "BATTER"
+    "tactical_edge": "BATTER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "ba607b88_a97c8ec2_ODI": {
     "batter_id": "ba607b88",
@@ -637,11 +682,12 @@
     "expected_runs_per_over": 6.3,
     "wicket_risk_pct": 20.0,
     "dot_pct": 41.4,
-    "boundary_pct": 10.0,
+    "boundary_pct": 10.1,
     "rotation_pct": 44.9,
     "batter_power_rating": 60.6,
-    "bowler_power_rating": 63.0,
-    "tactical_edge": "NEUTRAL"
+    "bowler_power_rating": 62.9,
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "99b75528_bb34fd31_ODI": {
     "batter_id": "99b75528",
@@ -655,7 +701,8 @@
     "rotation_pct": 34.6,
     "batter_power_rating": 61.8,
     "bowler_power_rating": 61.6,
-    "tactical_edge": "NEUTRAL"
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "372455c4_e84ac20c_ODI": {
     "batter_id": "372455c4",
@@ -665,11 +712,12 @@
     "expected_runs_per_over": 6.4,
     "wicket_risk_pct": 21.2,
     "dot_pct": 35.7,
-    "boundary_pct": 8.5,
+    "boundary_pct": 8.6,
     "rotation_pct": 51.8,
-    "batter_power_rating": 60.7,
+    "batter_power_rating": 60.8,
     "bowler_power_rating": 67.0,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "12b610c2_45a7e761_ODI": {
     "batter_id": "12b610c2",
@@ -681,9 +729,10 @@
     "dot_pct": 45.2,
     "boundary_pct": 16.3,
     "rotation_pct": 32.6,
-    "batter_power_rating": 56.2,
-    "bowler_power_rating": 68.7,
-    "tactical_edge": "BOWLER"
+    "batter_power_rating": 56.1,
+    "bowler_power_rating": 68.6,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "ba607b88_5574750c_ODI": {
     "batter_id": "ba607b88",
@@ -691,13 +740,14 @@
     "batter_name": "V Kohli",
     "bowler_name": "JC Archer",
     "expected_runs_per_over": 6.2,
-    "wicket_risk_pct": 33.4,
-    "dot_pct": 54.4,
-    "boundary_pct": 15.8,
-    "rotation_pct": 23.3,
+    "wicket_risk_pct": 33.1,
+    "dot_pct": 54.2,
+    "boundary_pct": 15.9,
+    "rotation_pct": 23.4,
     "batter_power_rating": 60.6,
-    "bowler_power_rating": 66.1,
-    "tactical_edge": "BOWLER"
+    "bowler_power_rating": 65.0,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "80fe764d_8d2c70ad_ODI": {
     "batter_id": "80fe764d",
@@ -711,7 +761,8 @@
     "rotation_pct": 36.2,
     "batter_power_rating": 52.2,
     "bowler_power_rating": 68.7,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "372455c4_bb34fd31_ODI": {
     "batter_id": "372455c4",
@@ -721,11 +772,12 @@
     "expected_runs_per_over": 9.2,
     "wicket_risk_pct": 12.8,
     "dot_pct": 32.3,
-    "boundary_pct": 20.8,
+    "boundary_pct": 20.9,
     "rotation_pct": 44.6,
-    "batter_power_rating": 60.7,
+    "batter_power_rating": 60.8,
     "bowler_power_rating": 61.6,
-    "tactical_edge": "BATTER"
+    "tactical_edge": "BATTER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "80fe764d_45a7e761_ODI": {
     "batter_id": "80fe764d",
@@ -733,13 +785,14 @@
     "batter_name": "Tanzid Hasan",
     "bowler_name": "Shaheen Shah Afridi",
     "expected_runs_per_over": 3.7,
-    "wicket_risk_pct": 36.4,
+    "wicket_risk_pct": 36.3,
     "dot_pct": 61.9,
     "boundary_pct": 6.6,
     "rotation_pct": 24.3,
     "batter_power_rating": 52.2,
-    "bowler_power_rating": 68.7,
-    "tactical_edge": "BOWLER"
+    "bowler_power_rating": 68.6,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "afe830a2_ded9240e_ODI": {
     "batter_id": "afe830a2",
@@ -753,7 +806,8 @@
     "rotation_pct": 28.4,
     "batter_power_rating": 40.4,
     "bowler_power_rating": 66.8,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "8a75e999_ded9240e_ODI": {
     "batter_id": "8a75e999",
@@ -767,7 +821,8 @@
     "rotation_pct": 21.9,
     "batter_power_rating": 56.2,
     "bowler_power_rating": 66.8,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "372455c4_5574750c_T20": {
     "batter_id": "372455c4",
@@ -780,8 +835,9 @@
     "boundary_pct": 23.0,
     "rotation_pct": 35.9,
     "batter_power_rating": 56.4,
-    "bowler_power_rating": 71.6,
-    "tactical_edge": "BOWLER"
+    "bowler_power_rating": 71.5,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "b681e71e_f834dcfc_T20": {
     "batter_id": "b681e71e",
@@ -795,7 +851,8 @@
     "rotation_pct": 31.2,
     "batter_power_rating": 58.4,
     "bowler_power_rating": 71.4,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "99b75528_3086f7a4_T20": {
     "batter_id": "99b75528",
@@ -809,7 +866,8 @@
     "rotation_pct": 30.6,
     "batter_power_rating": 56.7,
     "bowler_power_rating": 73.9,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "8a75e999_5574750c_T20": {
     "batter_id": "8a75e999",
@@ -821,9 +879,10 @@
     "dot_pct": 42.8,
     "boundary_pct": 18.8,
     "rotation_pct": 29.6,
-    "batter_power_rating": 56.2,
-    "bowler_power_rating": 71.6,
-    "tactical_edge": "BOWLER"
+    "batter_power_rating": 56.3,
+    "bowler_power_rating": 71.5,
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "b681e71e_3086f7a4_T20": {
     "batter_id": "b681e71e",
@@ -837,7 +896,8 @@
     "rotation_pct": 30.9,
     "batter_power_rating": 58.4,
     "bowler_power_rating": 73.9,
-    "tactical_edge": "BOWLER"
+    "tactical_edge": "BOWLER",
+    "_updated_at": "2026-11-26T04:35:17.436810+00:00"
   },
   "85ec8e33_8f2dfebf_ODI": {
     "batter_id": "85ec8e33",
@@ -2196,5 +2256,146 @@
     "batter_power_rating": 40.7,
     "bowler_power_rating": 47.0,
     "tactical_edge": "BOWLER"
+  },
+  "35828bdd_59559bc2_T20": {
+    "batter_id": "35828bdd",
+    "bowler_id": "59559bc2",
+    "batter_name": "AN Davidson-Richards",
+    "bowler_name": "S Ismail",
+    "expected_runs_per_over": 2.8,
+    "wicket_risk_pct": 64.1,
+    "dot_pct": 63.7,
+    "boundary_pct": 5.9,
+    "rotation_pct": 14.7,
+    "batter_power_rating": 10.0,
+    "bowler_power_rating": 86.1,
+    "tactical_edge": "BOWLER"
+  },
+  "218d4d78_249d60c9_T20": {
+    "batter_id": "218d4d78",
+    "bowler_id": "249d60c9",
+    "batter_name": "MT Renshaw",
+    "bowler_name": "AU Rashid",
+    "expected_runs_per_over": 3.9,
+    "wicket_risk_pct": 49.8,
+    "dot_pct": 55.7,
+    "boundary_pct": 6.7,
+    "rotation_pct": 26.8,
+    "batter_power_rating": 43.5,
+    "bowler_power_rating": 76.9,
+    "tactical_edge": "BOWLER"
+  },
+  "218d4d78_4a461c24_T20": {
+    "batter_id": "218d4d78",
+    "bowler_id": "4a461c24",
+    "batter_name": "MT Renshaw",
+    "bowler_name": "LA Dawson",
+    "expected_runs_per_over": 4.6,
+    "wicket_risk_pct": 45.6,
+    "dot_pct": 53.1,
+    "boundary_pct": 8.8,
+    "rotation_pct": 28.5,
+    "batter_power_rating": 43.5,
+    "bowler_power_rating": 69.4,
+    "tactical_edge": "BOWLER"
+  },
+  "6287d981_bb34fd31_TEST": {
+    "batter_id": "6287d981",
+    "bowler_id": "bb34fd31",
+    "batter_name": "MJ Ackerman",
+    "bowler_name": "Shoriful Islam",
+    "expected_runs_per_over": 6.3,
+    "wicket_risk_pct": 34.9,
+    "dot_pct": 47.1,
+    "boundary_pct": 13.5,
+    "rotation_pct": 32.5,
+    "batter_power_rating": 49.2,
+    "bowler_power_rating": 58.0,
+    "tactical_edge": "BOWLER"
+  },
+  "d3a1c63d_bb34fd31_TEST": {
+    "batter_id": "d3a1c63d",
+    "bowler_id": "bb34fd31",
+    "batter_name": "T de Zorzi",
+    "bowler_name": "Shoriful Islam",
+    "expected_runs_per_over": 6.4,
+    "wicket_risk_pct": 33.7,
+    "dot_pct": 46.4,
+    "boundary_pct": 14.0,
+    "rotation_pct": 32.9,
+    "batter_power_rating": 51.0,
+    "bowler_power_rating": 58.0,
+    "tactical_edge": "BOWLER"
+  },
+  "d3a1c63d_ef18b66e_TEST": {
+    "batter_id": "d3a1c63d",
+    "bowler_id": "ef18b66e",
+    "batter_name": "T de Zorzi",
+    "bowler_name": "Taskin Ahmed",
+    "expected_runs_per_over": 6.7,
+    "wicket_risk_pct": 31.8,
+    "dot_pct": 45.5,
+    "boundary_pct": 14.8,
+    "rotation_pct": 33.5,
+    "batter_power_rating": 51.0,
+    "bowler_power_rating": 55.2,
+    "tactical_edge": "NEUTRAL"
+  },
+  "6287d981_ef18b66e_TEST": {
+    "batter_id": "6287d981",
+    "bowler_id": "ef18b66e",
+    "batter_name": "MJ Ackerman",
+    "bowler_name": "Taskin Ahmed",
+    "expected_runs_per_over": 6.5,
+    "wicket_risk_pct": 33.0,
+    "dot_pct": 46.1,
+    "boundary_pct": 14.3,
+    "rotation_pct": 33.1,
+    "batter_power_rating": 49.2,
+    "bowler_power_rating": 55.2,
+    "tactical_edge": "BOWLER"
+  },
+  "35f173a0_ef18b66e_TEST": {
+    "batter_id": "35f173a0",
+    "bowler_id": "ef18b66e",
+    "batter_name": "MP Breetzke",
+    "bowler_name": "Taskin Ahmed",
+    "expected_runs_per_over": 5.7,
+    "wicket_risk_pct": 38.7,
+    "dot_pct": 49.1,
+    "boundary_pct": 11.9,
+    "rotation_pct": 31.2,
+    "batter_power_rating": 40.6,
+    "bowler_power_rating": 55.2,
+    "tactical_edge": "BOWLER"
+  },
+  "ba5e1069_dadbdb68_ODI": {
+    "batter_id": "ba5e1069",
+    "bowler_id": "dadbdb68",
+    "batter_name": "R Ravindra",
+    "bowler_name": "JA Duffy",
+    "expected_runs_per_over": 6.2,
+    "wicket_risk_pct": 35.7,
+    "dot_pct": 47.5,
+    "boundary_pct": 13.2,
+    "rotation_pct": 32.2,
+    "batter_power_rating": 53.0,
+    "bowler_power_rating": 63.0,
+    "tactical_edge": "BOWLER"
+  },
+  "ba607b88_3fb19989_T20": {
+    "batter_id": "ba607b88",
+    "bowler_id": "3fb19989",
+    "batter_name": "V Kohli",
+    "bowler_name": "MA Starc",
+    "expected_runs_per_over": 5.5,
+    "wicket_risk_pct": 21.0,
+    "dot_pct": 47.6,
+    "boundary_pct": 8.6,
+    "rotation_pct": 39.9,
+    "batter_power_rating": 64.4,
+    "bowler_power_rating": 70.2,
+    "tactical_edge": "NEUTRAL",
+    "_updated_at": "2026-11-26T04:29:43.607184+00:00"
   }
 }

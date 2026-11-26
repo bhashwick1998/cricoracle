@@ -10,7 +10,9 @@ Connects CricOracle with Render.com's Senior International Cricket Intelligence 
 import os
 import re
 import json
+import tempfile
 import urllib.request
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 
 RENDER_BASE_URL = "https://cricket-analytics-ghpv.onrender.com"
@@ -25,6 +27,15 @@ _memory_lookup: Optional[Dict[str, Any]] = None
 _memory_players: Dict[str, Dict[str, Any]] = {}
 _memory_adapt: Dict[str, Dict[str, Any]] = {}
 _memory_duels: Dict[str, Any] = {}
+
+
+def invalidate_render_caches() -> None:
+    """Clears in-memory Render caches so refreshed JSON snapshots load cleanly."""
+    global _memory_lookup, _memory_players, _memory_adapt, _memory_duels
+    _memory_lookup = None
+    _memory_players.clear()
+    _memory_adapt.clear()
+    _memory_duels.clear()
 
 # High-priority curated alias map for instant resolution
 KNOWN_ALIASES = {
@@ -193,8 +204,14 @@ def _load_duels_cache() -> Dict[str, Any]:
 def _save_duels_cache(cache: Dict[str, Any]):
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
-        with open(DUELS_CACHE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(cache, f, indent=2)
+        fd, tmp_name = tempfile.mkstemp(prefix=".render_duels.", suffix=".tmp", dir=DATA_DIR)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(cache, f, indent=2)
+            os.replace(tmp_name, DUELS_CACHE_FILE)
+        except Exception:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
     except Exception:
         pass
 
@@ -313,7 +330,8 @@ def get_render_crease_duel(
                     'rotation_pct': data.get('probabilities', {}).get('rotation_pct', 35.0),
                     'batter_power_rating': data.get('batter', {}).get('power_rating', 50.0),
                     'bowler_power_rating': data.get('bowler', {}).get('power_rating', 50.0),
-                    'tactical_edge': data.get('simulated_over', {}).get('tactical_edge', 'NEUTRAL')
+                    'tactical_edge': data.get('simulated_over', {}).get('tactical_edge', 'NEUTRAL'),
+                    '_updated_at': datetime.now(timezone.utc).isoformat()
                 }
                 duels_cache[cache_key] = sim_res
                 _save_duels_cache(duels_cache)

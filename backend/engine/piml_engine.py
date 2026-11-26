@@ -54,6 +54,11 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 # Cache for player foreign adaptability lookup from Render.com JSON files
 _RENDER_ADAPT_CACHE: Dict[str, Dict[str, Any]] = {}
 
+
+def invalidate_piml_render_cache() -> None:
+    """Clears cached Render adaptability JSON maps when disk snapshots are refreshed."""
+    _RENDER_ADAPT_CACHE.clear()
+
 def load_render_adaptability_dataset(fmt: str = "TEST") -> Dict[str, Any]:
     global _RENDER_ADAPT_CACHE
     fmt_key = fmt.upper()

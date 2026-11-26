@@ -115,6 +115,7 @@ async def init_db():
         await add_col("match_squads", "runs_conceded", "INTEGER DEFAULT 0")
         await add_col("match_squads", "wickets_taken", "INTEGER DEFAULT 0")
         await add_col("match_squads", "bowling_economy", "REAL DEFAULT 0.0")
+        await add_col("venues", "avg_first_innings_score_test", "INTEGER DEFAULT 310")
 
         # Ground-Truth Innings Integrity Migration for NZ vs IND 1st Test:
         # Match drawn: NZ 1st Innings (368), IND 1st Innings (720/9d), NZ 2nd Innings (239/5).

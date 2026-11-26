@@ -120,11 +120,18 @@ async def sync_cricket_analytics_players_to_db(conn: aiosqlite.Connection) -> in
     if not raw_players:
         return 0
 
+    valid_teams: Optional[set] = None
+    try:
+        async with conn.execute("SELECT id FROM teams") as t_cur:
+            valid_teams = {r[0] for r in await t_cur.fetchall()}
+    except Exception:
+        valid_teams = None
+
     inserted_count = 0
     for p in raw_players:
         c_code = p.get("country_id")
         our_team = COUNTRY_CODE_MAP.get(c_code)
-        if not our_team:
+        if not our_team or (valid_teams is not None and our_team not in valid_teams):
             continue
 
         raw_name = p.get("name", "").strip()

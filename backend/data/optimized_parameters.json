@@ -1,7 +1,7 @@
 {
-  "timestamp": "2026-11-23T04:14:48.144355+00:00",
+  "timestamp": "2026-11-26T04:36:31.627384+00:00",
   "source": "Cricsheet Recent Matches + Bayesian Regularized Optimizer",
-  "matches_analyzed": 600,
+  "matches_analyzed": 632,
   "formats": {
     "T20I": {
       "settled_early_mult": 1.0134,
@@ -14,13 +14,13 @@
       "geom_sensitivity": 0.0059,
       "venue_par_weight_bias": 0.5982,
       "accuracy_metrics": {
-        "baseline_mae": 13.53,
-        "optimized_mae": 9.24,
-        "baseline_rmse": 15.81,
-        "optimized_rmse": 10.95,
-        "mae_reduction_pct": 31.7,
-        "ci_coverage_pct": 82.4,
-        "mean_interval_width": 29.3
+        "baseline_mae": 13.33,
+        "optimized_mae": 9.62,
+        "baseline_rmse": 16.09,
+        "optimized_rmse": 11.61,
+        "mae_reduction_pct": 27.8,
+        "ci_coverage_pct": 81.8,
+        "mean_interval_width": 30.6
       }
     },
     "ODI": {
@@ -34,13 +34,13 @@
       "geom_sensitivity": 0.008,
       "venue_par_weight_bias": 0.5494,
       "accuracy_metrics": {
-        "baseline_mae": 21.78,
-        "optimized_mae": 14.97,
-        "baseline_rmse": 24.94,
-        "optimized_rmse": 18.59,
-        "mae_reduction_pct": 31.3,
-        "ci_coverage_pct": 75.0,
-        "mean_interval_width": 61.7
+        "baseline_mae": 16.53,
+        "optimized_mae": 14.22,
+        "baseline_rmse": 20.22,
+        "optimized_rmse": 17.68,
+        "mae_reduction_pct": 14.0,
+        "ci_coverage_pct": 87.1,
+        "mean_interval_width": 64.8
       }
     },
     "TEST": {
@@ -54,13 +54,13 @@
       "geom_sensitivity": 0.0057,
       "venue_par_weight_bias": 0.5164,
       "accuracy_metrics": {
-        "baseline_mae": 24.06,
-        "optimized_mae": 18.42,
-        "baseline_rmse": 30.34,
-        "optimized_rmse": 27.4,
-        "mae_reduction_pct": 23.4,
-        "ci_coverage_pct": 80.0,
-        "mean_interval_width": 92.6
+        "baseline_mae": 33.98,
+        "optimized_mae": 30.05,
+        "baseline_rmse": 40.84,
+        "optimized_rmse": 37.73,
+        "mae_reduction_pct": 11.6,
+        "ci_coverage_pct": 84.6,
+        "mean_interval_width": 105.5
       }
     }
   }

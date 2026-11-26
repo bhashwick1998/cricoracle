@@ -43,3 +43,7 @@ Thumbs.db
 # SQLite WAL & temporary files
 *.db-shm
 *.db-wal
+
+# Auto-refresh runtime state and downloaded Cricsheet match archives
+backend/data/.cache_refresh_state.json
+backend/data/cricsheet_cache/
