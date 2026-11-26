@@ -15,6 +15,7 @@ Keeps all local analytics snapshots synchronized automatically without manual sc
 """
 
 import asyncio
+import gc
 import json
 import logging
 import os
@@ -73,7 +74,20 @@ def _read_json_safe(path: Path, default: Any) -> Any:
 
 
 def _load_refresh_state() -> Dict[str, Any]:
-    return _read_json_safe(STATE_FILE_PATH, {})
+    state = _read_json_safe(STATE_FILE_PATH, {})
+    if state:
+        return state
+
+    # On fresh ephemeral containers (.cache_refresh_state.json absent), infer snapshot age from committed artifacts
+    seeded: Dict[str, Any] = {}
+    opt_data = _read_json_safe(DATA_DIR / "optimized_parameters.json", {})
+    opt_ts = opt_data.get("timestamp") if isinstance(opt_data, dict) else None
+    if opt_ts:
+        seeded["last_cricsheet_refresh_utc"] = opt_ts
+        t20_path = DATA_DIR / "render_players_t20.json"
+        if t20_path.exists() and t20_path.stat().st_size > 100_000:
+            seeded["last_render_refresh_utc"] = opt_ts
+    return seeded
 
 
 def _save_refresh_state(state: Dict[str, Any]) -> None:
@@ -228,6 +242,7 @@ async def refresh_render_snapshots(refresh_stale_duels_limit: int = 20) -> Dict[
                 summary["adaptability_by_format"][fmt] = len(merged_a)
             else:
                 summary["errors"].append(f"adaptability_{fmt}_fetch_failed")
+            gc.collect()
 
         # 2. Full Global Players Catalog + Lookup Enrichment
         all_p_data = await _fetch_json_with_retry(client, f"{RENDER_BASE_URL}/api/players?limit=5000")
@@ -251,8 +266,11 @@ async def refresh_render_snapshots(refresh_stale_duels_limit: int = 20) -> Dict[
             merged_cat = list(by_id.values())
             _atomic_write_json(PLAYERS_CATALOG_CACHE, merged_cat)
             summary["catalog_count"] = len(merged_cat)
+            del by_id, merged_cat
         else:
             summary["errors"].append("global_players_catalog_fetch_failed")
+        del all_p_data, existing_catalog
+        gc.collect()
 
         # 3. Enrich lookup candidates from /api/duel
         duel_meta = await _fetch_json_with_retry(
@@ -361,6 +379,7 @@ async def refresh_all_caches_if_stale(force: bool = False) -> Dict[str, Any]:
             if not r_sum.get("errors") or r_sum.get("catalog_count", 0) > 0:
                 state["last_render_refresh_utc"] = now_iso
                 state["last_render_summary"] = r_sum
+            gc.collect()
 
         if force or _is_stale(state.get("last_cricsheet_refresh_utc"), DEFAULT_CRICSHEET_TTL_HOURS):
             try:
@@ -379,6 +398,8 @@ async def refresh_all_caches_if_stale(force: bool = False) -> Dict[str, Any]:
             except Exception as exc:
                 logger.warning(f"Automated Cricsheet refresh skipped/failed cleanly: {exc}")
                 results["cricsheet"] = {"status": "error", "detail": str(exc)}
+            finally:
+                gc.collect()
 
         _save_refresh_state(state)
         return results
@@ -401,8 +422,8 @@ def get_cache_refresh_status() -> Dict[str, Any]:
 
 async def _background_refresh_loop() -> None:
     check_interval_sec = max(1800, int(min(DEFAULT_RENDER_TTL_HOURS, DEFAULT_CRICSHEET_TTL_HOURS) * 3600))
-    # Small startup yield so port binds and health checks succeed immediately
-    await asyncio.sleep(5)
+    # Yield long enough for cloud platform deploy cutover and health probes before background sync
+    await asyncio.sleep(30)
     while True:
         try:
             await refresh_all_caches_if_stale(force=False)

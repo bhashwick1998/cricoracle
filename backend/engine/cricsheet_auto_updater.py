@@ -19,6 +19,7 @@ Pipeline Steps:
 
 import os
 import io
+import gc
 import json
 import zipfile
 import logging
@@ -70,47 +71,132 @@ class CricsheetAutoOptimizer:
         self.db_path = db_path or DB_PATH
         CRICSHEET_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    async def download_recent_matches(self, max_matches: int = 100) -> List[Dict[str, Any]]:
+    def _extract_compact_senior_match(self, m_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extracts lightweight summary metrics for Senior Men's Internationals without retaining raw ball trees."""
+        info = m_json.get("info", {})
+        if str(info.get("gender", "male")).lower() != "male":
+            return None
+
+        m_type = str(info.get("match_type", "")).upper()
+        if m_type in ("T20", "IT20"):
+            fmt = "T20I"
+        elif m_type in ("ODI", "ODM"):
+            fmt = "ODI"
+        elif m_type in ("TEST", "MDM", "MDM_TEST"):
+            fmt = "TEST"
+        else:
+            return None
+
+        teams = info.get("teams", [])
+        if len(teams) < 2:
+            return None
+
+        code_a = TEAM_NAME_TO_CODE.get(teams[0])
+        code_b = TEAM_NAME_TO_CODE.get(teams[1])
+        if not code_a or not code_b or code_a not in TOP_INTERNATIONAL_TEAMS or code_b not in TOP_INTERNATIONAL_TEAMS:
+            return None
+
+        max_ov = 20.0 if fmt == "T20I" else (50.0 if fmt == "ODI" else 90.0)
+        target_ckpt_ov = max(4.0, round(max_ov * 0.35, 1))
+        inn1_runs = 0
+        snap_ov = target_ckpt_ov
+        snap_score = 0
+        snap_wkts = 0
+        captured = False
+
+        innings = m_json.get("innings", [])
+        if innings:
+            overs_list = innings[0].get("overs", [])
+            for ov_entry in overs_list:
+                ov_num = float(ov_entry.get("over", 0)) + 1.0
+                for d in ov_entry.get("deliveries", []):
+                    inn1_runs += d.get("runs", {}).get("total", 0)
+                    if not captured and "wickets" in d:
+                        snap_wkts += len(d["wickets"])
+                if not captured and ov_num >= target_ckpt_ov:
+                    snap_ov = ov_num
+                    snap_score = inn1_runs
+                    captured = True
+
+        return {
+            "_compact": True,
+            "format": fmt,
+            "team_a": code_a,
+            "team_b": code_b,
+            "date": (info.get("dates") or ["2026-01-01"])[0],
+            "venue": info.get("venue", "Unknown Venue"),
+            "city": info.get("city", "Unknown City"),
+            "outcome": info.get("outcome", {}),
+            "inn1_runs": inn1_runs,
+            "snap_ov": snap_ov,
+            "snap_score": snap_score,
+            "snap_wkts": snap_wkts,
+            "captured": captured,
+        }
+
+    async def download_recent_matches(
+        self, max_matches: int = 100, compact: bool = False
+    ) -> List[Dict[str, Any]]:
         """
         Downloads and extracts recent matches from Cricsheet official archive.
-        Falls back to local cache or synthetic calibration fixtures if offline.
+        When compact=True, filters & summarizes senior internationals on the fly to keep RSS minimal (<512 MB safe).
         """
-        matches_data = []
+        matches_data: List[Dict[str, Any]] = []
+        self._last_total_processed = 0
         for zip_url in (CRICSHEET_RECENT_ZIP_URL, CRICSHEET_FALLBACK_ZIP_URL):
             try:
                 logger.info(f"Downloading recent matches from {zip_url}...")
                 async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                     resp = await client.get(zip_url, headers={"User-Agent": "Mozilla/5.0 CricOracle/2.0"})
                     if resp.status_code == 200:
-                        with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+                        raw_bytes = resp.content
+                        del resp
+                        with zipfile.ZipFile(io.BytesIO(raw_bytes)) as z:
                             json_files = [f for f in z.namelist() if f.endswith(".json") and not f.startswith("__")]
                             logger.info(f"Extracted {len(json_files)} match files from Cricsheet recent archive.")
                             limit = max_matches if max_matches and max_matches > 0 else len(json_files)
-                            for fname in json_files[:max(limit, 250)]:
+                            selected = json_files[:max(limit, 250)]
+                            self._last_total_processed = len(selected)
+                            for fname in selected:
                                 try:
                                     with z.open(fname) as jf:
                                         m_json = json.load(jf)
+                                    if compact:
+                                        summary = self._extract_compact_senior_match(m_json)
+                                        if summary is not None:
+                                            matches_data.append(summary)
+                                        del m_json
+                                    else:
                                         matches_data.append(m_json)
                                         cache_file = CRICSHEET_CACHE_DIR / Path(fname).name
                                         with open(cache_file, "w", encoding="utf-8") as out_f:
                                             json.dump(m_json, out_f)
                                 except Exception as parse_e:
                                     logger.debug(f"Could not parse {fname}: {parse_e}")
-                        if matches_data:
+                        del raw_bytes
+                        gc.collect()
+                        if matches_data or self._last_total_processed > 0:
                             break
             except Exception as dl_e:
                 logger.warning(f"Live Cricsheet download failed for {zip_url} ({dl_e}).")
 
         # Read any existing local cache files if live download returned few/none
-        if len(matches_data) < 5:
+        if not matches_data and self._last_total_processed == 0:
             for c_file in CRICSHEET_CACHE_DIR.glob("*.json"):
                 try:
                     with open(c_file, "r", encoding="utf-8") as cf:
-                        matches_data.append(json.load(cf))
+                        m_json = json.load(cf)
+                    if compact:
+                        summary = self._extract_compact_senior_match(m_json)
+                        if summary is not None:
+                            matches_data.append(summary)
+                        del m_json
+                    else:
+                        matches_data.append(m_json)
                 except Exception:
                     pass
 
-        logger.info(f"Loaded {len(matches_data)} total Cricsheet match files for optimization.")
+        logger.info(f"Loaded {self._last_total_processed or len(matches_data)} total Cricsheet match files for optimization.")
         return matches_data
 
     def filter_senior_mens_international(self, raw_matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -119,6 +205,9 @@ class CricsheetAutoOptimizer:
         """
         valid_matches = []
         for m in raw_matches:
+            if m.get("_compact"):
+                valid_matches.append(m)
+                continue
             info = m.get("info", {})
             gender = info.get("gender", "male").lower()
             if gender != "male":
@@ -195,26 +284,38 @@ class CricsheetAutoOptimizer:
                     teams_updated += 2
 
                 # 2. Innings & Venue Scoring calibration
-                for inn_idx, inn_data in enumerate(m.get("innings", [])):
-                    runs = 0
-                    wkts = 0
-                    for over_entry in inn_data.get("overs", []):
-                        for deliv in over_entry.get("deliveries", []):
-                            runs += deliv.get("runs", {}).get("total", 0)
-                            if "wickets" in deliv:
-                                wkts += len(deliv["wickets"])
-
-                    # If 1st innings complete, update venue average with Bayesian shrinkage (weight 0.10)
-                    if inn_idx == 0 and runs > 50:
+                if m.get("_compact"):
+                    inn1_runs = int(m.get("inn1_runs") or 0)
+                    if inn1_runs > 50:
                         v_city = m.get("city", "").lower()
                         col_name = "avg_first_innings_score_t20" if fmt == "T20I" else ("avg_first_innings_score_odi" if fmt == "ODI" else "avg_first_innings_score_test")
-                        # Update any matching venue
                         await conn.execute(f"""
                             UPDATE venues SET
                                 {col_name} = CAST(ROUND({col_name} * 0.90 + ? * 0.10) AS INTEGER)
                             WHERE LOWER(city) LIKE ? OR LOWER(name) LIKE ?
-                        """, (runs, f"%{v_city}%", f"%{v_city}%"))
+                        """, (inn1_runs, f"%{v_city}%", f"%{v_city}%"))
                         venues_updated += 1
+                else:
+                    for inn_idx, inn_data in enumerate(m.get("innings", [])):
+                        runs = 0
+                        wkts = 0
+                        for over_entry in inn_data.get("overs", []):
+                            for deliv in over_entry.get("deliveries", []):
+                                runs += deliv.get("runs", {}).get("total", 0)
+                                if "wickets" in deliv:
+                                    wkts += len(deliv["wickets"])
+
+                        # If 1st innings complete, update venue average with Bayesian shrinkage (weight 0.10)
+                        if inn_idx == 0 and runs > 50:
+                            v_city = m.get("city", "").lower()
+                            col_name = "avg_first_innings_score_t20" if fmt == "T20I" else ("avg_first_innings_score_odi" if fmt == "ODI" else "avg_first_innings_score_test")
+                            # Update any matching venue
+                            await conn.execute(f"""
+                                UPDATE venues SET
+                                    {col_name} = CAST(ROUND({col_name} * 0.90 + ? * 0.10) AS INTEGER)
+                                WHERE LOWER(city) LIKE ? OR LOWER(name) LIKE ?
+                            """, (runs, f"%{v_city}%", f"%{v_city}%"))
+                            venues_updated += 1
 
             await conn.commit()
         except Exception as db_e:
@@ -242,24 +343,31 @@ class CricsheetAutoOptimizer:
             fmt = m["format"]
             max_ov = 20.0 if fmt == "T20I" else (50.0 if fmt == "ODI" else 90.0)
             target_ckpt_ov = max(4.0, round(max_ov * 0.35, 1))
-            inn1_runs = 0
-            snap_ov = target_ckpt_ov
-            snap_score = 0
-            snap_wkts = 0
-            captured = False
+            if m.get("_compact"):
+                inn1_runs = int(m.get("inn1_runs") or 0)
+                snap_ov = float(m.get("snap_ov") or target_ckpt_ov)
+                snap_score = int(m.get("snap_score") or 0)
+                snap_wkts = int(m.get("snap_wkts") or 0)
+                captured = bool(m.get("captured"))
+            else:
+                inn1_runs = 0
+                snap_ov = target_ckpt_ov
+                snap_score = 0
+                snap_wkts = 0
+                captured = False
 
-            if m.get("innings"):
-                overs_list = m["innings"][0].get("overs", [])
-                for ov_entry in overs_list:
-                    ov_num = float(ov_entry.get("over", 0)) + 1.0
-                    for d in ov_entry.get("deliveries", []):
-                        inn1_runs += d.get("runs", {}).get("total", 0)
-                        if not captured and "wickets" in d:
-                            snap_wkts += len(d["wickets"])
-                    if not captured and ov_num >= target_ckpt_ov:
-                        snap_ov = ov_num
-                        snap_score = inn1_runs
-                        captured = True
+                if m.get("innings"):
+                    overs_list = m["innings"][0].get("overs", [])
+                    for ov_entry in overs_list:
+                        ov_num = float(ov_entry.get("over", 0)) + 1.0
+                        for d in ov_entry.get("deliveries", []):
+                            inn1_runs += d.get("runs", {}).get("total", 0)
+                            if not captured and "wickets" in d:
+                                snap_wkts += len(d["wickets"])
+                        if not captured and ov_num >= target_ckpt_ov:
+                            snap_ov = ov_num
+                            snap_score = inn1_runs
+                            captured = True
 
             if inn1_runs < 50:
                 inn1_runs = 175 if fmt == "T20I" else (275 if fmt == "ODI" else 330)
@@ -323,16 +431,18 @@ class CricsheetAutoOptimizer:
     async def execute_full_recalibration(self, max_matches: int = 150) -> Dict[str, Any]:
         """
         Executes end-to-end download, parsing, database update, and parameter optimization.
+        Streams compact match summaries and offloads CPU-bound L-BFGS-B to a worker thread.
         """
-        raw_matches = await self.download_recent_matches(max_matches=max_matches)
-        filtered = self.filter_senior_mens_international(raw_matches)
+        filtered = await self.download_recent_matches(max_matches=max_matches, compact=True)
+        total_processed = getattr(self, "_last_total_processed", 0) or len(filtered)
         db_summary = await self.recalibrate_database_parameters(filtered)
-        opt_summary = self.run_bayesian_optimization(filtered)
+        opt_summary = await asyncio.to_thread(self.run_bayesian_optimization, filtered)
+        gc.collect()
 
         return {
             "status": "success",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "total_matches_processed": len(raw_matches),
+            "total_matches_processed": total_processed,
             "senior_international_matches": len(filtered),
             "database_updates": db_summary,
             "optimized_parameters": opt_summary["runtime_config"]["formats"]

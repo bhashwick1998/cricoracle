@@ -19,6 +19,16 @@ services:
         value: 3.11.9
       - key: PORT
         value: 10000
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
+      - key: NUMEXPR_NUM_THREADS
+        value: "1"
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       - key: CRICAPI_KEY_PAID
         sync: false
       - key: CORS_ALLOWED_ORIGINS

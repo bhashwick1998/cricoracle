@@ -8,6 +8,16 @@ Provides REST API & WebSocket Realtime streaming for:
 """
 
 import os
+
+for _env_k, _env_v in (
+    ("OMP_NUM_THREADS", "1"),
+    ("OPENBLAS_NUM_THREADS", "1"),
+    ("MKL_NUM_THREADS", "1"),
+    ("NUMEXPR_NUM_THREADS", "1"),
+    ("MALLOC_ARENA_MAX", "2"),
+):
+    os.environ.setdefault(_env_k, _env_v)
+
 import json
 import time
 import hashlib

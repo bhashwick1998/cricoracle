@@ -4736,7 +4736,7 @@
     "name": "Maaz Sadaqat",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "j hermann": {
     "id": "e87aeca2",
@@ -5324,7 +5324,7 @@
     "name": "Sheel Patel",
     "country": null,
     "role": "BOWLER",
-    "style": null
+    "style": "Slow / Spin (Inferred)"
   },
   "jj davidson": {
     "id": "068c47d2",
@@ -5436,7 +5436,7 @@
     "name": "Muhammad Shahdad",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "muhammad rohid": {
     "id": "9103ecdb",
@@ -5450,7 +5450,7 @@
     "name": "R Chopra",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "m levitt": {
     "id": "6a71ba3a",
@@ -5478,7 +5478,7 @@
     "name": "Adeeb Usmani",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "b siddharth": {
     "id": "80de053e",
@@ -5492,7 +5492,7 @@
     "name": "Awais Ali Shah",
     "country": null,
     "role": "BOWLER",
-    "style": null
+    "style": "Pace / Seam (Inferred)"
   },
   "shayan jahangir": {
     "id": "571e1d2a",
@@ -5814,7 +5814,7 @@
     "name": "AR Bisht",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "hamza tariq": {
     "id": "82e81007",
@@ -5856,7 +5856,7 @@
     "name": "WP Myburgh",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "b bhandari": {
     "id": "82342b13",
@@ -5919,7 +5919,7 @@
     "name": "S Sajeev",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "s jora": {
     "id": "156378d8",
@@ -6219,7 +6219,7 @@
     "id": "1f84183a",
     "name": "Nikhil Chaudhary",
     "country": null,
-    "role": "BOWLER",
+    "role": "BATTER",
     "style": "right-arm fast-medium"
   },
   "fh allen": {
@@ -7753,7 +7753,7 @@
     "name": "Ahmer Bin Nisar",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "af ifill": {
     "id": "0e6c2f00",
@@ -8159,7 +8159,7 @@
     "name": "Manpreet Singh",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "mm baig": {
     "id": "add288ea",
@@ -8257,7 +8257,7 @@
     "name": "P Kurup",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "oh agbomadzie": {
     "id": "b38a9f73",
@@ -8292,7 +8292,7 @@
     "name": "Hamza Khan",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "faisal khan": {
     "id": "a7553f15",
@@ -8411,7 +8411,7 @@
     "name": "Sohail Ahmed",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "sazib bhuiyan": {
     "id": "e5464794",
@@ -8670,7 +8670,7 @@
     "name": "C Roberts",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "b niaz": {
     "id": "b7824537",
@@ -8719,7 +8719,7 @@
     "name": "J Baker",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "fayaz khan": {
     "id": "373954ca",
@@ -8824,7 +8824,7 @@
     "name": "E Kasaija",
     "country": null,
     "role": "BOWLER",
-    "style": null
+    "style": "Pace / Seam (Inferred)"
   },
   "cv anto": {
     "id": "c01ca5af",
@@ -9034,7 +9034,7 @@
     "name": "AV Lazarus",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "t sandaruwan": {
     "id": "2c31f58a",
@@ -9076,7 +9076,7 @@
     "name": "Musaddiq Ahmed",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "muhammad saqib": {
     "id": "9d6644a0",
@@ -9559,7 +9559,7 @@
     "name": "YS Chauhan",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "waseem yaqoob": {
     "id": "06b387f1",
@@ -9720,7 +9720,7 @@
     "name": "M Kasselman",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "m jele": {
     "id": "1a8cedc8",
@@ -9734,7 +9734,7 @@
     "name": "Harsha Amarasinghe",
     "country": null,
     "role": "BOWLER",
-    "style": null
+    "style": "Pace / Seam (Inferred)"
   },
   "g gune": {
     "id": "5491a9ff",
@@ -9755,7 +9755,7 @@
     "name": "D Doyle-Calle",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "aslan jafri": {
     "id": "a14b5f3c",
@@ -9860,7 +9860,7 @@
     "name": "Bilal Tahir",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "b kohler-cadmore": {
     "id": "209e91e6",
@@ -9874,7 +9874,7 @@
     "name": "Areeb Khalid",
     "country": null,
     "role": "BOWLER",
-    "style": null
+    "style": "Medium / Mixed (Inferred)"
   },
   "walid ghauri": {
     "id": "331e137f",
@@ -10105,7 +10105,7 @@
     "name": "Omid Mailk Khel",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "o isiyaku": {
     "id": "4a0a532f",
@@ -10154,7 +10154,7 @@
     "name": "CM Mbebe",
     "country": null,
     "role": "BOWLER",
-    "style": null
+    "style": "Pace / Seam (Inferred)"
   },
   "a shahi": {
     "id": "2011735e",
@@ -10168,7 +10168,7 @@
     "name": "Zahirbhai Patel",
     "country": null,
     "role": "BOWLER",
-    "style": null
+    "style": "Slow / Spin (Inferred)"
   },
   "y jalloh": {
     "id": "7fe9a7e6",
@@ -10322,7 +10322,7 @@
     "name": "Yao Junting",
     "country": null,
     "role": "BOWLER",
-    "style": null
+    "style": "Slow / Spin (Inferred)"
   },
   "taranjeet singh": {
     "id": "ec483176",
@@ -10406,7 +10406,7 @@
     "name": "K Motlanka",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "ibrahim rahimi": {
     "id": "f8ef3653",
@@ -10539,7 +10539,7 @@
     "name": "Faraaz Mehti Abbas",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "c nunes": {
     "id": "37ee5d23",
@@ -10658,7 +10658,7 @@
     "name": "B Tamjidsuren",
     "country": null,
     "role": "BOWLER",
-    "style": null
+    "style": "Pace / Seam (Inferred)"
   },
   "adil khan": {
     "id": "b4706200",
@@ -10805,7 +10805,7 @@
     "name": "Esam Rahman",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "d kansonkho": {
     "id": "45ca12a7",
@@ -10819,7 +10819,7 @@
     "name": "Arun Yadav",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "a turkmen": {
     "id": "e56f4180",
@@ -10917,7 +10917,7 @@
     "name": "Mohamed Rishwan",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "m taylor": {
     "id": "92075cdc",
@@ -10959,7 +10959,7 @@
     "name": "Faisal Raza",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "aung ko ko": {
     "id": "648d060e",
@@ -11036,7 +11036,7 @@
     "name": "Sageer Ahmad",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "sg diaby": {
     "id": "fe3e9880",
@@ -11113,7 +11113,7 @@
     "name": "Avishka Iroshan",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "a turay": {
     "id": "11a22126",
@@ -11351,7 +11351,7 @@
     "name": "Awais Ahmad",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "vasmiakram chand": {
     "id": "7a7bc7a4",
@@ -11428,7 +11428,7 @@
     "name": "GK Ghalley",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "emanuel": {
     "id": "510d525c",
@@ -11540,7 +11540,7 @@
     "name": "W Miyauchi",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "vs padhaal": {
     "id": "c4fb0b39",
@@ -11561,7 +11561,7 @@
     "name": "Mohammed Al Balushi",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "ms maker": {
     "id": "14318ae4",
@@ -11575,7 +11575,7 @@
     "name": "M Devush Patel",
     "country": null,
     "role": "BATTER",
-    "style": null
+    "style": "Slow / Spin (Inferred)"
   },
   "l bonner": {
     "id": "fd94c29f",
@@ -11645,7 +11645,7 @@
     "name": "A Augastin",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "tshering tashi": {
     "id": "596c60cf",
@@ -11750,14 +11750,14 @@
     "name": "Zahidullah Kamal",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "y saranonnakkun": {
     "id": "9c93c0a3",
     "name": "Y Saranonnakkun",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "thilina silva": {
     "id": "f0ad7a75",
@@ -11834,7 +11834,7 @@
     "name": "BF Mailata",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "andre jarju": {
     "id": "53dd7d8e",
@@ -11848,7 +11848,7 @@
     "name": "Abhishek Anand",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "abdurrahman ahmadzai": {
     "id": "ae84d526",
@@ -11890,7 +11890,7 @@
     "name": "T Parima",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "t mpatane": {
     "id": "e1846e12",
@@ -11925,7 +11925,7 @@
     "name": "S Gulecha",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "s foo-ryland": {
     "id": "5ba89b11",
@@ -12044,7 +12044,7 @@
     "name": "Zada Sher",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "waqar ali": {
     "id": "55a73018",
@@ -12086,7 +12086,7 @@
     "name": "Reyansh Sharma",
     "country": null,
     "role": "BATTER",
-    "style": null
+    "style": "Slow / Spin (Inferred)"
   },
   "pv vuniwaqa": {
     "id": "653a7fa8",
@@ -12219,7 +12219,7 @@
     "name": "M Akhigbe",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "lucas rossi": {
     "id": "2064e555",
@@ -12331,7 +12331,7 @@
     "name": "GT Taylor",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "gs bajwa": {
     "id": "a2621507",
@@ -12352,14 +12352,14 @@
     "name": "G Ganbold",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "ba pai": {
     "id": "716bf559",
     "name": "BA Pai",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "a raza": {
     "id": "838bc6ab",
@@ -12380,7 +12380,7 @@
     "name": "Sheraz Iqbal",
     "country": null,
     "role": "BATTER",
-    "style": null
+    "style": "Pace / Seam (Inferred)"
   },
   "sachin mandy": {
     "id": "501fca0d",
@@ -12422,7 +12422,7 @@
     "name": "Ali Nawaz",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "abidullah kotwa": {
     "id": "13d3e7d8",
@@ -12506,7 +12506,7 @@
     "name": "HMHE Parsons",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "gurpreet singh": {
     "id": "f43dcdc1",
@@ -12520,14 +12520,14 @@
     "name": "David Demba",
     "country": null,
     "role": "BATTER",
-    "style": null
+    "style": "Pace / Seam (Inferred)"
   },
   "db lakhani": {
     "id": "03adc956",
     "name": "DB Lakhani",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "cd shekleton": {
     "id": "efdee934",
@@ -12583,21 +12583,21 @@
     "name": "S Kharvi",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "s houghton": {
     "id": "4895df9e",
     "name": "S Houghton",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "rm magare": {
     "id": "d5966b42",
     "name": "RM Magare",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "r francis": {
     "id": "06b766f4",
@@ -12618,14 +12618,14 @@
     "name": "Muhammad Atif",
     "country": null,
     "role": "BATTER",
-    "style": null
+    "style": "Slow / Spin (Inferred)"
   },
   "lm gabriel": {
     "id": "88a5adcf",
     "name": "LM Gabriel",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "kj stagno": {
     "id": "46ad7e01",
@@ -12674,7 +12674,7 @@
     "name": "F Suluoto",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "du jianhao": {
     "id": "d314deb8",
@@ -12695,35 +12695,35 @@
     "name": "BJ Konstas",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "adam senn": {
     "id": "34c3f7b9",
     "name": "Adam Senn",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "yasser nazir": {
     "id": "ccceaca9",
     "name": "Yasser Nazir",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "ve tembo": {
     "id": "1439a13c",
     "name": "VE Tembo",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "shahzeb afridi": {
     "id": "53494306",
     "name": "Shahzeb Afridi",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "salman patel": {
     "id": "4909a5f6",
@@ -12828,7 +12828,7 @@
     "name": "Amir Khan",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "a osei": {
     "id": "375322d1",
@@ -12849,14 +12849,14 @@
     "name": "P Pushparajan",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "mazharul islam": {
     "id": "30564b3e",
     "name": "Mazharul Islam",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "lovedeep singh": {
     "id": "a6e5e144",
@@ -12919,21 +12919,21 @@
     "name": "S Gantulga",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "rj ainsworth": {
     "id": "b6924e3f",
     "name": "RJ Ainsworth",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "muhammad soban": {
     "id": "a5e1e2d4",
     "name": "Muhammad Soban",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "md shuayeb": {
     "id": "66000a39",
@@ -12947,14 +12947,14 @@
     "name": "M Bhatia",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "kasir ahmed": {
     "id": "2619e00c",
     "name": "Kasir Ahmed",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "j singye": {
     "id": "28574428",
@@ -13003,7 +13003,7 @@
     "name": "W Wotu",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "ratul khan": {
     "id": "75855e23",
@@ -13045,14 +13045,14 @@
     "name": "Boio Ray",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "arjun vinod": {
     "id": "033e9d59",
     "name": "Arjun Vinod",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "adil butt": {
     "id": "fde53ec1",
@@ -13080,7 +13080,7 @@
     "name": "Shenjian Zheng",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "mustapha suwareh": {
     "id": "44116edc",
@@ -13094,7 +13094,7 @@
     "name": "Muhammad Fahad",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "m stanikzai": {
     "id": "ad8d5827",
@@ -13108,7 +13108,7 @@
     "name": "JR Newton",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "j baleicikoibia": {
     "id": "30a307d3",
@@ -13122,7 +13122,7 @@
     "name": "AN Toube",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "zahir mohammed": {
     "id": "7c38942a",
@@ -13227,7 +13227,7 @@
     "name": "JE Marks",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "i tchakou": {
     "id": "4d2b96b4",
@@ -13353,14 +13353,14 @@
     "name": "D Nanda",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "bk majji": {
     "id": "d864f752",
     "name": "BK Majji",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "aa senn": {
     "id": "719ac15b",
@@ -13388,7 +13388,7 @@
     "name": "Taher Muhammad",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "rohit kumar": {
     "id": "43462314",
@@ -13437,7 +13437,7 @@
     "name": "Syed Ahzamul Haq",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "r sharma": {
     "id": "2278c4ca",
@@ -13528,14 +13528,14 @@
     "name": "Vamshi Reddy",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "s shermatov": {
     "id": "a6941f24",
     "name": "S Shermatov",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "r mazumder": {
     "id": "b23d3ec5",
@@ -13549,7 +13549,7 @@
     "name": "Nikhil",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "muzaffar shiralkar": {
     "id": "d9d08ea3",
@@ -13640,7 +13640,7 @@
     "name": "Mohammed Jamadar",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "manan bashir": {
     "id": "5c14bd52",
@@ -13703,7 +13703,7 @@
     "name": "Furkan Tuskan",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "shahnawaz patel": {
     "id": "aa86d9d4",
@@ -13731,7 +13731,7 @@
     "name": "Patrick Nou",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "omid rahimi": {
     "id": "b2930573",
@@ -13822,7 +13822,7 @@
     "name": "N Knights",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "mohammed sameer": {
     "id": "e6409ae1",
@@ -13976,7 +13976,7 @@
     "name": "S Shailesh",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "numan yousuf": {
     "id": "33b48084",
@@ -14256,7 +14256,7 @@
     "name": "ME Leoela",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "kaif jamadar": {
     "id": "0a95c25a",
@@ -14319,7 +14319,7 @@
     "name": "K Jaikaran",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "j shields": {
     "id": "aa6c2fbf",
@@ -14417,7 +14417,7 @@
     "name": "A Awasthi",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "cr richards": {
     "id": "c10a581f",
@@ -15495,7 +15495,7 @@
     "name": "PR Surve",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Medium / Mixed (Inferred)"
   },
   "zeeshan kukikhel": {
     "id": "5d6a1f76",
@@ -15509,7 +15509,7 @@
     "name": "Yahya Suhail",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "swann htet ko ko": {
     "id": "9ee21ee4",
@@ -15530,7 +15530,7 @@
     "name": "Raihan Hossain",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "myat thu aung": {
     "id": "cebbf3c9",
@@ -15579,14 +15579,14 @@
     "name": "Ihsanullah Wafa",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "gf cardos": {
     "id": "09e5baeb",
     "name": "GF Cardos",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "d mendonca": {
     "id": "8c2ce459",
@@ -15670,7 +15670,7 @@
     "name": "OJ Herrington",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "oj hairs": {
     "id": "c8a7b014",
@@ -15691,14 +15691,14 @@
     "name": "N Mugabe",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "mohammad ahnaff": {
     "id": "9b85a13a",
     "name": "Mohammad Ahnaff",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "mj scotland": {
     "id": "a1cc467d",
@@ -15733,7 +15733,7 @@
     "name": "HK Kukreja",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "arsalan arif": {
     "id": "cc65e4a4",
@@ -15754,7 +15754,7 @@
     "name": "AE Isesele",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "t manders": {
     "id": "6d2b9724",
@@ -15768,7 +15768,7 @@
     "name": "Syed Faizan Tahir",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "shaik basha": {
     "id": "1b77c4c6",
@@ -15880,7 +15880,7 @@
     "name": "KH Abe",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "jr barry": {
     "id": "9bc324b5",
@@ -15957,7 +15957,7 @@
     "name": "D Wheatley",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Pace / Seam (Inferred)"
   },
   "c sudarsanan": {
     "id": "391a825b",
@@ -16020,7 +16020,7 @@
     "name": "US Hathinjar",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "lakshit gupta": {
     "id": "52b090a6",
@@ -16041,7 +16041,7 @@
     "name": "JS Iggo",
     "country": null,
     "role": "BATTER",
-    "style": "right-hand bat"
+    "style": "Slow / Spin (Inferred)"
   },
   "ha jackson": {
     "id": "ee40679e",
@@ -16070,5 +16070,12 @@
     "country": null,
     "role": "BOWLER",
     "style": "right-arm offbreak"
+  },
+  "aht donald": {
+    "id": "72918338",
+    "name": "AHT Donald",
+    "country": null,
+    "role": "BATTER",
+    "style": null
   }
 }
