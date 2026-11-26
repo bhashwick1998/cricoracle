@@ -434,7 +434,7 @@ _cors_origins = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()] i
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=(_cors_origins != ["*"]),
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["ETag", "Cache-Control"],

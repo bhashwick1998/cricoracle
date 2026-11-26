@@ -13,10 +13,12 @@ class TestCdnAndPayloadSplit(unittest.TestCase):
     def test_full_match_deduplicated_gzip_etag_and_304(self):
         res = self.client.get(
             "/api/matches/m_aus_eng_2026_odi_1",
-            headers={"Accept-Encoding": "gzip"},
+            headers={"Accept-Encoding": "gzip", "Origin": "https://example.com"},
         )
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.headers.get("content-encoding"), "gzip")
+        self.assertEqual(res.headers.get("access-control-allow-origin"), "*")
+        self.assertNotIn("origin", (res.headers.get("vary") or "").lower())
         self.assertEqual(
             res.headers.get("cache-control"),
             "public, max-age=5, s-maxage=15, stale-while-revalidate=15",

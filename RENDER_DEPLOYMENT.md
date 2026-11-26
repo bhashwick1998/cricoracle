@@ -28,8 +28,17 @@ This setup is tuned to stay within **Render Free (`750` instance hours/month, `5
 4. Enter your secret value for **`CRICAPI_KEY_PAID`** when prompted, then click **Apply**.
 5. Once live, note your Render service hostname (e.g., `cricoracle-backend-xxxx.onrender.com`) and verify `https://<your-render-host>/health` returns `{"status": "online", ...}`.
 
-## Step 3: Put Cloudflare Free CDN in Front of the Backend (`s-maxage=15`)
-*(Required for public crowds — without Cloudflare DNS proxy, browsers hit `.onrender.com` directly and bypass CDN edge caching.)*
+## Step 3: Choose Your Free CDN Layer (`s-maxage=15`)
+
+### Option A — No Custom Domain (Vercel Edge CDN Proxy)
+Use this if you want 100% free `*.vercel.app` + `*.onrender.com` URLs with no custom domain purchase:
+1. Leave **`NEXT_PUBLIC_API_URL` UNSET** in Vercel so browsers request same-origin `/api/*` paths.
+2. Set **`BACKEND_URL=https://cricoracle-backend-xzcw.onrender.com`** (server-side only in Vercel).
+3. [`frontend/app/api/[...path]/route.ts`](frontend/app/api/%5B...path%5D/route.ts) proxies `/api/*` server-side and returns `Vercel-CDN-Cache-Control: public, s-maxage=15, stale-while-revalidate=15` (`300s` for analytics/static endpoints).
+   - Vercel Hobby (`100 GB` Fast Data Transfer, `1M` CDN requests/month free) serves repeat crowd polls from edge cache (`x-vercel-cache: HIT`) so Render sees ~1 poll every 15s–30s instead of 1 per viewer.
+
+### Option B — Custom Domain with Cloudflare Free CDN
+*(Required if hitting backend directly instead of via Vercel Edge — requests straight to `*.onrender.com` bypass edge caching.)*
 1. Add your custom domain (e.g., `your-domain.com`) to **Cloudflare Free** and update your domain registrar's nameservers to Cloudflare.
 2. In **Render Dashboard -> `cricoracle-backend` -> Settings -> Custom Domains**, add `api.your-domain.com` and verify the CNAME target shown by Render.
 3. In **Cloudflare DNS**:
@@ -44,23 +53,28 @@ This setup is tuned to stay within **Render Free (`750` instance hours/month, `5
    - **Edge TTL**: **Use cache-control header if present, bypass cache if not** *(respects FastAPI's `s-maxage=15` for live match feeds, `s-maxage=300` for analytics/static data, and `no-store` for `POST` & `/api/system/*`)*.
    - **Browser TTL**: **Respect origin**.
 
-## Step 4: Deploy Frontend (`frontend/`) on Vercel Hobby or Cloudflare Pages
-1. On Vercel (or Cloudflare Pages), create a new project connected to your new GitHub repo.
-2. Set **Root Directory** to `frontend`.
+## Step 4: Deploy Frontend (`frontend/`) on Vercel Hobby (or Cloudflare Pages)
+1. On [vercel.com](https://vercel.com), import `bhashwick1998/cricoracle` from your GitHub account.
+2. Set **Root Directory** to `frontend` (Build command `npm run build`).
 3. Set Environment Variables (see [`frontend/.env.example`](frontend/.env.example)):
-   - `NEXT_PUBLIC_API_URL` = `https://api.your-domain.com`
-   - `NEXT_PUBLIC_SITE_URL` = `https://your-domain.com`
-   - `NEXT_PUBLIC_ENABLE_WS` = `false`
-4. Deploy, then add your apex/frontend custom domain (`your-domain.com`) in Vercel/Cloudflare Pages.
-5. *(Optional hardening)*: Back in Render **`cricoracle-backend` -> Environment**, set `CORS_ALLOWED_ORIGINS=https://your-domain.com`.
+   - **Option A (No custom domain / Vercel Edge CDN):**
+     - `BACKEND_URL` = `https://cricoracle-backend-xzcw.onrender.com`
+     - `NEXT_PUBLIC_SITE_URL` = `https://<your-vercel-app>.vercel.app`
+     - `NEXT_PUBLIC_ENABLE_WS` = `false`
+     - *(Leave `NEXT_PUBLIC_API_URL` empty/unset!)*
+   - **Option B (Cloudflare custom domain):**
+     - `NEXT_PUBLIC_API_URL` = `https://api.your-domain.com`
+     - `NEXT_PUBLIC_SITE_URL` = `https://your-domain.com`
+     - `NEXT_PUBLIC_ENABLE_WS` = `false`
+4. Deploy.
+5. *(Optional hardening)*: On Render **`cricoracle-backend` -> Environment**, set `CORS_ALLOWED_ORIGINS` to your deployed frontend origin (e.g. `https://<your-vercel-app>.vercel.app`).
 
 ## Step 5: Verify Production Caching & Bandwidth Behavior
-1. Check CDN cache headers via curl or browser DevTools on `https://api.your-domain.com/api/matches`:
-   - Confirm `Cache-Control: public, max-age=5, s-maxage=15, stale-while-revalidate=15`
-   - Confirm `Content-Encoding: gzip` and `ETag: W/"..."`
-   - Confirm `cf-cache-status: HIT` on the second request within 15 seconds.
-2. Open a match page on `https://your-domain.com/match/<id>` with DevTools **Network** open:
+1. Check CDN cache headers via curl or browser DevTools:
+   - **Option A (Vercel):** Request `https://<your-vercel-app>.vercel.app/api/matches` twice within 15 seconds -> confirm `x-vercel-cache: HIT` on the second call.
+   - **Option B (Cloudflare):** Request `https://api.your-domain.com/api/matches` twice within 15 seconds -> confirm `cf-cache-status: HIT` and `content-encoding: gzip`.
+2. Open a match page on your frontend `/match/<id>` with DevTools **Network** open:
    - Initial request hits `GET /api/matches/<id>` (`view: "full"`).
-   - Background polls every `~15–18s` hit `GET /api/matches/<id>/live` (`view: "live"`, much smaller payload) and stop automatically when the tab is hidden or the match finishes.
+   - Background updates every `~15–18s` hit `GET /api/matches/<id>/live` (`view: "live"`, ~10.6 KB gzipped) and pause automatically when the tab is hidden or the match finishes.
    - Filter **WS** in DevTools: zero WebSocket connections should be opened when `NEXT_PUBLIC_ENABLE_WS=false`.
 3. Note on ephemeral Free Tier disk: Free Render instances do not persist `backend/cricoracle.db` across restarts/sleeps. Automated startup sync and cache refreshers ([`render_cache_updater.py`](backend/engine/render_cache_updater.py)) rebuild stale local caches automatically on boot.
