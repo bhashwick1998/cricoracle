@@ -594,6 +594,7 @@ class CricApiSquadProvider:
 
         if not self._check_and_increment_quota():
             logger.warning("CricAPI quota guard active. Using cached live scores.")
+            self._last_fetch_succeeded = False
             return getattr(self, "_cached_live_scores", [])
 
         active_k = self.get_active_api_key()
@@ -601,6 +602,7 @@ class CricApiSquadProvider:
         if self.fallback_key and self.fallback_key not in keys_to_attempt:
             keys_to_attempt.append(self.fallback_key)
 
+        self._last_fetch_succeeded = False
         for attempt_k in keys_to_attempt:
             url = f"https://api.cricapi.com/v1/cricScore?apikey={attempt_k}"
             try:
@@ -614,6 +616,7 @@ class CricApiSquadProvider:
                             live_matches = parse_matches_list(raw_matches)
                             self._cached_live_scores = live_matches
                             self._cached_live_scores_time = now
+                            self._last_fetch_succeeded = True
                             logger.info(f"Successfully fetched and cached {len(live_matches)} live matches from CricAPI (key ...{attempt_k[-6:]}, hits: {info.get('hitsToday')}/{info.get('hitsLimit')}).")
                             return live_matches
                         else:
@@ -986,6 +989,31 @@ class CricApiSquadProvider:
                             logger.warning(f"Stage4 probability recalc skipped for {mid}: {prob_err}")
 
                     updated_matches.append(mid)
+
+        # Prune any LIVE_BALL_BY_BALL match in DB that CricAPI no longer reports as live
+        if getattr(self, "_last_fetch_succeeded", False):
+            active_pairs = set()
+            for m in live_scores:
+                c1 = TOP_20_MAP.get(m.get("team_a_code", ""))
+                c2 = TOP_20_MAP.get(m.get("team_b_code", ""))
+                if c1 and c2:
+                    active_pairs.add((c1, c2))
+                    active_pairs.add((c2, c1))
+
+            async with conn.execute("SELECT id, team_a_id, team_b_id FROM matches WHERE state IN ('LIVE_BALL_BY_BALL', 'IN_PLAY')") as cur:
+                db_live_rows = await cur.fetchall()
+            for row in db_live_rows:
+                r_id, r_a, r_b = row[0], row[1], row[2]
+                if (r_a, r_b) not in active_pairs:
+                    logger.info(f"Match {r_id} ({r_a} vs {r_b}) is no longer live on CricAPI. Marking COMPLETED.")
+                    await conn.execute("""
+                        UPDATE matches SET
+                            state = 'COMPLETED',
+                            is_stumps = 0,
+                            stumps_label = NULL
+                        WHERE id = ?
+                    """, (r_id,))
+                    updated_matches.append(r_id)
 
         await conn.commit()
         return updated_matches
