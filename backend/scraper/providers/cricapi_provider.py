@@ -816,6 +816,7 @@ class CricApiSquadProvider:
             init_pb = 42.0 if fmt == "TEST" else 49.0
         par_init = 340 if fmt == "TEST" else (275 if fmt == "ODI" else 170)
 
+        is_dn_init = 0 if fmt == "TEST" else 1
         await conn.execute("""
             INSERT OR IGNORE INTO matches (
                 id, series_name, format, team_a_id, team_b_id, venue_id,
@@ -825,14 +826,14 @@ class CricApiSquadProvider:
                 match_status_text, last_wpa_swing, last_event_description
             ) VALUES (
                 ?, ?, ?, ?, ?, ?,
-                ?, 1, 'LIVE_BALL_BY_BALL', ?, ?, ?,
+                ?, ?, 'LIVE_BALL_BY_BALL', ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, 0.0, 0.0,
                 ?, 0.0, ?
             )
         """, (
             cricapi_mid, series_name, fmt, c1, c2, v_id,
-            scheduled, init_pa, init_pb, p_draw_init,
+            scheduled, is_dn_init, init_pa, init_pb, p_draw_init,
             init_pa, init_pa, init_pa, par_init,
             par_init - 25, par_init + 25,
             status_text, status_text,
@@ -1207,17 +1208,68 @@ class CricApiSquadProvider:
                     if newly_created or score_changed or wicket_fell or innings_changed:
                         try:
                             from ...engine.stage4_live import calculate_stage4_live
-                            from ...engine.pitch_history_model import get_historical_venue_profile
-                            from ...engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability
+                            from ...engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability, resolve_venue_dossier_context
                             from ...engine.live_pitch_classifier import LivePitchClassifier
+                            from ...engine.live_dew_detector import LiveDewDetector
+                            from ...engine.live_weather_service import get_venue_live_weather_bundle
 
                             match_format = db_m.get("format", "TEST")
                             v_id = db_m.get("venue_id", "")
+                            v_name_hint = match_info_meta.get("venue_name") or v_id or db_m.get("series_name") or ""
+                            try:
+                                async with conn.execute("SELECT name, city FROM venues WHERE id = ?", (v_id,)) as vcur:
+                                    vrow = await vcur.fetchone()
+                                    if vrow and vrow[0]:
+                                        v_name_hint = f"{vrow[0]}, {vrow[1]}" if vrow[1] else vrow[0]
+                            except Exception:
+                                pass
+
                             t_a = c1
                             t_b = c2
                             team_a_batting = (bat_team == c1)
+                            bat_code = t_a if team_a_batting else t_b
+                            bowl_code = t_b if team_a_batting else t_a
 
-                            # Quick pitch classification (no ball-by-ball data needed)
+                            # Fetch recent DB deliveries + real squads when available
+                            recent_dels: List[Dict[str, Any]] = []
+                            try:
+                                async with conn.execute(
+                                    "SELECT innings, over_number, ball_number, runs_batter, extras, is_wicket, is_wide, is_noball, extra_type, commentary "
+                                    "FROM deliveries WHERE match_id = ? ORDER BY innings ASC, over_number ASC, ball_number ASC LIMIT 300",
+                                    (mid,),
+                                ) as dcur:
+                                    for dr in await dcur.fetchall():
+                                        recent_dels.append({
+                                            "innings": dr[0], "over": dr[1], "ball": dr[2],
+                                            "runs_batter": dr[3], "extras": dr[4],
+                                            "is_wicket": bool(dr[5]), "is_wide": bool(dr[6]),
+                                            "is_noball": bool(dr[7]), "extra_type": dr[8],
+                                            "commentary": dr[9] or "",
+                                        })
+                            except Exception:
+                                recent_dels = []
+
+                            real_dugout: List[Dict[str, Any]] = []
+                            real_bowlers: List[Dict[str, Any]] = []
+                            try:
+                                async with conn.execute("""
+                                    SELECT p.*, ms.team_id
+                                    FROM match_squads ms
+                                    JOIN players p ON ms.player_id = p.id
+                                    WHERE ms.match_id = ? AND ms.is_playing_xi = 1
+                                """, (mid,)) as sqcur:
+                                    for sr in await sqcur.fetchall():
+                                        sd = dict(sr)
+                                        if sd.get("team_id") == bat_code:
+                                            real_dugout.append(sd)
+                                        elif sd.get("team_id") == bowl_code:
+                                            role_l = str(sd.get("role") or "").lower()
+                                            if "bowl" in role_l or "all" in role_l:
+                                                real_bowlers.append(sd)
+                            except Exception:
+                                pass
+
+                            # Quick pitch classification (uses DB deliveries if available + commentary)
                             import json as _json_prov
                             pitch_classifier = LivePitchClassifier()
                             pitch_eval = pitch_classifier.classify_live_pitch(
@@ -1227,7 +1279,7 @@ class CricApiSquadProvider:
                                 current_balls=balls,
                                 current_score=runs,
                                 current_wickets=wkts,
-                                deliveries=[],
+                                deliveries=recent_dels[-36:],
                                 commentary_strings=[status_text],
                                 match_day=s_day,
                                 previous_pitch_state=db_m.get("live_pitch_state_json"),
@@ -1237,12 +1289,31 @@ class CricApiSquadProvider:
 
                             t_a_adapt = get_country_pitch_adaptability(t_a, match_format, detected_pitch)
                             t_b_adapt = get_country_pitch_adaptability(t_b, match_format, detected_pitch)
+                            v_ctx_prov = resolve_venue_dossier_context(v_name_hint, match_format)
+                            hist_v_par = v_ctx_prov.get("venue_par")
 
-                            # Build dummy dugout based on wickets remaining
+                            # Live Weather + Dew Intelligence
+                            is_dn_prov = bool(db_m.get("is_day_night")) if db_m.get("is_day_night") is not None else (match_format != "TEST")
+                            live_w_bundle = get_venue_live_weather_bundle(v_name_hint, match_format)
+                            inn1_sum_prov = {"runs": i1_runs, "overs": float(i1_ovs or (20.0 if "T20" in match_format else 50.0))} if i1_runs else None
+                            dew_eval_prov = LiveDewDetector.detect_live_dew(
+                                venue_id=v_name_hint or v_id,
+                                is_day_night=is_dn_prov,
+                                match_format=match_format,
+                                innings=inn_val,
+                                current_overs=float(ovs) + float(balls) / 6.0,
+                                commentary_feed=[status_text],
+                                weather_data=live_w_bundle,
+                                deliveries=recent_dels,
+                                inn_1_summary=inn1_sum_prov,
+                            )
+                            cal_dew_prov = float(dew_eval_prov.get("dew_factor_calibrated") or v_ctx_prov.get("dew_factor") or 0.25)
+
+                            # Build dugout / bowlers fallback cleanly if DB has no squad rows yet
                             wkts_left = max(0, 10 - wkts)
                             ref_avg = 35.0 if match_format == "TEST" else (30.0 if match_format == "ODI" else 25.0)
-                            dummy_dugout = [{"t20_batting_avg": ref_avg, "batting_order": 10 - wkts_left + i + 1} for i in range(wkts_left)]
-                            dummy_bowlers = [{"t20_economy": 7.5, "bowl_score": 55.0}] * 4
+                            eff_dugout = real_dugout if len(real_dugout) >= 4 else [{"t20_batting_avg": ref_avg, "batting_order": 10 - wkts_left + i + 1} for i in range(wkts_left)]
+                            eff_bowlers = real_bowlers if len(real_bowlers) >= 3 else [{"t20_economy": 7.5, "bowl_score": 55.0}] * 4
 
                             prev_b_prov = int(db_m.get("current_balls") or 0)
                             prev_inn_prov = int(db_m.get("current_innings") or 1)
@@ -1255,14 +1326,14 @@ class CricApiSquadProvider:
                                 overs=ovs,
                                 balls=balls,
                                 target=tgt_runs if match_format != "TEST" else None,
-                                striker={"balls_faced": 10, "batting_hand": "right"},
-                                non_striker={"balls_faced": 5, "batting_hand": "right"},
-                                bowler={"bowling_style": "RF"},
+                                striker=eff_dugout[0] if eff_dugout else {"balls_faced": 10, "batting_hand": "right"},
+                                non_striker=eff_dugout[1] if len(eff_dugout) > 1 else {"balls_faced": 5, "batting_hand": "right"},
+                                bowler=eff_bowlers[0] if eff_bowlers else {"bowling_style": "RF"},
                                 team_a_batting=team_a_batting,
                                 p0_pre_match=float(db_m.get("p0_pre_match") or init_pa if newly_created else (db_m.get("p0_pre_match") or 50.0)),
                                 previous_p_team_a=float(db_m.get("p_team_a") or 50.0),
-                                dugout_players=dummy_dugout,
-                                bowlers_list=dummy_bowlers,
+                                dugout_players=eff_dugout,
+                                bowlers_list=eff_bowlers,
                                 pitch_spin_ratio=float(db_m.get("spin_wicket_ratio") or 0.40),
                                 match_format=match_format,
                                 live_pitch_type=detected_pitch,
@@ -1273,12 +1344,22 @@ class CricApiSquadProvider:
                                 match_day=s_day,
                                 is_stumps=bool(is_stumps) and not first_live_hydration,
                                 previous_p_draw=(float(db_m.get("p_draw")) if (db_m.get("p_draw") is not None and float(db_m.get("p_draw") or 0.0) > 0.0) else 18.2) if match_format == "TEST" else None,
+                                is_day_night=is_dn_prov,
+                                dew_factor=cal_dew_prov,
+                                dew_intelligence=dew_eval_prov,
+                                historical_venue_par=hist_v_par,
+                                commentary=status_text,
+                                scheduled_overs=ctx.revised_max_overs if ctx.is_reduced_overs else None,
+                                overs_lost=ov_lost,
+                                venue_name=v_name_hint,
                                 prev_score=prev_runs,
                                 prev_wickets=prev_wkts,
                                 prev_overs=int(prev_ovs),
                                 prev_balls=prev_b_prov,
                                 prev_innings=prev_inn_prov,
                                 is_progress_step=step_prog or first_live_hydration,
+                                deliveries=recent_dels or None,
+                                weather_report=live_w_bundle,
                             )
 
                             if (is_stumps or not step_prog) and not first_live_hydration:
@@ -1290,7 +1371,9 @@ class CricApiSquadProvider:
                                 new_p_b = stage4_res.get("p_team_b", float(db_m.get("p_team_b") or 50.0))
                                 new_p_draw = stage4_res.get("p_draw", 0.0) if match_format == "TEST" else 0.0
                                 new_wpa = 0.0 if is_stumps else stage4_res.get("wpa", 0.0)
-                            new_par   = stage4_res.get("projected_score", float(db_m.get("par_score_projected") or 0))
+                            new_par = stage4_res.get("par_score_projected", stage4_res.get("projected_score", float(db_m.get("par_score_projected") or 0)))
+                            new_par_min = stage4_res.get("par_score_min", db_m.get("par_score_min"))
+                            new_par_max = stage4_res.get("par_score_max", db_m.get("par_score_max"))
 
                             is_wicket_flag = 1 if wicket_fell else 0
                             try:
@@ -1301,9 +1384,11 @@ class CricApiSquadProvider:
                                         p_draw = ?,
                                         last_wpa_swing = ?,
                                         par_score_projected = ?,
+                                        par_score_min = COALESCE(?, par_score_min),
+                                        par_score_max = COALESCE(?, par_score_max),
                                         live_pitch_state_json = COALESCE(?, live_pitch_state_json)
                                     WHERE id = ?
-                                """, (new_p_a, new_p_b, new_p_draw, new_wpa, new_par, prov_pitch_state_str, mid))
+                                """, (new_p_a, new_p_b, new_p_draw, new_wpa, new_par, new_par_min, new_par_max, prov_pitch_state_str, mid))
                             except Exception:
                                 await conn.execute("""
                                     UPDATE matches SET

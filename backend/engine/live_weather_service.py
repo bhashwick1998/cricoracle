@@ -64,7 +64,7 @@ def get_live_stadium_weather(
             url,
             headers={"User-Agent": "CricOracle-CricketAnalytics/2.0"}
         )
-        with urllib.request.urlopen(req, timeout=4.0) as resp:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
             data = json.loads(resp.read().decode())
             current = data.get("current", {})
 
@@ -118,4 +118,36 @@ def get_live_stadium_weather(
             "dew_risk": "LOW",
             "dew_factor": 0.20
         }
+        _WEATHER_CACHE[cache_key] = (now - CACHE_TTL_SECONDS + 60.0, fallback)
         return fallback
+
+
+def get_venue_live_weather_bundle(venue_hint: Optional[str], fmt: str = "ODI") -> Optional[Dict[str, Any]]:
+    """
+    Resolves venue coordinates and returns a weather_data dict formatted for LiveDewDetector
+    and weather_intelligence (Open-Meteo cached for 10 min; non-blocking offline fallback).
+    """
+    if not venue_hint:
+        return None
+    try:
+        from .cricsheet_pitch_intelligence import FORMAT_GROUND_PITCH_DOSSIERS, resolve_venue_dossier_context
+        v_ctx = resolve_venue_dossier_context(str(venue_hint), fmt)
+        vk = v_ctx.get("venue_key")
+        coords = FORMAT_GROUND_PITCH_DOSSIERS.get(vk, {}).get("coordinates") if vk else None
+        if not coords or "lat" not in coords or "lon" not in coords:
+            return None
+        w = get_live_stadium_weather(coords["lat"], coords["lon"], str(venue_hint))
+        return {
+            "source": w.get("source"),
+            "temp_c": w.get("temperature_c"),
+            "relative_humidity_pct": w.get("humidity"),
+            "wind_speed_kmh": w.get("wind_kmh"),
+            "dew_point_c": w.get("dew_point_c"),
+            "dew_spread_c": w.get("dew_spread_c"),
+            "dew_factor": w.get("dew_factor"),
+            "dew_risk": w.get("dew_risk"),
+            "humidity_pct": w.get("humidity"),
+            "temperature_c": w.get("temperature_c"),
+        }
+    except Exception:
+        return None

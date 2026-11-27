@@ -1775,6 +1775,8 @@ def calculate_stage4_live(
     prev_balls: Optional[int] = None,
     prev_innings: Optional[int] = None,
     is_progress_step: bool = True,
+    deliveries: Optional[List[Dict[str, Any]]] = None,
+    weather_report: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Performs full Stage 4 Live inference on arrival of a delivery with real-time pitch awareness,
@@ -1825,7 +1827,30 @@ def calculate_stage4_live(
     if effective_pitch != canon_pitch:
         pitch_display_name = f"{canon_pitch.capitalize()} ──► {pitch_display_name} (Kalman Drift x{drift_mult:.2f})"
 
-    # Atmospheric Physics Extraction for Rain-Affected Matches & Dew
+    # Atmospheric Physics Extraction & Live Dew Auto-Detection
+    eff_dew_factor = float(dew_factor or 0.0)
+    if dew_intelligence is None and fmt_upper in ("ODI", "T20", "T20I"):
+        try:
+            from .live_dew_detector import LiveDewDetector
+            dew_eval_auto = LiveDewDetector.detect_live_dew(
+                venue_id=venue_name or v_ctx_stage4.get("venue_key") or team_a,
+                is_day_night=bool(is_day_night),
+                match_format=fmt_upper,
+                innings=int(innings),
+                current_overs=curr_ov_float,
+                commentary_feed=[commentary] if commentary else None,
+                weather_data=weather_report,
+                deliveries=deliveries,
+                inn_1_summary={"runs": int(innings_1_score)} if innings_1_score is not None else None,
+            )
+            dew_intelligence = dew_eval_auto
+            if eff_dew_factor <= 0.0 and dew_eval_auto.get("dew_factor_calibrated") is not None:
+                eff_dew_factor = float(dew_eval_auto["dew_factor_calibrated"])
+        except Exception:
+            pass
+    elif eff_dew_factor <= 0.0 and isinstance(dew_intelligence, dict) and dew_intelligence.get("dew_factor_calibrated") is not None:
+        eff_dew_factor = float(dew_intelligence["dew_factor_calibrated"])
+
     pitch_sweat_index = 0.0
     spin_grip_penalty_pct = 0.0
     outfield_friction_pct = 0.0
@@ -1833,10 +1858,20 @@ def calculate_stage4_live(
         pitch_sweat_index = float(dew_intelligence.get("pitch_sweat_index", 0.0) or 0.0)
         spin_grip_penalty_pct = float(dew_intelligence.get("spin_grip_penalty_pct", 0.0) or 0.0)
         outfield_friction_pct = float(dew_intelligence.get("outfield_friction_pct", 0.0) or 0.0)
-    elif overs_lost > 0.0 or (commentary and any(k in str(commentary).lower() for k in ["rain", "covers", "wet outfield", "curtailed"])):
-        pitch_sweat_index = min(8.0, max(1.5, overs_lost * 0.6))
-        spin_grip_penalty_pct = min(50.0, max(15.0, overs_lost * 3.5))
-        outfield_friction_pct = min(45.0, max(12.0, overs_lost * 3.0))
+    if (
+        int(innings) == 2
+        and bool(is_day_night)
+        and spin_grip_penalty_pct <= 0.0
+        and (
+            eff_dew_factor >= 0.22
+            or bool(isinstance(dew_intelligence, dict) and dew_intelligence.get("active_dew_advantage"))
+        )
+    ):
+        spin_grip_penalty_pct = round(min(28.0, eff_dew_factor * 32.0), 1)
+    if overs_lost > 0.0 or (commentary and any(k in str(commentary).lower() for k in ["rain", "covers", "wet outfield", "curtailed"])):
+        pitch_sweat_index = max(pitch_sweat_index, min(8.0, max(1.5, overs_lost * 0.6)))
+        spin_grip_penalty_pct = max(spin_grip_penalty_pct, min(50.0, max(15.0, overs_lost * 3.5)))
+        outfield_friction_pct = max(outfield_friction_pct, min(45.0, max(12.0, overs_lost * 3.0)))
 
     # Dynamic Fielding & Powerplay Proportions
     from .cricket_rules import compute_curtailed_powerplay_breakdown
@@ -1891,7 +1926,7 @@ def calculate_stage4_live(
         match_format=match_format,
         live_pitch_type=canon_pitch,
         is_day_night=is_day_night,
-        dew_factor=dew_factor,
+        dew_factor=eff_dew_factor,
         match_day=match_day,
         commentary=commentary,
         scheduled_overs=resolved_sched_ov,
@@ -1929,7 +1964,7 @@ def calculate_stage4_live(
         batting_quality_mult=resource_tanks["batting_quality_mult"],
         bowling_quality_mult=resource_tanks["bowling_quality_mult"],
         is_day_night=is_day_night,
-        dew_factor=dew_factor,
+        dew_factor=eff_dew_factor,
         previous_p_team_a=previous_p_team_a,
         previous_p_draw=previous_p_draw,
         finisher_count=resource_tanks.get("finisher_count", 0),
@@ -1950,9 +1985,9 @@ def calculate_stage4_live(
     fmt = match_format.upper()
     is_chasing = (fmt != "TEST" and innings == 2) or (fmt == "TEST" and innings == 4)
 
-    # Calibrated Innings-1 Stage 4 Blend (Render 22-attr + 5-surface adapt + duel + DLS + Bayesian log-odds)
+    # Calibrated Stage 4 Blends (Innings 1 + Limited-Overs Innings 2 Chases)
     # Applied symmetrically to live prediction, par projection, and counterfactual WPA.
-    from .stage4_calibrator import predict_innings1_calibrated
+    from .stage4_calibrator import predict_innings1_calibrated, predict_innings2_chase_calibrated
     ov_f_stage4 = float(overs) + float(balls) / 6.0
     std_ov_cal = 100.0 if fmt == "TEST" else (50.0 if fmt == "ODI" else 20.0)
     is_curtailed_match = bool(resolved_sched_ov and fmt != "TEST" and resolved_sched_ov < 0.85 * std_ov_cal)
@@ -1967,43 +2002,81 @@ def calculate_stage4_live(
 
     def _eval_cal_for_state(st_sc: int, st_wk: int, st_ov: int, st_bl: int) -> Optional[Dict[str, Any]]:
         st_ov_f = float(st_ov) + float(st_bl) / 6.0
-        if innings != 1 or is_curtailed_match or st_wk >= 10 or st_ov_f < 1.0 or st_ov_f >= (std_ov_cal * 0.82):
+        if is_curtailed_match or st_wk >= 10 or st_ov_f < 1.0:
             return None
         try:
-            return predict_innings1_calibrated(
-                fmt=fmt,
-                score=float(st_sc),
-                wickets=int(st_wk),
-                overs_f=st_ov_f,
-                p0_bat_dec=p0_bat_dec_cal,
-                bat_team=bat_t_cal,
-                bowl_team=bowl_t_cal,
-                venue_name=venue_name or "",
-                hist_venue_par=eff_hist_venue_par,
-                live_pitch_type=canon_pitch,
-                bat_adapt=bat_adp_cal,
-                bowl_adapt=bowl_adp_cal,
-                striker=striker,
-                non_striker=non_striker,
-                bowler=bowler,
-                dugout_players=dugout_players,
-                bowlers_list=bowlers_list,
-                dew_factor=float(dew_factor),
-                boundary_avg_m=b_avg_m_cal,
-            )
+            if innings == 1 and st_ov_f < (std_ov_cal * 0.82):
+                return predict_innings1_calibrated(
+                    fmt=fmt,
+                    score=float(st_sc),
+                    wickets=int(st_wk),
+                    overs_f=st_ov_f,
+                    p0_bat_dec=p0_bat_dec_cal,
+                    bat_team=bat_t_cal,
+                    bowl_team=bowl_t_cal,
+                    venue_name=venue_name or "",
+                    hist_venue_par=eff_hist_venue_par,
+                    live_pitch_type=canon_pitch,
+                    bat_adapt=bat_adp_cal,
+                    bowl_adapt=bowl_adp_cal,
+                    striker=striker,
+                    non_striker=non_striker,
+                    bowler=bowler,
+                    dugout_players=dugout_players,
+                    bowlers_list=bowlers_list,
+                    dew_factor=eff_dew_factor,
+                    is_day_night=bool(is_day_night),
+                    deliveries=deliveries,
+                    boundary_avg_m=b_avg_m_cal,
+                )
+            if innings == 2 and fmt in ("ODI", "T20", "T20I"):
+                eff_tgt_cal = float(target if target is not None else ((innings_1_score + 1) if innings_1_score is not None else 0))
+                if eff_tgt_cal <= 0 or st_sc >= eff_tgt_cal:
+                    return None
+                eff_i1_cal = float(innings_1_score if innings_1_score is not None else max(1.0, eff_tgt_cal - 1.0))
+                return predict_innings2_chase_calibrated(
+                    fmt=fmt,
+                    score=float(st_sc),
+                    wickets=int(st_wk),
+                    overs_f=st_ov_f,
+                    target=eff_tgt_cal,
+                    inn1_score=eff_i1_cal,
+                    p0_chase_dec=p0_bat_dec_cal,
+                    chase_team=bat_t_cal,
+                    defend_team=bowl_t_cal,
+                    venue_name=venue_name or "",
+                    live_pitch_type=canon_pitch,
+                    chase_adapt=bat_adp_cal,
+                    defend_adapt=bowl_adp_cal,
+                    striker=striker,
+                    non_striker=non_striker,
+                    bowler=bowler,
+                    dugout_players=dugout_players,
+                    bowlers_list=bowlers_list,
+                    is_day_night=bool(is_day_night),
+                    dew_factor=eff_dew_factor,
+                    dew_intelligence=dew_intelligence,
+                    deliveries=deliveries,
+                    scheduled_overs=resolved_sched_ov,
+                )
         except Exception:
             return None
+        return None
 
-    def _blend_innings1_probs(raw_pa: float, raw_pd: float, cal_d: Optional[Dict[str, Any]]) -> Tuple[float, float, float]:
+    def _blend_calibrated_probs(raw_pa: float, raw_pd: float, cal_d: Optional[Dict[str, Any]]) -> Tuple[float, float, float]:
         if cal_d is None or cal_d.get("fade_weight", 0.0) <= 0.01:
             return raw_pa, round(max(0.0, 100.0 - raw_pd - raw_pa), 1) if fmt == "TEST" else round(100.0 - raw_pa, 1), raw_pd
         dec_pool = max(5.0, 100.0 - float(raw_pd)) if fmt == "TEST" else 100.0
-        mc_a_dec = max(0.02, min(0.98, float(raw_pa) / dec_pool))
+        mc_a_dec = max(0.01, min(0.99, float(raw_pa) / dec_pool))
         mc_bat_dec = mc_a_dec if team_a_batting else (1.0 - mc_a_dec)
-        base_w = 0.45 if fmt == "TEST" else 0.78
-        w_cal = base_w * float(cal_d["fade_weight"])
+        if "p_chase_win" in cal_d:
+            w_cal = float(cal_d["fade_weight"])
+            p_c = max(0.01, min(0.99, float(cal_d["p_chase_win"])))
+        else:
+            base_w = 0.45 if fmt == "TEST" else 0.78
+            w_cal = base_w * float(cal_d["fade_weight"])
+            p_c = max(0.02, min(0.98, float(cal_d["p_bat_win"])))
         logit_mc = math.log(mc_bat_dec / (1.0 - mc_bat_dec))
-        p_c = max(0.02, min(0.98, float(cal_d["p_bat_win"])))
         logit_c = math.log(p_c / (1.0 - p_c))
         comb_bat = 1.0 / (1.0 + math.exp(-max(-5.5, min(5.5, (1.0 - w_cal) * logit_mc + w_cal * logit_c))))
         comb_a_dec = comb_bat if team_a_batting else (1.0 - comb_bat)
@@ -2012,7 +2085,7 @@ def calculate_stage4_live(
         return eff_pa, eff_pb, raw_pd
 
     cal_live_res = _eval_cal_for_state(score, wickets, overs, balls)
-    p_team_a_live, p_team_b_live, p_draw_live = _blend_innings1_probs(p_team_a_live, p_draw_live, cal_live_res)
+    p_team_a_live, p_team_b_live, p_draw_live = _blend_calibrated_probs(p_team_a_live, p_draw_live, cal_live_res)
 
     # Counterfactual Pitch-Held, Deterministic CRN Delivery WPA & Progress/Stumps Gating:
     # Eliminates non-attributed WPA swings from pitch flips, model switches, Stumps breaks, or idle polls.
@@ -2075,7 +2148,7 @@ def calculate_stage4_live(
             batting_quality_mult=resource_tanks["batting_quality_mult"],
             bowling_quality_mult=resource_tanks["bowling_quality_mult"],
             is_day_night=is_day_night,
-            dew_factor=dew_factor,
+            dew_factor=eff_dew_factor,
             previous_p_team_a=None,
             previous_p_draw=None,
             finisher_count=resource_tanks.get("finisher_count", 0),
@@ -2102,9 +2175,9 @@ def calculate_stage4_live(
             current_overs=int(prev_overs), current_balls=int(prev_balls),
             **cf_common_kwargs,
         )
-        cf_after_a, _, _ = _blend_innings1_probs(cf_after_mc_a, cf_after_mc_d, cal_live_res)
+        cf_after_a, _, _ = _blend_calibrated_probs(cf_after_mc_a, cf_after_mc_d, cal_live_res)
         cal_before_res = _eval_cal_for_state(int(prev_score), int(prev_wickets), int(prev_overs), int(prev_balls))
-        cf_before_a, _, _ = _blend_innings1_probs(cf_before_mc_a, cf_before_mc_d, cal_before_res)
+        cf_before_a, _, _ = _blend_calibrated_probs(cf_before_mc_a, cf_before_mc_d, cal_before_res)
         raw_cf_wpa = round(cf_after_a - cf_before_a, 1)
         if int(wickets) <= int(prev_wickets):
             max_non_wkt = 1.8 if fmt == "TEST" else (3.5 if fmt == "ODI" else 5.0)
@@ -2146,7 +2219,7 @@ def calculate_stage4_live(
             bowlers_list=bowlers_list,
             recent_momentum_shift=recent_momentum_shift,
             is_day_night=is_day_night,
-            dew_factor=dew_factor,
+            dew_factor=eff_dew_factor,
             commentary=commentary,
             bowler=bowler,
             scheduled_overs=resolved_sched_ov,
@@ -2159,7 +2232,7 @@ def calculate_stage4_live(
             venue_name=venue_name
         )
         # Unified Calibrated Innings-1 Score & Conformal 90%+ Band Blend across T20I, ODI, and TEST
-        if innings == 1 and cal_live_res is not None:
+        if innings == 1 and cal_live_res is not None and "proj_score" in cal_live_res:
             w_sc_cal = (0.72 if fmt in ("T20", "T20I") else 0.78) * float(cal_live_res["fade_weight"])
             if w_sc_cal > 0.01:
                 blended_proj = int(round((1.0 - w_sc_cal) * par_proj + w_sc_cal * float(cal_live_res["proj_score"])))
@@ -2210,8 +2283,11 @@ def calculate_stage4_live(
             
             # Wicket-bounded expected runs
             wkt_run_capacity = (rec_left * run_per_rec) + (tail_left * run_per_tail)
-            # Ball-bounded expected runs
-            ball_run_capacity = (balls_rem / 6.0) * max(3.5, min(8.5, crr))
+            # Ball-bounded expected runs (format-calibrated ceiling for high-chase T20Is vs ODIs)
+            max_cap_rr = 12.5 if fmt in ("T20", "T20I") else 8.8
+            min_cap_rr = 5.5 if fmt in ("T20", "T20I") else 3.8
+            eff_chase_rr = max(min_cap_rr, min(max_cap_rr, crr * (1.06 if (is_day_night and eff_dew_factor >= 0.30) else 1.00)))
+            ball_run_capacity = (balls_rem / 6.0) * eff_chase_rr
             
             expected_rem_runs = min(wkt_run_capacity, ball_run_capacity)
             expected_fall_short = min(runs_req - 1, int(round(expected_rem_runs)))
@@ -2297,7 +2373,7 @@ def calculate_stage4_live(
         "par_score_projected": par_proj,
         "par_score_min": par_min,
         "par_score_max": par_max,
-        "dew_factor": dew_factor,
+        "dew_factor": round(eff_dew_factor, 3),
         "dew_intelligence": dew_intelligence,
         "striker_settledness": striker_settledness,
         "next_ball_distribution": next_ball_dist,

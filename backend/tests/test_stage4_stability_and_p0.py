@@ -305,6 +305,163 @@ class TestStage4StabilityAndStage3P0(unittest.TestCase):
             self.assertGreater(r1["proj_high"], r1["proj_low"])
             self.assertTrue(0.02 <= r1["p_bat_win"] <= 0.98)
 
+    def test_stage4_calibrated_innings2_chase_bounds_determinism_and_dls_sensitivity(self):
+        from backend.engine.stage4_calibrator import predict_innings2_chase_calibrated
+
+        xi_chase = _make_xi("IND", bat_avg=45.0, sr=135.0, bowl_avg=26.0, econ=5.2, adapt=82.0)
+        xi_defend = _make_xi("AUS", bat_avg=43.0, sr=128.0, bowl_avg=25.0, econ=5.0, adapt=80.0)
+        sample_delivs = [
+            {"over": ov, "ball": b, "runs_batter": 1 if b % 2 else 4, "extras": 0, "is_wicket": False, "bowler": "A Zampa"}
+            for ov in range(1, 5)
+            for b in range(1, 7)
+        ]
+
+        for fmt, sc_ahead, sc_behind, wk, ov, target, inn1 in (
+            ("T20I", 82, 52, 1, 8.0, 175, 174),
+            ("ODI", 138, 92, 2, 20.0, 290, 289),
+        ):
+            r_ahead_1 = predict_innings2_chase_calibrated(
+                fmt=fmt,
+                score=sc_ahead,
+                wickets=wk,
+                overs_f=ov,
+                target=target,
+                inn1_score=inn1,
+                p0_chase_dec=0.52,
+                chase_team="IND",
+                defend_team="AUS",
+                venue_name="Wankhede Stadium, Mumbai",
+                live_pitch_type="flat",
+                striker=xi_chase[0],
+                non_striker=xi_chase[1],
+                bowler=xi_defend[8],
+                dugout_players=xi_chase[2:],
+                bowlers_list=xi_defend[6:],
+                is_day_night=True,
+                dew_factor=0.65,
+                deliveries=sample_delivs,
+            )
+            r_ahead_2 = predict_innings2_chase_calibrated(
+                fmt=fmt,
+                score=sc_ahead,
+                wickets=wk,
+                overs_f=ov,
+                target=target,
+                inn1_score=inn1,
+                p0_chase_dec=0.52,
+                chase_team="IND",
+                defend_team="AUS",
+                venue_name="Wankhede Stadium, Mumbai",
+                live_pitch_type="flat",
+                striker=xi_chase[0],
+                non_striker=xi_chase[1],
+                bowler=xi_defend[8],
+                dugout_players=xi_chase[2:],
+                bowlers_list=xi_defend[6:],
+                is_day_night=True,
+                dew_factor=0.65,
+                deliveries=sample_delivs,
+            )
+            r_behind = predict_innings2_chase_calibrated(
+                fmt=fmt,
+                score=sc_behind,
+                wickets=wk + 2,
+                overs_f=ov,
+                target=target,
+                inn1_score=inn1,
+                p0_chase_dec=0.52,
+                chase_team="IND",
+                defend_team="AUS",
+                venue_name="Wankhede Stadium, Mumbai",
+                live_pitch_type="flat",
+                striker=xi_chase[0],
+                non_striker=xi_chase[1],
+                bowler=xi_defend[8],
+                dugout_players=xi_chase[2:],
+                bowlers_list=xi_defend[6:],
+                is_day_night=True,
+                dew_factor=0.65,
+                deliveries=sample_delivs,
+            )
+            self.assertIsNotNone(r_ahead_1)
+            self.assertIsNotNone(r_behind)
+            self.assertEqual(r_ahead_1, r_ahead_2)
+            self.assertTrue(0.01 <= r_ahead_1["p_chase_win"] <= 0.99)
+            self.assertTrue(0.01 <= r_behind["p_chase_win"] <= 0.99)
+            self.assertGreater(r_ahead_1["p_chase_win"], r_behind["p_chase_win"])
+
+    def test_stage4_live_innings2_chase_auto_dew_and_wpa_bounds(self):
+        striker = {"id": "s1", "name": "R Sharma", "runs": 42, "balls": 28, "batting_avg": 45.0, "strike_rate": 138.0}
+        non_striker = {"id": "s2", "name": "V Kohli", "runs": 35, "balls": 26, "batting_avg": 52.0, "strike_rate": 132.0}
+        bowler = {"id": "b1", "name": "A Zampa", "bowling_avg": 24.0, "economy": 6.4, "bowling_style": "Right-arm legbreak"}
+        xi_bat = _make_xi("IND", bat_avg=45.0, sr=132.0, bowl_avg=26.0, econ=5.2, adapt=82.0)
+        xi_bowl = _make_xi("AUS", bat_avg=42.0, sr=125.0, bowl_avg=25.0, econ=5.0, adapt=80.0)
+        recent_delivs = [
+            {
+                "over": ov,
+                "ball": b,
+                "runs_batter": 4 if b in (2, 5) else 1,
+                "extras": 1 if b == 3 else 0,
+                "is_wicket": False,
+                "bowler": "A Zampa",
+                "bowler_type": "spinner",
+            }
+            for ov in range(5, 11)
+            for b in range(1, 7)
+        ]
+        humid_weather = {
+            "temp_c": 26.5,
+            "relative_humidity_pct": 89.0,
+            "wind_speed_kmh": 4.0,
+        }
+
+        for fmt, sc, wk, ov, target, inn1, max_dot_swing in (
+            ("T20I", 88, 2, 10, 178, 177, 5.05),
+            ("ODI", 145, 3, 24, 286, 285, 3.55),
+        ):
+            kwargs = dict(
+                innings=2,
+                score=sc,
+                wickets=wk,
+                overs=ov,
+                balls=3,
+                target=target,
+                innings_1_score=inn1,
+                striker=striker,
+                non_striker=non_striker,
+                bowler=bowler,
+                team_a_batting=True,
+                p0_pre_match=52.0,
+                previous_p_team_a=58.0,
+                dugout_players=xi_bat[2:7],
+                bowlers_list=xi_bowl[6:],
+                team_a="IND",
+                team_b="AUS",
+                match_format=fmt,
+                live_pitch_type="flat",
+                venue_name="Wankhede Stadium, Mumbai",
+                is_day_night=True,
+                dew_factor=0.0,
+                dew_intelligence=None,
+                weather_report=humid_weather,
+                deliveries=recent_delivs,
+                prev_innings=2,
+                prev_score=sc,
+                prev_wickets=wk,
+                prev_overs=ov,
+                prev_balls=2,
+                is_progress_step=True,
+            )
+            res1 = calculate_stage4_live(**kwargs)
+            res2 = calculate_stage4_live(**kwargs)
+            self.assertEqual(res1["p_team_a"], res2["p_team_a"])
+            self.assertEqual(res1["wpa"], res2["wpa"])
+            self.assertIsInstance(res1.get("dew_intelligence"), dict)
+            self.assertGreater(res1.get("dew_factor", 0.0), 0.0)
+            self.assertGreater(res1.get("spin_grip_penalty_pct", 0.0), 0.0)
+            self.assertTrue(0.5 <= res1["p_team_a"] <= 99.5)
+            self.assertLessEqual(abs(res1["wpa"]), max_dot_swing)
+
 
 if __name__ == "__main__":
     unittest.main()

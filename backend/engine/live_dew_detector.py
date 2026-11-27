@@ -397,18 +397,31 @@ class LiveDewDetector:
             inn2_dels = [d for d in deliveries if d.get("innings") == 2 or d.get("inning") == 2]
             if inn2_dels:
                 total_balls = len(inn2_dels)
-                wides = sum(1 for d in inn2_dels if str(d.get("extra_type", "")).lower() == "wide" or d.get("is_wide"))
-                noballs = sum(1 for d in inn2_dels if str(d.get("extra_type", "")).lower() == "noball" or d.get("is_noball"))
+                wides = sum(1 for d in inn2_dels if "wide" in str(d.get("extra_type", "")).lower() or d.get("is_wide"))
+                noballs = sum(1 for d in inn2_dels if "noball" in str(d.get("extra_type", "")).lower() or d.get("is_noball"))
                 extras_count = wides + noballs
                 extras_rate_inn2 = extras_count / max(1, total_balls)
 
+                def _del_bat_runs(delv: Dict[str, Any]) -> int:
+                    val = delv.get("runs_batter")
+                    if val is None:
+                        val = delv.get("batter_runs")
+                    if val is None:
+                        val = delv.get("runs_off_bat")
+                    return int(val or 0)
+
+                def _del_tot_runs(delv: Dict[str, Any]) -> int:
+                    if delv.get("runs") is not None and not isinstance(delv.get("runs"), dict):
+                        return int(delv.get("runs") or 0)
+                    return _del_bat_runs(delv) + int(delv.get("extras_runs") or (delv.get("extras") if not isinstance(delv.get("extras"), dict) else 0) or 0)
+
                 # Spin deliveries
-                spin_dels = [d for d in inn2_dels if "spin" in str(d.get("bowler_style", "")).lower()]
-                spin_runs = sum(int(d.get("runs_batter", 0)) + int(d.get("extras", 0)) for d in spin_dels)
+                spin_dels = [d for d in inn2_dels if any(k in str(d.get("bowler_style", "")).lower() for k in ("spin", "orth", "break", "chinaman", "slow"))]
+                spin_runs = sum(_del_tot_runs(d) for d in spin_dels)
                 spin_rpo_inn2 = (spin_runs / (len(spin_dels) / 6.0)) if len(spin_dels) >= (6 if is_t20 else 12) else (7.8 if is_t20 else 5.2)
 
                 # Fours
-                fours = sum(1 for d in inn2_dels if int(d.get("runs_batter", 0)) == 4)
+                fours = sum(1 for d in inn2_dels if _del_bat_runs(d) == 4)
                 fours_per_over = fours / max(1.0, total_balls / 6.0)
             else:
                 total_balls = 0

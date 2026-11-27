@@ -1251,14 +1251,36 @@ class IngestionManager:
             hist_venue_par = v_ctx.get("venue_par")
 
             from ..engine.live_dew_detector import LiveDewDetector
+            from ..engine.live_weather_service import get_venue_live_weather_bundle
             cur_ov_calc = live_data["current_overs"] + live_data["current_balls"] / 6.0
+            live_weather_ca = get_venue_live_weather_bundle(v_name_hint, m_fmt)
+            ca_dels: List[Dict[str, Any]] = []
+            try:
+                async with conn.execute(
+                    "SELECT innings, over_number, ball_number, runs_batter, extras, is_wicket, is_wide, is_noball, extra_type, commentary "
+                    "FROM deliveries WHERE match_id = ? ORDER BY innings ASC, over_number ASC, ball_number ASC LIMIT 300",
+                    (match_id,),
+                ) as dcur_ca:
+                    for dr in await dcur_ca.fetchall():
+                        ca_dels.append({
+                            "innings": dr[0], "over": dr[1], "ball": dr[2],
+                            "runs_batter": dr[3], "extras": dr[4],
+                            "is_wicket": bool(dr[5]), "is_wide": bool(dr[6]),
+                            "is_noball": bool(dr[7]), "extra_type": dr[8],
+                            "commentary": dr[9] or "",
+                        })
+            except Exception:
+                ca_dels = []
             dew_eval = LiveDewDetector.detect_live_dew(
                 venue_id=match.get("venue_id") or match.get("venue") or "wankhede",
                 is_day_night=bool(match.get("is_day_night", 0)),
                 match_format=m_fmt,
                 innings=live_data["current_innings"],
                 current_overs=cur_ov_calc,
-                commentary_feed=[live_data.get("last_event_description", ""), live_data.get("pitch_report", "")]
+                commentary_feed=[live_data.get("last_event_description", ""), live_data.get("pitch_report", "")],
+                weather_data=live_weather_ca,
+                deliveries=ca_dels or None,
+                inn_1_summary={"runs": int(match["innings_1_score"])} if match.get("innings_1_score") else None,
             )
             calibrated_dew_factor = dew_eval.get("dew_factor_calibrated", float(match.get("dew_factor") or 0.30))
 
@@ -1308,6 +1330,7 @@ class IngestionManager:
                 is_day_night=bool(match.get("is_day_night", 0)),
                 dew_factor=calibrated_dew_factor,
                 dew_intelligence=dew_eval,
+                commentary=live_data.get("last_event_description"),
                 venue_name=v_name_hint,
                 historical_venue_par=hist_venue_par,
                 prev_score=match.get("current_score"),
@@ -1316,6 +1339,8 @@ class IngestionManager:
                 prev_balls=match.get("current_balls"),
                 prev_innings=match.get("current_innings"),
                 is_progress_step=ca_progressed,
+                deliveries=ca_dels or None,
+                weather_report=live_weather_ca,
             )
 
             if not ca_progressed or bool(match.get("is_stumps")):
@@ -2198,13 +2223,18 @@ class IngestionManager:
 
             # 5. Full Stage 4 ML Inference with Duel Simulation & Quality Resource Tanks
             from ..engine.live_dew_detector import LiveDewDetector
+            from ..engine.live_weather_service import get_venue_live_weather_bundle
+            live_weather_cb = get_venue_live_weather_bundle(v_name_hint_cb, match_format)
             dew_eval = LiveDewDetector.detect_live_dew(
                 venue_id=v_id,
                 is_day_night=bool(match.get("is_day_night", 0)),
                 match_format=match_format,
                 innings=inn_val,
                 current_overs=overs + balls / 6.0,
-                commentary_feed=commentary_list
+                commentary_feed=commentary_list,
+                weather_data=live_weather_cb,
+                deliveries=pitch_deliv_context or None,
+                inn_1_summary={"runs": int(inn_1_score)} if inn_1_score else None,
             )
             calibrated_dew_factor = dew_eval.get("dew_factor_calibrated", float(match.get("dew_factor") or 0.30))
 
@@ -2254,6 +2284,7 @@ class IngestionManager:
                 is_day_night=bool(match.get("is_day_night", 0)),
                 dew_factor=calibrated_dew_factor,
                 dew_intelligence=dew_eval,
+                commentary=st_text,
                 venue_name=v_name_hint_cb,
                 historical_venue_par=hist_venue_par_cb,
                 prev_score=match.get("current_score"),
@@ -2262,6 +2293,8 @@ class IngestionManager:
                 prev_balls=match.get("current_balls"),
                 prev_innings=match.get("current_innings"),
                 is_progress_step=cb_progressed,
+                deliveries=pitch_deliv_context or None,
+                weather_report=live_weather_cb,
             )
 
             is_break_frozen = (not cb_progressed) or bool(is_stumps_val or (match_format == "TEST" and match.get("is_stumps")))

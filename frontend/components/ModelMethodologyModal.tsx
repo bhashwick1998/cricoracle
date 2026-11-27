@@ -40,15 +40,15 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
         {/* Accuracy Benchmark Metric Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-6">
           <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-center">
-            <span className="text-[10px] uppercase font-bold text-slate-400 block">20% Stage 4 Win Acc</span>
-            <span className="text-xl font-black text-emerald-400 mt-0.5 block">76% / 74%</span>
-            <span className="text-[10px] text-slate-400">T20I 76% | TEST 73.8% | ODI 67%</span>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Stage 4 Inn-2 Chase</span>
+            <span className="text-xl font-black text-emerald-400 mt-0.5 block">88.1% / 76.1%</span>
+            <span className="text-[10px] text-slate-400">T20I 88.1% (93.7% Dew) | ODI 76.1%</span>
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-center">
-            <span className="text-[10px] uppercase font-bold text-slate-400 block">90% Conformal Band</span>
-            <span className="text-xl font-black text-cyan-400 mt-0.5 block">84% - 95%</span>
-            <span className="text-[10px] text-slate-400">Horizon &amp; Wicket Calibrated</span>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">20% Match Win Acc</span>
+            <span className="text-xl font-black text-cyan-400 mt-0.5 block">75% / 74%</span>
+            <span className="text-[10px] text-slate-400">T20I 74.9% | TEST 73.8% | ODI 66.9%</span>
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-center">
@@ -58,9 +58,9 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-center">
-            <span className="text-[10px] uppercase font-bold text-slate-400 block">In-Play Latency</span>
-            <span className="text-xl font-black text-indigo-400 mt-0.5 block">&lt; 80ms</span>
-            <span className="text-[10px] text-slate-400">Deterministic SHA-256 WPA</span>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">90% Conformal Band</span>
+            <span className="text-xl font-black text-indigo-400 mt-0.5 block">84% - 95%</span>
+            <span className="text-[10px] text-slate-400">Live Telemetry &amp; Dew Aware</span>
           </div>
         </div>
 
@@ -77,12 +77,12 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
               <div className="flex items-center justify-between font-bold text-cyan-400 mb-1">
                 <span className="flex items-center gap-1.5">
                   <Database className="w-3.5 h-3.5 text-cyan-400" />
-                  1. Dirichlet Pitch Prior &amp; Kalman Drift
+                  1. Live Pitch Kalman Drift &amp; Weather/Dew
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800">Priors</span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800">Atmosphere</span>
               </div>
               <p className="text-slate-300 text-[11px] leading-relaxed">
-                Blends Cricsheet venue dossiers and 5-surface adaptability into a 5-way pitch posterior (flat, balanced, green, dusty, bouncy) with hysteresis-damped Kalman Gain drift tracking.
+                Tracks 5-way pitch probabilities with hysteresis-damped Kalman drift alongside live Open-Meteo dew-point spread, venue dew priors, and wet-ball spin grip penalties in Day/Night chases.
               </p>
             </div>
 
@@ -96,7 +96,7 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
                 <span className="text-[10px] px-2 py-0.5 rounded bg-teal-950 border border-teal-800">Stage 4 v2</span>
               </div>
               <p className="text-slate-300 text-[11px] leading-relaxed">
-                Combines Huber, Ridge, XGBoost, and ExtraTrees regressors over Stern DLS &amp; wicket-era anchors with horizon-normalized conformal score intervals (84%–95% OOS coverage).
+                Combines Huber, Ridge, XGBoost, and ExtraTrees regressors over Stern DLS &amp; wicket-era anchors with live 3-over pace, dot/boundary pressure telemetry, and horizon conformal intervals (84%–95% OOS coverage).
               </p>
             </div>
 
@@ -119,12 +119,12 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
               <div className="flex items-center justify-between font-bold text-rose-400 mb-1">
                 <span className="flex items-center gap-1.5">
                   <TrendingUp className="w-3.5 h-3.5 text-rose-400" />
-                  4. Bayesian Log-Odds Fusion &amp; Monte Carlo
+                  4. Stern DLS Chase Fusion &amp; Monte Carlo
                 </span>
                 <span className="text-[10px] px-2 py-0.5 rounded bg-rose-950 border border-rose-800">Rollouts</span>
               </div>
               <p className="text-slate-300 text-[11px] leading-relaxed">
-                Fuses Stage 3 MOV-Elo &amp; XI priors with calibrated Innings-1 log-odds updates and 3,000 SHA-256 deterministic 2nd-innings/4-innings simulations with pitch-held counterfactual WPA.
+                Fuses calibrated Innings-1 log-odds and Stern DLS / dew-adjusted Innings-2 chase models with 3,000 SHA-256 deterministic Monte Carlo rollouts and pitch-held counterfactual WPA.
               </p>
             </div>
           </div>

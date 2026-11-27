@@ -884,14 +884,18 @@ async def get_matches(state: Optional[str] = None):
 
                 # Live Dew Detection for Day/Night and Limited Overs Matches
                 from .engine.live_dew_detector import LiveDewDetector
+                from .engine.live_weather_service import get_venue_live_weather_bundle
                 cur_ov_m = float(m.get("current_overs") or 0.0) + float(m.get("current_balls") or 0) / 6.0
+                w_m = get_venue_live_weather_bundle(m.get("venue_name") or m.get("venue_id"), m_fmt)
                 dew_res = LiveDewDetector.detect_live_dew(
                     venue_id=m.get("venue_id") or "wankhede",
                     is_day_night=bool(m.get("is_day_night", 0)),
                     match_format=m_fmt,
                     innings=m.get("current_innings", 1),
                     current_overs=cur_ov_m,
-                    commentary_feed=[m.get("last_event_description", ""), m.get("pitch_report", "")]
+                    commentary_feed=[m.get("last_event_description", ""), m.get("pitch_report", "")],
+                    weather_data=w_m,
+                    inn_1_summary={"runs": int(m["innings_1_score"])} if m.get("innings_1_score") else None,
                 )
                 m["dew_intelligence"] = dew_res
                 if dew_res.get("dew_detected") and dew_res.get("dew_factor_calibrated"):
@@ -1908,22 +1912,27 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
         if cur_ov is None or (cur_ov == 0 and match_data.get("innings_2_overs")):
             cur_ov = match_data.get("innings_2_overs")
 
-        # Live Dew Detection
+        # Live Dew Detection (with live Open-Meteo telemetry + deliveries when available)
         from .engine.live_dew_detector import LiveDewDetector
+        from .engine.live_weather_service import get_venue_live_weather_bundle
+        w_full = get_venue_live_weather_bundle(match_data.get("venue_name") or match_data.get("venue_id"), m_format)
         dew_eval = LiveDewDetector.detect_live_dew(
             venue_id=match_data.get("venue_id", "wankhede"),
             is_day_night=bool(match_data.get("is_day_night", 0)),
             match_format=m_format,
             innings=match_data.get("current_innings", 1),
             current_overs=float(cur_ov or 0.0),
-            commentary_feed=[match_data.get("last_event_description", ""), match_data.get("pitch_report", "")]
+            commentary_feed=[match_data.get("last_event_description", ""), match_data.get("pitch_report", "")],
+            weather_data=w_full,
+            deliveries=deliv_rows if "deliv_rows" in locals() else None,
+            inn_1_summary={"runs": int(match_data["innings_1_score"])} if match_data.get("innings_1_score") else None,
         )
         match_data["dew_intelligence"] = dew_eval
         dew_fac = dew_eval.get("dew_factor_calibrated") or match_data.get("dew_factor") or 0.28
         match_data["dew_factor"] = dew_fac
 
-        hum_val = float(match_data.get("humidity_pct") or 62.0)
-        temp_val = float(match_data.get("temperature_c") or 26.5)
+        hum_val = float((w_full or {}).get("humidity_pct") or match_data.get("humidity_pct") or 62.0)
+        temp_val = float((w_full or {}).get("temperature_c") or match_data.get("temperature_c") or 26.5)
 
         weather_eval = detect_and_predict_weather_impact(
             match_format=m_format,
