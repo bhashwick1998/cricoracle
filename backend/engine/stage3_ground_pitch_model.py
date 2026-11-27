@@ -978,6 +978,7 @@ def predict_stage3_calibrated_score(
         )
         for k, v in c_vals.items():
             raw_pred += float(w.get(k, 0.0)) * v
+        raw_pred += float(model.get("era_shift", 0.0))
         resid_std = float(model.get("residual_std", cfg["default_resid_std"]))
     else:
         raw_pred = (
@@ -1076,6 +1077,8 @@ def compute_stage3_dual_first_innings_projections(
         + (float(f_a.get("bat_country_adapt", 75.0)) - float(f_b.get("bat_country_adapt", 75.0))) * 0.28
         + (float(f_a.get("me_bat_rating", 0.0)) - float(f_b.get("me_bat_rating", 0.0))) * 0.18
         + (float(f_a.get("me_bowl_rating", 0.0)) - float(f_b.get("me_bowl_rating", 0.0))) * 0.14
+        + (float(f_a.get("xi_bat_strength", 0.0)) - float(f_b.get("xi_bat_strength", 0.0))) * 0.25
+        + (float(f_a.get("xi_bat_index", 0.0)) - float(f_b.get("xi_bat_index", 0.0))) * 0.30
     )
     toss_bat_bias = 0.0
     if toss_known:
@@ -1083,7 +1086,58 @@ def compute_stage3_dual_first_innings_projections(
 
     log_scale = 48.0 if fmt_key == "TEST" else (34.0 if fmt_key == "ODI" else 19.0)
     combined_edge = par_diff + duel_edge + adapt_edge + toss_bat_bias
-    logit = max(-3.5, min(3.5, combined_edge / max(8.0, log_scale)))
+    logit_6sig = max(-3.5, min(3.5, combined_edge / max(8.0, log_scale)))
+
+    # Blend 6-signal logit with calibrated Chronological MOV-Elo + Form + H2H + Venue Chase Bias
+    pr = priors if priors is not None else load_stage3_calibrated_priors()
+    fmt_pr = pr.get(fmt_key, {}) if isinstance(pr, dict) else {}
+    team_elo = fmt_pr.get("team_elo", {})
+    win_model = fmt_pr.get("win_model", {})
+    if team_elo and win_model and "weights" in win_model:
+        home_boost = 45.0 if fmt_key == "T20I" else (55.0 if fmt_key == "ODI" else 70.0)
+        v_key = normalize_venue_key(venue_name)
+        hc = infer_host_country_code(v_key, normalize_city_key(city), venue_name)
+        cl = "SENA" if hc in {"AUS", "ENG", "NZ", "SA"} else ("SUBCONT" if hc in {"IND", "PAK", "SL", "BAN", "AFG"} else "OTHER")
+        elo_a = float(team_elo.get(code_a, 1460.0)) + (home_boost if hc and code_a == hc else 0.0)
+        elo_b = float(team_elo.get(code_b, 1460.0)) + (home_boost if hc and code_b == hc else 0.0)
+        cl_map = fmt_pr.get("team_elo_cluster", {}).get(cl, {})
+        cl_diff = float(cl_map.get(code_a, 1500.0)) - float(cl_map.get(code_b, 1500.0))
+        t_form = fmt_pr.get("team_form", {})
+        fa = float(t_form.get(code_a, 0.5))
+        fb = float(t_form.get(code_b, 0.5))
+        t_rpo = fmt_pr.get("team_rpo_margin", {})
+        ra = float(t_rpo.get(code_a, 0.0))
+        rb = float(t_rpo.get(code_b, 0.0))
+        pk_a, pk_b = sorted((code_a, code_b))
+        h2h_map = fmt_pr.get("h2h_win_pct", {})
+        raw_h = float(h2h_map.get(f"{pk_a}_{pk_b}", 0.5))
+        h_a = raw_h if code_a == pk_a else (1.0 - raw_h)
+        def_b1 = 0.48 if fmt_key == "T20I" else (0.49 if fmt_key == "ODI" else 0.52)
+        v_b1 = float(fmt_pr.get("venue_bat1_win_pct", {}).get(v_key, def_b1))
+        toss_bat_a = 1.0 if (not toss_known or toss_code == code_a) else -1.0
+        x_w = [
+            (elo_a - elo_b) / 100.0,
+            cl_diff / 100.0,
+            fa - fb,
+            ra - rb,
+            h_a - 0.5,
+            v_b1 - 0.5,
+            toss_bat_a * (v_b1 - 0.5),
+        ]
+        wm_w = win_model["weights"]
+        n_w = len(wm_w)
+        wm_m = win_model.get("means", [0.0] * n_w)
+        wm_s = win_model.get("stds", [1.0] * n_w)
+        logit_chron = float(win_model.get("intercept", 0.0)) + sum(
+            float(wm_w[idx]) * ((x_w[idx] - float(wm_m[idx])) / max(1e-4, float(wm_s[idx])))
+            for idx in range(min(len(x_w), n_w))
+        )
+        logit_chron = max(-3.5, min(3.5, logit_chron))
+        w_6sig = 0.62 if fmt_key == "ODI" else (0.52 if fmt_key == "T20I" else 0.65)
+        logit = max(-3.5, min(3.5, w_6sig * logit_6sig + (1.0 - w_6sig) * logit_chron))
+    else:
+        logit = logit_6sig
+
     decisive_prob_a = 1.0 / (1.0 + math.exp(-logit))
 
     dom_p = str(f_a.get("dominant_pitch") or "balanced").lower()

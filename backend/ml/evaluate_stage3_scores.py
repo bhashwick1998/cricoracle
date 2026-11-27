@@ -279,6 +279,9 @@ def extract_clean_matches_from_zip(zip_path: Path, fmt_label: str) -> List[Dict[
                                 player_contrib_bowl[reg[bwn]][2] += 1
 
             p_type = classify_match_pitch_telemetry(d, fmt_label, players_cache)
+            win_raw = outcome.get("winner")
+            win_code = TEAM_NAME_TO_CODE.get(win_raw, normalize_team_code(win_raw)) if win_raw else None
+            is_draw = outcome.get("result") == "draw"
             rows.append({
                 "match_id": fn.replace(".json", ""),
                 "format": fmt_label,
@@ -292,6 +295,8 @@ def extract_clean_matches_from_zip(zip_path: Path, fmt_label: str) -> List[Dict[
                 "toss_winner_code": toss_winner_code,
                 "toss_decision": toss_dec,
                 "toss_winner_bats": (toss_winner_code == bat_code),
+                "winner_code": win_code,
+                "is_draw": is_draw,
                 "bat_xi": _build_xi(bat_team_name, bat_code),
                 "bowl_xi": _build_xi(bowl_team_name, bowl_code),
                 "actual_score": int(runs1),
@@ -491,6 +496,51 @@ def build_empirical_priors_from_train_rows(fmt: str, train_rows: List[Dict[str, 
                 },
             }
 
+    # Chronological MOV-Elo, Form EMA, Venue Chase Bias & H2H strictly over `train_rows`
+    home_elo_boost = 45.0 if fmt == "T20I" else (55.0 if fmt == "ODI" else 70.0)
+    k_elo_base = 28.0 if fmt == "T20I" else 24.0
+    default_bat1_win = 0.48 if fmt == "T20I" else (0.49 if fmt == "ODI" else 0.52)
+    elo_map: Dict[str, float] = defaultdict(lambda: 1500.0)
+    form_pairs: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+    ven_bat1_pairs: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+    h2h_pairs: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+    for r, wt in sorted(zip(train_rows, w_all), key=lambda x: (x[0]["date"], x[0]["match_id"])):
+        b_c, bw_c = r["bat_code"], r["bowl_code"]
+        hc = infer_host_country_code(r["venue_key"], r["city_key"], r["venue"])
+        eb = elo_map[b_c] + (home_elo_boost if hc and b_c == hc else 0.0)
+        ebw = elo_map[bw_c] + (home_elo_boost if hc and bw_c == hc else 0.0)
+        p_exp = 1.0 / (1.0 + math.pow(10.0, -(eb - ebw) / 400.0))
+        wc = r.get("winner_code")
+        if wc in (b_c, bw_c):
+            res_b = 1.0 if wc == b_c else 0.0
+            res_bw = 1.0 - res_b
+            if r["venue_key"]:
+                ven_bat1_pairs[r["venue_key"]].append((res_b, wt))
+        else:
+            res_b, res_bw = 0.5, 0.5
+        k_eff = k_elo_base * (2.2 / (abs(eb - ebw) * 0.001 + 2.2))
+        d_elo = k_eff * (res_b - p_exp)
+        elo_map[b_c] += d_elo
+        elo_map[bw_c] -= d_elo
+        form_pairs[b_c].append((res_b, wt))
+        form_pairs[bw_c].append((res_bw, wt))
+        pk = "_".join(sorted((b_c, bw_c)))
+        h2h_pairs[pk].append((1.0 if wc == pk.split("_")[0] else (0.0 if wc == pk.split("_")[1] else 0.5), wt))
+
+    team_elo = {c: round(float(v), 1) for c, v in elo_map.items()}
+    team_form = {
+        c: round((sum(w for _, w in prs) * _wmean(prs, 0.5) + 4.0 * 0.5) / (sum(w for _, w in prs) + 4.0), 4)
+        for c, prs in form_pairs.items()
+    }
+    venue_bat1_win_pct = {
+        v: round((sum(w for _, w in prs) * _wmean(prs, default_bat1_win) + 8.0 * default_bat1_win) / (sum(w for _, w in prs) + 8.0), 4)
+        for v, prs in ven_bat1_pairs.items()
+    }
+    h2h_win_pct = {
+        k: round((sum(w for _, w in prs) * _wmean(prs, 0.5) + 3.0 * 0.5) / (sum(w for _, w in prs) + 3.0), 4)
+        for k, prs in h2h_pairs.items()
+    }
+
     return {
         "overall_mean": round(overall_mean, 2),
         "global_pitch_pars": global_pitch_pars,
@@ -507,6 +557,10 @@ def build_empirical_priors_from_train_rows(fmt: str, train_rows: List[Dict[str, 
         "country_bowl_pitch_residuals": shrunk_bowl_pitch,
         "player_bat_adapt": player_bat_adapt,
         "player_bowl_adapt": player_bowl_adapt,
+        "team_elo": team_elo,
+        "team_form": team_form,
+        "venue_bat1_win_pct": venue_bat1_win_pct,
+        "h2h_win_pct": h2h_win_pct,
     }
 
 
@@ -551,6 +605,7 @@ def fit_ridge_stage3_model(
     fold_idx = np.arange(n) % n_folds
     X_list: List[np.ndarray] = []
     y_list: List[float] = []
+    d_list: List[str] = []
     w_list: List[float] = []
     ref_date = max((r["date"] for r in train_rows), default="2024-12-31")
 
@@ -575,6 +630,7 @@ def fit_ridge_stage3_model(
             )
             X_list.append(_extract_feature_vector(feat))
             y_list.append(float(r["actual_score"]))
+            d_list.append(r["date"])
             w_list.append(_recency_weight(r["date"], ref_date, half_life_days=half_life))
 
     X = np.vstack(X_list)
@@ -633,6 +689,17 @@ def fit_ridge_stage3_model(
     preds = inter + X_base @ w_base + X_adj_centered @ w_adj
     resid_std = float(np.sqrt(np.average((y - preds) ** 2, weights=sample_w)))
 
+    # Era-drift debiaser from the final 300-day OOF training tail (fixes recent scoring inflation cleanly)
+    tail_pairs = [
+        (float(y[i] - preds[i]), _recency_weight(d_list[i], ref_date, half_life_days=240.0))
+        for i in range(len(y))
+    ]
+    t_ws = sum(w for _, w in tail_pairs)
+    raw_era_shift = sum(r_v * w for r_v, w in tail_pairs) / max(1e-6, t_ws + 28.0)
+    max_shift = 7.0 if fmt == "T20I" else (6.0 if fmt == "ODI" else 14.0)
+    # Only correct secular upward scoring drift; avoid fitting short-term dips negatively
+    era_shift = round(max(0.0, min(max_shift, raw_era_shift)), 2)
+
     adj_names = [
         "me_bat_rating",
         "me_bowl_rating",
@@ -678,6 +745,7 @@ def fit_ridge_stage3_model(
         "intercept": round(inter, 4),
         "weights": weights,
         "feature_means": feature_means,
+        "era_shift": era_shift,
         "residual_std": round(resid_std, 2),
         "oof_train_mae": round(float(np.mean(np.abs(y - preds))), 2),
         "oof_train_rmse": round(float(np.sqrt(np.mean((y - preds) ** 2))), 2),
@@ -769,6 +837,253 @@ def _match_baseline_legacy_stage3(r: Dict[str, Any]) -> Tuple[int, int, int]:
     return int(res["par_score_projected"]), int(res["par_score_min"]), int(res["par_score_max"])
 
 
+def _fit_stage3_win_calibrator(fmt: str, train_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Fits an L2-regularized Stage 3 Win Probability logistic meta-calibrator strictly chronologically
+    on `train_rows` combining chronological MOV-Elo, rolling form, bilateral H2H, and venue chase bias.
+    """
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+
+    home_boost = 45.0 if fmt == "T20I" else (55.0 if fmt == "ODI" else 70.0)
+    k_elo = 28.0 if fmt == "T20I" else 24.0
+    def_bat1 = 0.48 if fmt == "T20I" else (0.49 if fmt == "ODI" else 0.52)
+
+    elo_c: Dict[str, float] = defaultdict(lambda: 1500.0)
+    form_c: Dict[str, List[float]] = defaultdict(list)
+    ven_c: Dict[str, List[float]] = defaultdict(list)
+    h2h_c: Dict[str, List[float]] = defaultdict(list)
+
+    X_w, y_w = [], []
+    for r in sorted(train_rows, key=lambda x: (x["date"], x["match_id"])):
+        b_c, bw_c = r["bat_code"], r["bowl_code"]
+        hc = infer_host_country_code(r["venue_key"], r["city_key"], r["venue"])
+        eb = elo_c[b_c] + (home_boost if hc and b_c == hc else 0.0)
+        ebw = elo_c[bw_c] + (home_boost if hc and bw_c == hc else 0.0)
+        elo_diff = eb - ebw
+        p_exp = 1.0 / (1.0 + math.pow(10.0, -elo_diff / 400.0))
+
+        fa = (sum(form_c[b_c][-12:]) + 4.0 * 0.5) / (len(form_c[b_c][-12:]) + 4.0)
+        fb = (sum(form_c[bw_c][-12:]) + 4.0 * 0.5) / (len(form_c[bw_c][-12:]) + 4.0)
+        vb_list = ven_c.get(r["venue_key"], [])
+        v_b1 = (sum(vb_list[-20:]) + 8.0 * def_bat1) / (len(vb_list[-20:]) + 8.0)
+
+        pk_a, pk_b = sorted((b_c, bw_c))
+        h_list = h2h_c.get(f"{pk_a}_{pk_b}", [])
+        raw_h = (sum(h_list[-12:]) + 3.0 * 0.5) / (len(h_list[-12:]) + 3.0)
+        h_b = raw_h if b_c == pk_a else (1.0 - raw_h)
+
+        wc = r.get("winner_code")
+        if wc in (b_c, bw_c):
+            res_b = 1.0 if wc == b_c else 0.0
+            X_w.append([
+                elo_diff / 100.0,
+                fa - fb,
+                h_b - 0.5,
+                v_b1 - 0.5,
+                (1.0 if r["toss_winner_bats"] else -1.0) * (v_b1 - 0.5),
+            ])
+            y_w.append(int(res_b))
+            if r["venue_key"]:
+                ven_c[r["venue_key"]].append(res_b)
+        else:
+            res_b = 0.5
+
+        k_eff = k_elo * (2.2 / (abs(elo_diff) * 0.001 + 2.2))
+        d_elo = k_eff * (res_b - p_exp)
+        elo_c[b_c] += d_elo
+        elo_c[bw_c] -= d_elo
+        form_c[b_c].append(res_b)
+        form_c[bw_c].append(1.0 - res_b)
+        h2h_c[f"{pk_a}_{pk_b}"].append(res_b if b_c == pk_a else (1.0 - res_b))
+
+    if len(X_w) < 30:
+        return {"intercept": 0.0, "weights": [0.45, 0.25, 0.15, 0.20, 0.15], "means": [0.0] * 5, "stds": [1.0] * 5}
+
+    X_arr = np.array(X_w, dtype=float)
+    y_arr = np.array(y_w, dtype=int)
+    sc = StandardScaler()
+    Xs = sc.fit_transform(X_arr)
+    clf = LogisticRegression(C=0.05, max_iter=1000).fit(Xs, y_arr)
+    return {
+        "intercept": round(float(clf.intercept_[0]), 5),
+        "weights": [round(float(w), 5) for w in clf.coef_[0]],
+        "means": [round(float(m), 5) for m in sc.mean_],
+        "stds": [round(float(s), 5) for s in np.maximum(1e-4, sc.scale_)],
+    }
+
+
+def _fit_stage3_full_chronological_win_priors(zpath: Path, fmt: str, split_date: str) -> Dict[str, Any]:
+    """
+    Replays ALL historical male matches (< split_date) in strict chronological order to converge
+    MOV-Elo, SENA/Subcontinent cluster Elo, rolling L12 win rate, RPO margin, H2H, venue chase bias,
+    and an L2-regularized LogisticRegression win calibrator without any post-split leakage.
+    """
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+
+    sena_set = {"AUS", "ENG", "NZ", "SA"}
+    sub_set = {"IND", "PAK", "SL", "BAN", "AFG"}
+    home_boost = 45.0 if fmt == "T20I" else (55.0 if fmt == "ODI" else 70.0)
+    k_elo = 28.0 if fmt == "T20I" else 24.0
+    def_bat1 = 0.48 if fmt == "T20I" else (0.49 if fmt == "ODI" else 0.52)
+
+    raw_list = []
+    with zipfile.ZipFile(zpath, "r") as z:
+        for fn in sorted(z.namelist()):
+            if not fn.endswith(".json"):
+                continue
+            d = json.loads(z.read(fn))
+            info = d.get("info", {})
+            if info.get("gender") != "male":
+                continue
+            teams = info.get("teams", [])
+            dt = (info.get("dates") or [""])[0]
+            if len(teams) != 2 or not dt or dt >= split_date:
+                continue
+            outcome = info.get("outcome", {})
+            if outcome.get("result") in ("no result", "abandoned"):
+                continue
+            inns = d.get("innings", [])
+            if not inns:
+                continue
+            raw_list.append((dt, fn, d))
+    raw_list.sort(key=lambda x: (x[0], x[1]))
+
+    elo_c: Dict[str, float] = defaultdict(lambda: 1500.0)
+    elo_cl: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(lambda: 1500.0))
+    form_c: Dict[str, List[float]] = defaultdict(list)
+    rpo_c: Dict[str, List[float]] = defaultdict(list)
+    ven_c: Dict[str, List[float]] = defaultdict(list)
+    h2h_c: Dict[str, List[float]] = defaultdict(list)
+
+    X_w, y_w, w_samps = [], [], []
+    for dt, _, d in raw_list:
+        info = d.get("info", {})
+        teams = info.get("teams", [])
+        inns = d.get("innings", [])
+        b_name = inns[0].get("team") or teams[0]
+        bw_name = teams[1] if b_name == teams[0] else teams[0]
+        b_c = TEAM_NAME_TO_CODE.get(b_name, normalize_team_code(b_name))
+        bw_c = TEAM_NAME_TO_CODE.get(bw_name, normalize_team_code(bw_name))
+        venue = info.get("venue", "") or ""
+        city = info.get("city", "") or ""
+        vk = normalize_venue_key(venue)
+        ck = normalize_city_key(city)
+        hc = infer_host_country_code(vk, ck, venue)
+        cl = "SENA" if hc in sena_set else ("SUBCONT" if hc in sub_set else "OTHER")
+
+        toss = info.get("toss", {})
+        tw_name = toss.get("winner") or b_name
+        tw_code = TEAM_NAME_TO_CODE.get(tw_name, normalize_team_code(tw_name))
+        toss_bat = 1.0 if tw_code == b_c else -1.0
+
+        eb = elo_c[b_c] + (home_boost if hc and b_c == hc else 0.0)
+        ebw = elo_c[bw_c] + (home_boost if hc and bw_c == hc else 0.0)
+        elo_diff = eb - ebw
+        cl_diff = elo_cl[cl][b_c] - elo_cl[cl][bw_c]
+        p_exp = 1.0 / (1.0 + math.pow(10.0, -elo_diff / 400.0))
+
+        fa = (sum(form_c[b_c][-12:]) + 4.0 * 0.5) / (len(form_c[b_c][-12:]) + 4.0)
+        fb = (sum(form_c[bw_c][-12:]) + 4.0 * 0.5) / (len(form_c[bw_c][-12:]) + 4.0)
+        ra = (sum(rpo_c[b_c][-10:]) / max(1, len(rpo_c[b_c][-10:]))) if rpo_c[b_c] else 0.0
+        rb = (sum(rpo_c[bw_c][-10:]) / max(1, len(rpo_c[bw_c][-10:]))) if rpo_c[bw_c] else 0.0
+
+        vb_list = ven_c.get(vk, [])
+        v_b1 = (sum(vb_list[-25:]) + 8.0 * def_bat1) / (len(vb_list[-25:]) + 8.0)
+
+        pk_a, pk_b = sorted((b_c, bw_c))
+        h_list = h2h_c.get(f"{pk_a}_{pk_b}", [])
+        raw_h = (sum(h_list[-12:]) + 3.0 * 0.5) / (len(h_list[-12:]) + 3.0)
+        h_b = raw_h if b_c == pk_a else (1.0 - raw_h)
+
+        # Extract RPO margin for MOV-Elo
+        inn_rpos = []
+        for inn in inns[:2]:
+            ir, ib = 0, 0
+            for ov in inn.get("overs", []):
+                for dl in ov.get("deliveries", []):
+                    ir += dl.get("runs", {}).get("total", 0)
+                    et = dl.get("extras", {})
+                    if "wides" not in et and "noballs" not in et:
+                        ib += 1
+            inn_rpos.append((inn.get("team"), ir / max(1.0, ib / 6.0)))
+        if len(inn_rpos) >= 2:
+            rpo_m = inn_rpos[0][1] - inn_rpos[1][1] if inn_rpos[0][0] == b_name else inn_rpos[1][1] - inn_rpos[0][1]
+        else:
+            rpo_m = 0.0
+
+        win_raw = info.get("outcome", {}).get("winner")
+        wc = TEAM_NAME_TO_CODE.get(win_raw, normalize_team_code(win_raw)) if win_raw else None
+        is_sen = (b_name in SENIOR_TEAMS and bw_name in SENIOR_TEAMS)
+        if dt >= "2016-01-01" and wc in (b_c, bw_c):
+            res_b = 1.0 if wc == b_c else 0.0
+            X_w.append([
+                elo_diff / 100.0,
+                cl_diff / 100.0,
+                fa - fb,
+                ra - rb,
+                h_b - 0.5,
+                v_b1 - 0.5,
+                toss_bat * (v_b1 - 0.5),
+            ])
+            y_w.append(int(res_b))
+            w_samps.append(1.5 if is_sen else 0.75)
+            if vk:
+                ven_c[vk].append(res_b)
+        elif wc in (b_c, bw_c):
+            res_b = 1.0 if wc == b_c else 0.0
+            if vk:
+                ven_c[vk].append(res_b)
+        else:
+            res_b = 0.5
+
+        mov = max(0.75, min(2.0, math.log1p(abs(rpo_m)) * (2.2 / (abs(elo_diff) * 0.001 + 2.2))))
+        d_elo = (k_elo * mov) * (res_b - p_exp)
+        elo_c[b_c] += d_elo
+        elo_c[bw_c] -= d_elo
+        p_cl = 1.0 / (1.0 + math.pow(10.0, -cl_diff / 400.0))
+        elo_cl[cl][b_c] += 20.0 * (res_b - p_cl)
+        elo_cl[cl][bw_c] -= 20.0 * (res_b - p_cl)
+        form_c[b_c].append(res_b)
+        form_c[bw_c].append(1.0 - res_b)
+        rpo_c[b_c].append(rpo_m)
+        rpo_c[bw_c].append(-rpo_m)
+        h2h_c[f"{pk_a}_{pk_b}"].append(res_b if b_c == pk_a else (1.0 - res_b))
+
+    team_elo = {c: round(float(v), 1) for c, v in elo_c.items()}
+    team_elo_cluster = {cl: {c: round(float(v), 1) for c, v in mp.items()} for cl, mp in elo_cl.items()}
+    team_form = {c: round((sum(v[-12:]) + 4.0 * 0.5) / (len(v[-12:]) + 4.0), 4) for c, v in form_c.items()}
+    team_rpo_margin = {c: round(float(sum(v[-10:]) / max(1, len(v[-10:]))), 4) for c, v in rpo_c.items()}
+    venue_bat1 = {v: round((sum(vals[-25:]) + 8.0 * def_bat1) / (len(vals[-25:]) + 8.0), 4) for v, vals in ven_c.items()}
+    h2h_map = {k: round((sum(vals[-12:]) + 3.0 * 0.5) / (len(vals[-12:]) + 3.0), 4) for k, vals in h2h_c.items()}
+
+    win_model = {"intercept": 0.0, "weights": [0.55, 0.15, 0.15, 0.10, 0.08, 0.12, 0.08], "means": [0.0] * 7, "stds": [1.0] * 7}
+    if len(X_w) >= 40:
+        Xa = np.array(X_w, dtype=float)
+        ya = np.array(y_w, dtype=int)
+        wa = np.array(w_samps, dtype=float)
+        sc = StandardScaler()
+        Xs = sc.fit_transform(Xa)
+        clf = LogisticRegression(C=0.05, max_iter=1000).fit(Xs, ya, sample_weight=wa)
+        win_model = {
+            "intercept": round(float(clf.intercept_[0]), 5),
+            "weights": [round(float(w), 5) for w in clf.coef_[0]],
+            "means": [round(float(m), 5) for m in sc.mean_],
+            "stds": [round(float(s), 5) for s in np.maximum(1e-4, sc.scale_)],
+        }
+
+    return {
+        "team_elo": team_elo,
+        "team_elo_cluster": team_elo_cluster,
+        "team_form": team_form,
+        "team_rpo_margin": team_rpo_margin,
+        "venue_bat1_win_pct": venue_bat1,
+        "h2h_win_pct": h2h_map,
+        "win_model": win_model,
+    }
+
+
 def run_calibration_and_evaluation(
     split_date: str = "2025-01-01",
     save_priors: bool = True,
@@ -796,6 +1111,8 @@ def run_calibration_and_evaluation(
         fmt_priors = build_empirical_priors_from_train_rows(fmt, train_rows)
         score_model = fit_ridge_stage3_model(fmt, train_rows, l2_alpha=250.0)
         fmt_priors["score_model"] = score_model
+        chron_win = _fit_stage3_full_chronological_win_priors(zpath, fmt, split_date=split_date)
+        fmt_priors.update(chron_win)
         priors_all[fmt] = fmt_priors
 
         single_prior = {fmt: fmt_priors}
