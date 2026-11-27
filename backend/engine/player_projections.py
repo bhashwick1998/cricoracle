@@ -2141,10 +2141,10 @@ def predict_live_innings_score_monte_carlo(
             # Render.com Dual Simulated Matchup vs Active Bowler
             duel_rpo_factor = 1.0
             if active_bowler_name:
-                r_duel = get_render_crease_duel(p_name, active_bowler_name, fmt)
+                r_duel = get_render_crease_duel(p_name, active_bowler_name, fmt, allow_network=False)
                 if r_duel:
                     duel_rpo = float(r_duel.get("expected_runs_per_over") or 5.0)
-                    duel_rpo_factor = max(0.70, min(1.35, duel_rpo / 5.0))
+                    duel_rpo_factor = max(0.84, min(1.18, 1.0 + 0.50 * (duel_rpo / 5.0 - 1.0)))
 
             # Lever 1: Control Percentage & False-Shot Hazard (Test Active Batter)
             ctrl_val = p.get("control_pct") or p.get("control_percentage")
@@ -2291,8 +2291,10 @@ def predict_live_innings_score_monte_carlo(
         blended = raw_point * (1.0 - eq_w) + target_equil * eq_w
         clamped = apply_pitch_corridor_envelope(blended, pitch_type, fmt, curr_wkts, effective_overs)
         proj_final = max(curr_score, int(round(clamped)))
-        proj_low = max(curr_score, int(round(proj_final - 35)))
-        proj_high = max(proj_low + 5, int(round(proj_final + 40)))
+        test_rem_frac = max(0.06, min(1.0, (100.0 - min(95.0, effective_overs)) / 100.0))
+        test_norm = math.sqrt(test_rem_frac) * max(0.25, (wickets_left / 10.0) ** 0.35)
+        proj_low = max(curr_score, int(round(proj_final - max(20.0, 165.0 * test_norm))))
+        proj_high = max(proj_low + 10, int(round(proj_final + max(24.0, 195.0 * test_norm))))
 
         return {
             "proj_final": proj_final,
@@ -2438,13 +2440,13 @@ def predict_live_innings_score_monte_carlo(
             wkt_factor = (wickets_left / 10.0) ** wkt_exp
             depletion = max(0.42, min(1.04, wkt_factor * (0.64 + 0.36 * coverage)))
 
-        # Variable B: Batter vs Bowler Matchup Matrix (Render.com /api/duel)
+        # Variable B: Batter vs Bowler Matchup Matrix (Render.com /api/duel cache; zero blocking HTTP in MC)
         duel_factor = 1.0
         if striker_name and bowler_name:
-            r_duel = get_render_crease_duel(striker_name, bowler_name, fmt)
+            r_duel = get_render_crease_duel(striker_name, bowler_name, fmt, allow_network=False)
             if r_duel:
                 base_rpo = 8.0 if fmt != "ODI" else 5.4
-                duel_factor = max(0.72, min(1.30, float(r_duel.get("expected_runs_per_over") or base_rpo) / base_rpo))
+                duel_factor = max(0.84, min(1.16, 1.0 + 0.55 * (float(r_duel.get("expected_runs_per_over") or base_rpo) / base_rpo - 1.0)))
 
         # Variable C: Batting Lineup Depth (Dugout Resource Tank & Render 22 attributes)
         batting_tank_pct = float(match_data.get("batting_tank_pct") or max(60.0, 100.0 * (wickets_left / 10.0)))
@@ -2461,10 +2463,10 @@ def predict_live_innings_score_monte_carlo(
                 if (fmt == "ODI" and (sr >= 95.0 or pow_hit >= 65.0)) or (fmt != "ODI" and (sr >= 135.0 or pow_hit >= 58.0)):
                     finishers += 1
 
-        finisher_death_mult = 1.08 if (finishers >= 2 and death_balls > 0) else 1.00
+        finisher_death_mult = (1.03 if fmt == "ODI" else 1.05) if (finishers >= 2 and death_balls > 0) else 1.00
         tail_penalty = 0.82 if rec_batters <= 1 else 1.00
 
-        # Variable E: 5-Surface Pitch Adaptability from Render.com
+        # Variable E: 5-Surface Pitch Adaptability from Render.com (damped to prevent long-horizon stacking)
         striker_pitch_mult = 1.00
         if striker_name:
             r_adapt = get_render_pitch_adaptability(striker_name, fmt)
@@ -2472,12 +2474,12 @@ def predict_live_innings_score_monte_carlo(
             if r_adapt and r_adapt.get(pitch_col) and float(r_adapt[pitch_col]) > 0:
                 st_avg = float(r_adapt[pitch_col])
                 bench_avg = 28.0 if fmt != "ODI" else 35.0
-                striker_pitch_mult = max(0.80, min(1.25, st_avg / bench_avg))
+                striker_pitch_mult = max(0.88, min(1.12, 1.0 + 0.45 * (st_avg / bench_avg - 1.0)))
 
-        # Variable F: Striker Settledness (Format-Calibrated Logarithmic Curve)
+        # Variable F: Striker Settledness (tempered across long remaining overs to avoid +17 run ODI bias)
         st_bf = int(striker_obj.get("balls_faced") or 10) if striker_obj else 10
-        settled_gamma = 0.12 if fmt in ["T20", "T20I"] else 0.10
-        st_settled_mult = max(0.85, min(1.30, 0.90 + settled_gamma * math.log(1.0 + max(0, st_bf))))
+        settled_gamma = 0.06 if fmt in ["T20", "T20I"] else 0.045
+        st_settled_mult = max(0.92, min(1.10, 0.96 + settled_gamma * math.log(1.0 + max(0, st_bf))))
 
         # Lever 1: Control Percentage & False-Shot Hazard (Limited-Overs Striker)
         st_ctrl = striker_obj.get("control_pct") or striker_obj.get("control_percentage") if striker_obj else None
@@ -2558,18 +2560,22 @@ def predict_live_innings_score_monte_carlo(
             mid_crr_delta = 0.25 * crr_shrink * wkt_carry_damp * max(-1.6, min(2.1, crr_excess))
             death_crr_delta = 0.20 * crr_shrink * wkt_carry_damp * max(-1.4, min(2.0, crr_excess))
             # Bouncy tracks with 2+ PP wickets lost suppress middle/death scoring; dusty tracks hold steady
-            surface_adj = 0.90 if (pitch_type == "bouncy" and curr_wkts >= 2) else (1.05 if pitch_type == "dusty" and curr_wkts <= 2 else 1.00)
+            surface_adj = 0.94 if (pitch_type == "bouncy" and curr_wkts >= 2) else 1.00
         else:  # T20 / T20I
             crr_shrink = min(0.70, effective_overs / (effective_overs + 2.2))
             wkt_carry_damp = 0.95 if curr_wkts <= 1 else (0.80 if curr_wkts <= 3 else 0.45)
             pp_crr_delta = 0.44 * crr_shrink * wkt_carry_damp * max(-2.6, min(3.4, crr_excess))
             mid_crr_delta = 0.38 * crr_shrink * wkt_carry_damp * max(-2.2, min(3.0, crr_excess))
             death_crr_delta = 0.32 * crr_shrink * wkt_carry_damp * max(-2.0, min(2.8, crr_excess))
-            surface_adj = 1.05 if (pitch_type == "bouncy" and curr_wkts <= 1) else 0.97 if (pitch_type != "bouncy" and curr_wkts <= 1) else 1.00
+            surface_adj = 1.04 if (pitch_type == "bouncy" and curr_wkts <= 1) else 0.98 if (pitch_type != "bouncy" and curr_wkts <= 1) else 1.00
 
-        pp_rate = max(2.5, (rr_pp + pp_crr_delta) * opp_bowl_factor * depletion * duel_factor * striker_pitch_mult * st_settled_mult * st_longevity_mult * bowler_perf_mult * momentum_mult * eff_kalman_mult * geom_wind_mult * surface_adj)
-        mid_rate = max(2.5, (rr_mid + mid_crr_delta) * opp_bowl_factor * depletion * duel_factor * striker_pitch_mult * partnership_mult * eff_tank_mult * tail_penalty * momentum_mult * eff_kalman_mult * geom_wind_mult * surface_adj)
-        death_rate = max(3.5, (rr_death + death_crr_delta) * opp_bowl_factor * depletion * death_bowler_mult * finisher_death_mult * eff_tank_mult * tail_penalty * momentum_mult * eff_kalman_mult * geom_wind_mult * surface_adj)
+        m_lo, m_hi = (0.85, 1.13) if fmt == "ODI" else (0.82, 1.18)
+        pp_mult = max(m_lo, min(m_hi, opp_bowl_factor * depletion * duel_factor * striker_pitch_mult * st_settled_mult * st_longevity_mult * bowler_perf_mult * momentum_mult * eff_kalman_mult * geom_wind_mult * surface_adj))
+        mid_mult = max(m_lo, min(m_hi, opp_bowl_factor * depletion * duel_factor * striker_pitch_mult * partnership_mult * eff_tank_mult * tail_penalty * momentum_mult * eff_kalman_mult * geom_wind_mult * surface_adj))
+        death_mult = max(m_lo, min(m_hi, opp_bowl_factor * depletion * death_bowler_mult * finisher_death_mult * eff_tank_mult * tail_penalty * momentum_mult * eff_kalman_mult * geom_wind_mult * surface_adj))
+        pp_rate = max(2.5, (rr_pp + pp_crr_delta) * pp_mult)
+        mid_rate = max(2.5, (rr_mid + mid_crr_delta) * mid_mult)
+        death_rate = max(3.5, (rr_death + death_crr_delta) * death_mult)
 
         # Competing All-Out Termination Hazard: teams losing 4+ early wickets get bowled out
         # before exhausting all scheduled overs; keep 0-3 wkt survival realistic (~96-100% of overs).
@@ -2631,8 +2637,10 @@ def predict_live_innings_score_monte_carlo(
         blended = raw_median * (1.0 - eq_w) + target_equil * eq_w
         clamped = apply_pitch_corridor_envelope(blended, pitch_type, fmt, curr_wkts, effective_overs)
         proj_final = max(curr_score, int(round(clamped)))
-        proj_low = max(curr_score, int(round(proj_final - (12 if fmt == "T20" else 22))))
-        proj_high = max(proj_low + 5, int(round(proj_final + (14 if fmt == "T20" else 25))))
+        lo_norm = math.sqrt(max(0.03, float(balls_left) / float(max_balls))) * max(0.25, (wickets_left / 10.0) ** 0.35)
+        bw_lo, bw_hi = (44.0, 46.0) if fmt == "T20" else (92.0, 98.0)
+        proj_low = max(curr_score, int(round(proj_final - max(8.0 if fmt == "T20" else 12.0, bw_lo * lo_norm))))
+        proj_high = max(proj_low + 6, int(round(proj_final + max(10.0 if fmt == "T20" else 14.0, bw_hi * lo_norm))))
 
         return {
             "proj_final": proj_final,

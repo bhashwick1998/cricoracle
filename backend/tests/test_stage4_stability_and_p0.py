@@ -260,6 +260,51 @@ class TestStage4StabilityAndStage3P0(unittest.TestCase):
         sc_allout = prov.parse_score_string("108 all out (16.5)")
         self.assertEqual(sc_allout["wickets"], 10)
 
+    def test_stage4_calibrated_innings1_bounds_and_determinism(self):
+        from backend.engine.stage4_calibrator import predict_innings1_calibrated
+
+        xi_bat = _make_xi("IND", bat_avg=45.0, sr=135.0, bowl_avg=26.0, econ=5.2, adapt=82.0)
+        xi_bowl = _make_xi("AUS", bat_avg=43.0, sr=128.0, bowl_avg=25.0, econ=5.0, adapt=80.0)
+        for fmt, sc, wk, ov in (("T20I", 38, 1, 4.0), ("ODI", 52, 2, 10.0), ("TEST", 68, 2, 20.0)):
+            r1 = predict_innings1_calibrated(
+                fmt=fmt,
+                score=sc,
+                wickets=wk,
+                overs_f=ov,
+                p0_bat_dec=0.55,
+                bat_team="IND",
+                bowl_team="AUS",
+                venue_name="Melbourne Cricket Ground",
+                live_pitch_type="balanced",
+                striker=xi_bat[0],
+                non_striker=xi_bat[1],
+                bowler=xi_bowl[8],
+                dugout_players=xi_bat[2:],
+                bowlers_list=xi_bowl[6:],
+            )
+            r2 = predict_innings1_calibrated(
+                fmt=fmt,
+                score=sc,
+                wickets=wk,
+                overs_f=ov,
+                p0_bat_dec=0.55,
+                bat_team="IND",
+                bowl_team="AUS",
+                venue_name="Melbourne Cricket Ground",
+                live_pitch_type="balanced",
+                striker=xi_bat[0],
+                non_striker=xi_bat[1],
+                bowler=xi_bowl[8],
+                dugout_players=xi_bat[2:],
+                bowlers_list=xi_bowl[6:],
+            )
+            self.assertIsNotNone(r1)
+            self.assertEqual(r1, r2)
+            self.assertGreaterEqual(r1["proj_score"], sc)
+            self.assertGreaterEqual(r1["proj_low"], sc)
+            self.assertGreater(r1["proj_high"], r1["proj_low"])
+            self.assertTrue(0.02 <= r1["p_bat_win"] <= 0.98)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1098,6 +1098,8 @@ def run_live_vectorized_monte_carlo(
     venue_name: Optional[str] = None,
     historical_venue_par: Optional[float] = None,
     rng_override_seed: Optional[str] = None,
+    batting_squad: Optional[List[Dict[str, Any]]] = None,
+    bowling_squad: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[float, float, float]:
     """
     Sub-15ms vectorized Monte Carlo match simulation from current delivery to finish.
@@ -1216,8 +1218,8 @@ def run_live_vectorized_monte_carlo(
                 curr_wkts=current_wickets,
                 curr_overs=float(current_overs),
                 curr_balls=current_balls,
-                batting_squad=[],
-                bowling_squad=[],
+                batting_squad=list(batting_squad or []),
+                bowling_squad=list(bowling_squad or []),
                 ground_arch=pitch_type,
                 match_data={
                     "id": f"{team_a}_{team_b}_TEST",
@@ -1232,9 +1234,10 @@ def run_live_vectorized_monte_carlo(
                 n_sims=400
             )
             sd_1st_test = max(45.0, min(115.0, (105.0 if pitch_type == "flat" else 88.0) * (1.0 - min(0.60, curr_ov_f / 110.0))))
+            bq_test_mult = max(0.93, min(1.07, batting_quality_mult)) if batting_squad else max(0.85, min(1.15, batting_quality_mult))
             sim_1st_innings = np.maximum(
                 float(current_score),
-                rng.normal(loc=float(mc_test["proj_final"]) * max(0.85, min(1.15, batting_quality_mult)), scale=sd_1st_test, size=n_sims)
+                rng.normal(loc=float(mc_test["proj_final"]) * bq_test_mult, scale=sd_1st_test, size=n_sims)
             )
             bat_c = normalize_team_code(bat_t)
             bowl_c = normalize_team_code(bowl_t)
@@ -1246,8 +1249,10 @@ def run_live_vectorized_monte_carlo(
             batting_advantage = (sim_1st_innings + batting_pitch_edge * 0.5 - ref_par) / 95.0
             p_bat_share = max(0.03, min(0.97, float(np.mean(1.0 / (1.0 + np.exp(-batting_advantage))))))
 
-            # Log-Odds Bayesian Prior Fusion anchored to P0, responsive to early collapses
-            p0_batting = max(0.03, min(0.97, (p0_pre_match / 100.0) if team_a_batting else (1.0 - (p0_pre_match / 100.0))))
+            # Log-Odds Bayesian Prior Fusion anchored to decisive P0 share (excluding draw pool when present)
+            draw_p0_pool = float(previous_p_draw) if (previous_p_draw is not None and float(previous_p_draw) > 0 and float(p0_pre_match) + float(previous_p_draw) <= 101.0) else 0.0
+            p0_a_dec = (float(p0_pre_match) / max(15.0, 100.0 - draw_p0_pool)) if draw_p0_pool > 0 else (float(p0_pre_match) / 100.0)
+            p0_batting = max(0.03, min(0.97, p0_a_dec if team_a_batting else (1.0 - p0_a_dec)))
             test_progress = min(1.0, curr_ov_f / 420.0)
             shock_boost = 0.16 if current_wickets >= 4 else (0.08 if current_wickets <= 1 and current_score >= 65 else 0.0)
             info_w = min(0.85, 0.28 + 0.72 * (test_progress ** 0.75) + shock_boost)
@@ -1485,8 +1490,8 @@ def run_live_vectorized_monte_carlo(
             curr_wkts=current_wickets,
             curr_overs=float(current_overs),
             curr_balls=current_balls,
-            batting_squad=[],
-            bowling_squad=[],
+            batting_squad=list(batting_squad or []),
+            bowling_squad=list(bowling_squad or []),
             ground_arch=pitch_type,
             match_data={
                 "id": f"{team_a}_{team_b}_{fmt}",
@@ -1503,10 +1508,11 @@ def run_live_vectorized_monte_carlo(
             n_sims=400
         )
 
-        mu_1st = float(mc_live["proj_final"]) * max(0.88, min(1.12, batting_quality_mult))
+        bq_lo_mult = max(0.95, min(1.05, batting_quality_mult)) if batting_squad else max(0.88, min(1.12, batting_quality_mult))
+        mu_1st = float(mc_live["proj_final"]) * bq_lo_mult
         if death_bowlers_exhausted and fmt != "ODI":
-            mu_1st *= 1.04
-        if finisher_count >= 1 and fmt != "ODI":
+            mu_1st *= (1.02 if batting_squad else 1.04)
+        if finisher_count >= 1 and fmt != "ODI" and not batting_squad:
             mu_1st *= 1.03
 
         if pitch_sweat_index > 0.0:
@@ -1896,6 +1902,9 @@ def calculate_stage4_live(
     )
 
     # 4. Macro 3,000 Vectorized Monte Carlo Rollout with Duel + Quality Tanks Integration
+    eff_bat_squad = [p for p in ([striker, non_striker] + list(dugout_players or [])) if isinstance(p, dict) and (p.get("name") or p.get("id"))]
+    eff_bowl_squad = [p for p in ([bowler] + list(bowlers_list or [])) if isinstance(p, dict) and (p.get("name") or p.get("id"))]
+
     p_team_a_live, p_team_b_live, p_draw_live = run_live_vectorized_monte_carlo(
         innings=innings,
         current_score=score,
@@ -1933,49 +1942,77 @@ def calculate_stage4_live(
         spin_grip_penalty_pct=spin_grip_penalty_pct,
         outfield_friction_pct=outfield_friction_pct,
         venue_name=venue_name,
-        historical_venue_par=eff_hist_venue_par
+        historical_venue_par=eff_hist_venue_par,
+        batting_squad=eff_bat_squad,
+        bowling_squad=eff_bowl_squad,
     )
 
     fmt = match_format.upper()
     is_chasing = (fmt != "TEST" and innings == 2) or (fmt == "TEST" and innings == 4)
 
-    # Selective Innings-1 XGBoost PIML Blending:
-    # Real-match trained PIML boosts T20I Innings-1 win probability calibration & TEST/ODI Innings-1 scores;
-    # 2nd-innings chases and Test multi-innings stays pure ball-by-ball / 4-innings Monte Carlo.
-    piml_live_res = None
+    # Calibrated Innings-1 Stage 4 Blend (Render 22-attr + 5-surface adapt + duel + DLS + Bayesian log-odds)
+    # Applied symmetrically to live prediction, par projection, and counterfactual WPA.
+    from .stage4_calibrator import predict_innings1_calibrated
     ov_f_stage4 = float(overs) + float(balls) / 6.0
-    max_ov_piml = 90.0 if fmt == "TEST" else (float(resolved_sched_ov) if (resolved_sched_ov and fmt != "TEST") else (50.0 if fmt == "ODI" else 20.0))
-    if innings == 1 and wickets < 9 and ov_f_stage4 >= 1.0 and ov_f_stage4 < (max_ov_piml * 0.80):
+    std_ov_cal = 100.0 if fmt == "TEST" else (50.0 if fmt == "ODI" else 20.0)
+    is_curtailed_match = bool(resolved_sched_ov and fmt != "TEST" and resolved_sched_ov < 0.85 * std_ov_cal)
+    bat_t_cal = team_a if team_a_batting else team_b
+    bowl_t_cal = team_b if team_a_batting else team_a
+    bat_adp_cal = team_a_pitch_adapt if team_a_batting else team_b_pitch_adapt
+    bowl_adp_cal = team_b_pitch_adapt if team_a_batting else team_a_pitch_adapt
+    draw_pool_p0 = float(previous_p_draw) if (fmt == "TEST" and previous_p_draw is not None and float(previous_p_draw) > 0 and float(p0_pre_match) + float(previous_p_draw) <= 101.0) else 0.0
+    p0_a_dec_cal = (float(p0_pre_match) / max(15.0, 100.0 - draw_pool_p0)) if draw_pool_p0 > 0 else (float(p0_pre_match) / 100.0)
+    p0_bat_dec_cal = max(0.02, min(0.98, p0_a_dec_cal if team_a_batting else (1.0 - p0_a_dec_cal)))
+    b_avg_m_cal = float(v_ctx_stage4.get("avg_m") or 68.0)
+
+    def _eval_cal_for_state(st_sc: int, st_wk: int, st_ov: int, st_bl: int) -> Optional[Dict[str, Any]]:
+        st_ov_f = float(st_ov) + float(st_bl) / 6.0
+        if innings != 1 or is_curtailed_match or st_wk >= 10 or st_ov_f < 1.0 or st_ov_f >= (std_ov_cal * 0.82):
+            return None
         try:
-            from .piml_engine import piml_engine
-            bat_t_piml = team_a if team_a_batting else team_b
-            bowl_t_piml = team_b if team_a_batting else team_a
-            p0_bat_piml = float(p0_pre_match) if team_a_batting else (100.0 - float(p0_pre_match))
-            b_avg_m = float(v_ctx_stage4.get("avg_m") or 68.0)
-            piml_live_res = piml_engine.predict_piml(
-                score=float(score),
-                overs=ov_f_stage4,
-                wickets=int(wickets),
-                fmt=("T20" if fmt in ("T20", "T20I") else fmt),
-                pitch_archetype=canon_pitch,
-                team_a=bat_t_piml,
-                team_b=bowl_t_piml,
-                venue=venue_name or "",
-                boundary_avg_m=b_avg_m,
-                is_day_night=bool(is_day_night),
+            return predict_innings1_calibrated(
+                fmt=fmt,
+                score=float(st_sc),
+                wickets=int(st_wk),
+                overs_f=st_ov_f,
+                p0_bat_dec=p0_bat_dec_cal,
+                bat_team=bat_t_cal,
+                bowl_team=bowl_t_cal,
+                venue_name=venue_name or "",
+                hist_venue_par=eff_hist_venue_par,
+                live_pitch_type=canon_pitch,
+                bat_adapt=bat_adp_cal,
+                bowl_adapt=bowl_adp_cal,
+                striker=striker,
+                non_striker=non_striker,
+                bowler=bowler,
+                dugout_players=dugout_players,
+                bowlers_list=bowlers_list,
                 dew_factor=float(dew_factor),
-                p0_a=p0_bat_piml
+                boundary_avg_m=b_avg_m_cal,
             )
-            if fmt in ("T20", "T20I") and piml_live_res and not (resolved_sched_ov and resolved_sched_ov < 18.0):
-                prog_t20 = ov_f_stage4 / max(1.0, max_ov_piml)
-                w_win_piml = 0.22 * max(0.0, 1.0 - max(0.0, prog_t20 - 0.50) / 0.30)
-                if w_win_piml > 0.01:
-                    p_bat_piml = float(piml_live_res["prob_a"])
-                    p_ta_piml = p_bat_piml if team_a_batting else (100.0 - p_bat_piml)
-                    p_team_a_live = round(max(0.5, min(99.5, (1.0 - w_win_piml) * p_team_a_live + w_win_piml * p_ta_piml)), 1)
-                    p_team_b_live = round(100.0 - p_team_a_live, 1)
         except Exception:
-            piml_live_res = None
+            return None
+
+    def _blend_innings1_probs(raw_pa: float, raw_pd: float, cal_d: Optional[Dict[str, Any]]) -> Tuple[float, float, float]:
+        if cal_d is None or cal_d.get("fade_weight", 0.0) <= 0.01:
+            return raw_pa, round(max(0.0, 100.0 - raw_pd - raw_pa), 1) if fmt == "TEST" else round(100.0 - raw_pa, 1), raw_pd
+        dec_pool = max(5.0, 100.0 - float(raw_pd)) if fmt == "TEST" else 100.0
+        mc_a_dec = max(0.02, min(0.98, float(raw_pa) / dec_pool))
+        mc_bat_dec = mc_a_dec if team_a_batting else (1.0 - mc_a_dec)
+        base_w = 0.45 if fmt == "TEST" else 0.78
+        w_cal = base_w * float(cal_d["fade_weight"])
+        logit_mc = math.log(mc_bat_dec / (1.0 - mc_bat_dec))
+        p_c = max(0.02, min(0.98, float(cal_d["p_bat_win"])))
+        logit_c = math.log(p_c / (1.0 - p_c))
+        comb_bat = 1.0 / (1.0 + math.exp(-max(-5.5, min(5.5, (1.0 - w_cal) * logit_mc + w_cal * logit_c))))
+        comb_a_dec = comb_bat if team_a_batting else (1.0 - comb_bat)
+        eff_pa = round(max(0.5 if fmt != "TEST" else 1.0, min(dec_pool - (0.5 if fmt != "TEST" else 1.0), dec_pool * comb_a_dec)), 1)
+        eff_pb = round(max(0.0, dec_pool - eff_pa), 1)
+        return eff_pa, eff_pb, raw_pd
+
+    cal_live_res = _eval_cal_for_state(score, wickets, overs, balls)
+    p_team_a_live, p_team_b_live, p_draw_live = _blend_innings1_probs(p_team_a_live, p_draw_live, cal_live_res)
 
     # Counterfactual Pitch-Held, Deterministic CRN Delivery WPA & Progress/Stumps Gating:
     # Eliminates non-attributed WPA swings from pitch flips, model switches, Stumps breaks, or idle polls.
@@ -2053,16 +2090,21 @@ def calculate_stage4_live(
             venue_name=venue_name,
             historical_venue_par=eff_hist_venue_par,
             rng_override_seed=cf_seed,
+            batting_squad=eff_bat_squad,
+            bowling_squad=eff_bowl_squad,
         )
-        cf_after_a, _, _ = run_live_vectorized_monte_carlo(
+        cf_after_mc_a, _, cf_after_mc_d = run_live_vectorized_monte_carlo(
             current_score=score, current_wickets=wickets, current_overs=overs, current_balls=balls,
             **cf_common_kwargs,
         )
-        cf_before_a, _, _ = run_live_vectorized_monte_carlo(
+        cf_before_mc_a, _, cf_before_mc_d = run_live_vectorized_monte_carlo(
             current_score=int(prev_score), current_wickets=int(prev_wickets),
             current_overs=int(prev_overs), current_balls=int(prev_balls),
             **cf_common_kwargs,
         )
+        cf_after_a, _, _ = _blend_innings1_probs(cf_after_mc_a, cf_after_mc_d, cal_live_res)
+        cal_before_res = _eval_cal_for_state(int(prev_score), int(prev_wickets), int(prev_overs), int(prev_balls))
+        cf_before_a, _, _ = _blend_innings1_probs(cf_before_mc_a, cf_before_mc_d, cal_before_res)
         raw_cf_wpa = round(cf_after_a - cf_before_a, 1)
         if int(wickets) <= int(prev_wickets):
             max_non_wkt = 1.8 if fmt == "TEST" else (3.5 if fmt == "ODI" else 5.0)
@@ -2116,16 +2158,14 @@ def calculate_stage4_live(
             bowling_team=(team_b if team_a_batting else team_a),
             venue_name=venue_name
         )
-        # Selective PIML score blend for TEST & ODI Innings 1 (where OOF CV confirms lower MAE)
-        if fmt in ("TEST", "ODI") and piml_live_res is not None:
-            prog_sc = ov_f_stage4 / max(1.0, max_ov_piml)
-            w_sc_piml = 0.20 * max(0.0, 1.0 - max(0.0, prog_sc - 0.35) / 0.45)
-            if w_sc_piml > 0.01:
-                blended_proj = int(round((1.0 - w_sc_piml) * par_proj + w_sc_piml * float(piml_live_res["proj_final"])))
-                delta_p = max(score, blended_proj) - par_proj
+        # Unified Calibrated Innings-1 Score & Conformal 90%+ Band Blend across T20I, ODI, and TEST
+        if innings == 1 and cal_live_res is not None:
+            w_sc_cal = (0.72 if fmt in ("T20", "T20I") else 0.78) * float(cal_live_res["fade_weight"])
+            if w_sc_cal > 0.01:
+                blended_proj = int(round((1.0 - w_sc_cal) * par_proj + w_sc_cal * float(cal_live_res["proj_score"])))
                 par_proj = max(score, blended_proj)
-                par_min = max(score, par_min + delta_p)
-                par_max = max(par_proj + 5, par_max + delta_p)
+                par_min = max(score, int(round((1.0 - w_sc_cal) * par_min + w_sc_cal * float(cal_live_res["proj_low"]))))
+                par_max = max(par_proj + 6, int(round((1.0 - w_sc_cal) * par_max + w_sc_cal * float(cal_live_res["proj_high"]))))
         target_chase_dynamics = {
             "is_chasing": False,
             "target": None,

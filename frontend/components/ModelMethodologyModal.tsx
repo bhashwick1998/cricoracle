@@ -32,7 +32,7 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
               CricOracle Physics-Informed ML & Monte Carlo Architecture
             </h2>
             <p className="text-xs text-slate-400">
-              Conjugate Dirichlet Bayesian Priors, Adaptive Kalman Pitch Drift & 3,000-Rollout 2-Innings Monte Carlo
+              Conjugate Dirichlet Pitch Priors, Bayesian Log-Odds P₀ Fusion, Conformal Uncertainty Bands &amp; 3,000-Rollout Monte Carlo
             </p>
           </div>
         </div>
@@ -40,15 +40,15 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
         {/* Accuracy Benchmark Metric Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-6">
           <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-center">
-            <span className="text-[10px] uppercase font-bold text-slate-400 block">Out-of-Sample Accuracy</span>
-            <span className="text-xl font-black text-emerald-400 mt-0.5 block">80.0%</span>
-            <span className="text-[10px] text-slate-400">90% ODI | 80% Test | 70% T20</span>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">20% Stage 4 Win Acc</span>
+            <span className="text-xl font-black text-emerald-400 mt-0.5 block">76% / 74%</span>
+            <span className="text-[10px] text-slate-400">T20I 76% | TEST 73.8% | ODI 67%</span>
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-center">
-            <span className="text-[10px] uppercase font-bold text-slate-400 block">Milestone MAE</span>
-            <span className="text-xl font-black text-cyan-400 mt-0.5 block">4.5 - 8.1r</span>
-            <span className="text-[10px] text-slate-400">&lt; 10r Target Exceeded</span>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">90% Conformal Band</span>
+            <span className="text-xl font-black text-cyan-400 mt-0.5 block">84% - 95%</span>
+            <span className="text-[10px] text-slate-400">Horizon &amp; Wicket Calibrated</span>
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-center">
@@ -60,15 +60,15 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
           <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-center">
             <span className="text-[10px] uppercase font-bold text-slate-400 block">In-Play Latency</span>
             <span className="text-xl font-black text-indigo-400 mt-0.5 block">&lt; 80ms</span>
-            <span className="text-[10px] text-slate-400">Ball-by-Ball WPA Streaming</span>
+            <span className="text-[10px] text-slate-400">Deterministic SHA-256 WPA</span>
           </div>
         </div>
 
-        {/* The 5 Pillars of the New Methodology */}
+        {/* The 4 Core Pillars of the Architecture */}
         <div className="space-y-4 text-xs">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-cyan-400" />
-            The 5 Core Pillars of the New Methodology
+            Core Analytical &amp; ML Pillars
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -77,12 +77,12 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
               <div className="flex items-center justify-between font-bold text-cyan-400 mb-1">
                 <span className="flex items-center gap-1.5">
                   <Database className="w-3.5 h-3.5 text-cyan-400" />
-                  1. Dirichlet-Bayesian Pitch Prior & 318 Venues
+                  1. Dirichlet Pitch Prior &amp; Kalman Drift
                 </span>
                 <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800">Priors</span>
               </div>
               <p className="text-slate-300 text-[11px] leading-relaxed">
-                Blends Cricsheet format dossiers with 318 Render.com verified venues and calendar-month seasonal moisture matrices (β_season) into a 5-way Dirichlet posterior probability vector: (p_flat, p_balanced, p_green, p_dusty, p_bouncy).
+                Blends Cricsheet venue dossiers and 5-surface adaptability into a 5-way pitch posterior (flat, balanced, green, dusty, bouncy) with hysteresis-damped Kalman Gain drift tracking.
               </p>
             </div>
 
@@ -91,12 +91,12 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
               <div className="flex items-center justify-between font-bold text-teal-400 mb-1">
                 <span className="flex items-center gap-1.5">
                   <Activity className="w-3.5 h-3.5 text-teal-400" />
-                  2. Adaptive Kalman Filter Pitch Drift
+                  2. Phase-Blended Score &amp; Conformal Bands
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-teal-950 border border-teal-800">In-Play Drift</span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-teal-950 border border-teal-800">Stage 4 v2</span>
               </div>
               <p className="text-slate-300 text-[11px] leading-relaxed">
-                Computes real-time innovation residuals between observed scoring velocity and par rate. As overs progress, dynamic Kalman Gain (K_t) detects categorical surface transitions (e.g. Flat deck baking into a Dusty turner).
+                Combines Huber, Ridge, XGBoost, and ExtraTrees regressors over Stern DLS &amp; wicket-era anchors with horizon-normalized conformal score intervals (84%–95% OOS coverage).
               </p>
             </div>
 
@@ -105,12 +105,12 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
               <div className="flex items-center justify-between font-bold text-amber-400 mb-1">
                 <span className="flex items-center gap-1.5">
                   <Layers className="w-3.5 h-3.5 text-amber-400" />
-                  3. Render.com 22 Master Metrics Integration
+                  3. Render 22 Master Attributes &amp; Duel Matrix
                 </span>
                 <span className="text-[10px] px-2 py-0.5 rounded bg-amber-950 border border-amber-800">Attributes</span>
               </div>
               <p className="text-slate-300 text-[11px] leading-relaxed">
-                Integrates normalized power metrics, clutch death-bowling ratings (clutch_death_bowl), expected wickets (xw_bowl), and tactical vulnerabilities by bowling style/angle directly into ball-by-ball hazard transitions.
+                Integrates remaining batter dependability, 5-surface pitch averages, death-bowling ratings, and striker-bowler duel expected RPO/hazard directly into live phase rates &amp; resource tanks.
               </p>
             </div>
 
@@ -119,12 +119,12 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
               <div className="flex items-center justify-between font-bold text-rose-400 mb-1">
                 <span className="flex items-center gap-1.5">
                   <TrendingUp className="w-3.5 h-3.5 text-rose-400" />
-                  4. Vectorized 2-Innings Monte Carlo Chase
+                  4. Bayesian Log-Odds Fusion &amp; Monte Carlo
                 </span>
                 <span className="text-[10px] px-2 py-0.5 rounded bg-rose-950 border border-rose-800">Rollouts</span>
               </div>
               <p className="text-slate-300 text-[11px] leading-relaxed">
-                Runs 3,000 parallel rollouts simulating 1st innings target distribution &#123;T^(1), ..., T^(M)&#125; and 2nd innings chase dynamics under dynamic evening dew and pitch wear. Evaluates exact chase equity rather than linear heuristics.
+                Fuses Stage 3 MOV-Elo &amp; XI priors with calibrated Innings-1 log-odds updates and 3,000 SHA-256 deterministic 2nd-innings/4-innings simulations with pitch-held counterfactual WPA.
               </p>
             </div>
           </div>
@@ -134,7 +134,7 @@ export default function ModelMethodologyModal({ isOpen, onClose }: ModelMethodol
         <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2 text-[11px] text-slate-400">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            Calibrated against 390 international matches with 0% train-test leakage
+            Trained &amp; calibrated strictly chronologically across 1,680+ international matches with zero future leakage
           </div>
           <button
             onClick={onClose}

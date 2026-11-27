@@ -289,7 +289,8 @@ def get_render_crease_duel(
     bowler_name_or_id: str,
     fmt: str = "TEST",
     team_bat: Optional[str] = None,
-    team_bowl: Optional[str] = None
+    team_bowl: Optional[str] = None,
+    allow_network: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """
     Fetches dual simulated matchup between striker and bowler from Render.com /api/duel.
@@ -310,6 +311,9 @@ def get_render_crease_duel(
     duels_cache = _load_duels_cache()
     if cache_key in duels_cache:
         return duels_cache[cache_key]
+
+    if not allow_network:
+        return None
 
     # Live query with 3.5s timeout
     url = f"{RENDER_BASE_URL}/api/duel?batter_id={b_id}&bowler_id={bw_id}&format={render_fmt}"
