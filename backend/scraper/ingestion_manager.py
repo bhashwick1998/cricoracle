@@ -506,15 +506,16 @@ class IngestionManager:
                 "toss_winner_id = COALESCE(?, toss_winner_id)",
                 "toss_decision = COALESCE(?, toss_decision)",
                 "venue_id = COALESCE(?, venue_id)",
-                "last_event_description = ?",
             ]
+            params: List[Any] = [toss_win_id, toss_dec, resolved_venue]
             if m.get("state") not in ("LIVE_BALL_BY_BALL", "COMPLETED"):
                 set_clauses.append("state = 'XI_AND_TOSS_LOCKED'")
-            params = [toss_win_id, toss_dec, resolved_venue, status_msg]
+                set_clauses.append("last_event_description = ?")
+                params.append(status_msg)
             if "innings_1_team_id" in match_cols:
                 set_clauses.append("innings_1_team_id = COALESCE(?, innings_1_team_id)")
                 params.append(first_bat_id)
-            if "match_status_text" in match_cols:
+            if "match_status_text" in match_cols and m.get("state") not in ("LIVE_BALL_BY_BALL", "COMPLETED"):
                 set_clauses.append("match_status_text = ?")
                 params.append(status_msg)
             params.append(match_id)
@@ -658,7 +659,7 @@ class IngestionManager:
             # 3. Synchronize with CricAPI senior matches (35-second cadence using 2,000 hits/day tier)
             now_ts = time.time()
             last_cricapi_sync = getattr(self, "_last_cricapi_live_sync", 0.0)
-            if (now_ts - last_cricapi_sync) >= 35.0 or not active_ids:
+            if (now_ts - last_cricapi_sync) >= 35.0:
                 self._last_cricapi_live_sync = now_ts
                 from .providers.cricapi_provider import cricapi_provider
                 updated_ids = await cricapi_provider.sync_live_senior_mens_matches(conn)
@@ -723,10 +724,47 @@ class IngestionManager:
             # Step 2: Strictly synchronize live matches from CricAPI only
             # (Do not promote finished/stale Cricbuzz or RSS matches into LIVE_BALL_BY_BALL)
             from .providers.cricapi_provider import cricapi_provider
+            from ..engine.cricsheet_pitch_intelligence import normalize_team_code
             cricapi_updated = await cricapi_provider.sync_live_senior_mens_matches(conn)
             for mid in cricapi_updated:
                 if mid not in updated_match_ids:
                     updated_match_ids.append(mid)
+
+            # Step 3: Ensure any active live CricAPI match has confirmed 11v11 Playing XI + Stage 3 priors even with zero visitors
+            live_cricapi_scores = getattr(cricapi_provider, "_cached_live_scores", []) or []
+            for cs in live_cricapi_scores:
+                raw_cid = re.sub(r"[^a-zA-Z0-9_-]", "", str(cs.get("cricapi_id") or ""))
+                if not re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-", raw_cid, re.I):
+                    continue
+                c1_xi = normalize_team_code(cs.get("team_a_code") or "")
+                c2_xi = normalize_team_code(cs.get("team_b_code") or "")
+                if not c1_xi or not c2_xi:
+                    continue
+                async with conn.execute(
+                    "SELECT id FROM matches WHERE ((team_a_id = ? AND team_b_id = ?) OR (team_a_id = ? AND team_b_id = ?)) AND state = 'LIVE_BALL_BY_BALL' LIMIT 1",
+                    (c1_xi, c2_xi, c2_xi, c1_xi),
+                ) as mcur:
+                    mrow = await mcur.fetchone()
+                if not mrow:
+                    continue
+                live_mid = mrow["id"]
+                async with conn.execute(
+                    "SELECT team_id, COUNT(*) AS cnt FROM match_squads WHERE match_id = ? AND is_confirmed_xi = 1 GROUP BY team_id",
+                    (live_mid,),
+                ) as sqc:
+                    xi_cnts = {r["team_id"]: int(r["cnt"] or 0) for r in await sqc.fetchall()}
+                if xi_cnts.get(c1_xi, 0) < 11 or xi_cnts.get(c2_xi, 0) < 11:
+                    try_key = f"_auto_xi_try_{raw_cid}"
+                    last_try = getattr(self, try_key, 0.0)
+                    if (time.time() - last_try) >= 300.0:
+                        setattr(self, try_key, time.time())
+                        xi_res = cricapi_provider.fetch_playing_xi_for_match(raw_cid, cs.get("date_time_gmt"), force_call=True)
+                        if xi_res.get("status") == "success" and len(xi_res.get("teams") or []) >= 2:
+                            await self.apply_cricapi_playing_xi(live_mid, xi_res)
+                            if live_mid not in updated_match_ids:
+                                updated_match_ids.append(live_mid)
+
+            for mid in updated_match_ids:
                 if self.broadcast_func:
                     async with conn.execute("SELECT * FROM matches WHERE id = ?", (mid,)) as c:
                         row = await c.fetchone()
@@ -1257,17 +1295,18 @@ class IngestionManager:
             ca_dels: List[Dict[str, Any]] = []
             try:
                 async with conn.execute(
-                    "SELECT innings, over_number, ball_number, runs_batter, extras, is_wicket, is_wide, is_noball, extra_type, commentary "
-                    "FROM deliveries WHERE match_id = ? ORDER BY innings ASC, over_number ASC, ball_number ASC LIMIT 300",
+                    "SELECT innings, over, ball, runs_batter, extras, is_wicket, extra_type, commentary "
+                    "FROM match_deliveries WHERE match_id = ? ORDER BY innings ASC, over ASC, ball ASC LIMIT 300",
                     (match_id,),
                 ) as dcur_ca:
                     for dr in await dcur_ca.fetchall():
+                        ex_t = str(dr[6] or "").lower()
                         ca_dels.append({
                             "innings": dr[0], "over": dr[1], "ball": dr[2],
                             "runs_batter": dr[3], "extras": dr[4],
-                            "is_wicket": bool(dr[5]), "is_wide": bool(dr[6]),
-                            "is_noball": bool(dr[7]), "extra_type": dr[8],
-                            "commentary": dr[9] or "",
+                            "is_wicket": bool(dr[5]), "is_wide": ("wide" in ex_t),
+                            "is_noball": ("noball" in ex_t or "no-ball" in ex_t), "extra_type": dr[6],
+                            "commentary": dr[7] or "",
                         })
             except Exception:
                 ca_dels = []

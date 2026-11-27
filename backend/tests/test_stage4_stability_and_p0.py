@@ -462,6 +462,87 @@ class TestStage4StabilityAndStage3P0(unittest.TestCase):
             self.assertTrue(0.5 <= res1["p_team_a"] <= 99.5)
             self.assertLessEqual(abs(res1["wpa"]), max_dot_swing)
 
+    def test_test_stumps_session_forecast_aligned_with_stage4_total(self):
+        import re
+        from backend.engine.test_stumps_engine import compute_test_stumps_intelligence
+
+        xi_bat = _make_xi("NZ", bat_avg=40.0, sr=62.0, bowl_avg=31.0, econ=3.2, adapt=78.0)
+        xi_bowl = _make_xi("IND", bat_avg=42.0, sr=64.0, bowl_avg=26.0, econ=2.9, adapt=80.0)
+        venue = {"name": "Hagley Oval", "pitch_type": "balanced"}
+
+        # 246/5 overnight with Stage 4 projected total 324 (5 wickets remaining across tail)
+        match_5w = {
+            "id": "m_nz_ind_2026_test_2",
+            "format": "TEST",
+            "state": "LIVE_BALL_BY_BALL",
+            "team_a_id": "NZ",
+            "team_b_id": "IND",
+            "team_a_name": "New Zealand",
+            "team_b_name": "India",
+            "current_innings": 1,
+            "current_score": 246,
+            "current_wickets": 5,
+            "current_overs": 85.0,
+            "par_score_projected": 324,
+            "par_score_min": 289,
+            "par_score_max": 364,
+            "is_stumps": 1,
+            "stumps_day": 1,
+            "match_status_text": "Day 1: Stumps",
+            "active_pitch_type": "balanced",
+        }
+        st_5w = compute_test_stumps_intelligence(match_5w, xi_bat, xi_bowl, venue)
+        mf_5w = st_5w["morning_session_forecast"]
+        self.assertIsNotNone(mf_5w)
+        m_lunch = re.search(r"~(\d+)/(\d+)", mf_5w["lunch_score_target"])
+        self.assertIsNotNone(m_lunch)
+        lunch_runs = int(m_lunch.group(1))
+        lunch_wkts = int(m_lunch.group(2))
+        self.assertEqual(lunch_wkts, 7)
+        self.assertGreater(lunch_runs, 246)
+        self.assertLess(lunch_runs, 324)
+
+        # 246/8 overnight with Stage 4 projected total 278 -> all out before lunch
+        match_8w = {**match_5w, "current_wickets": 8, "par_score_projected": 278, "par_score_max": 298}
+        st_8w = compute_test_stumps_intelligence(match_8w, xi_bat, xi_bowl, venue)
+        self.assertIn("~278/10", st_8w["morning_session_forecast"]["lunch_score_target"])
+
+        # 246/2 overnight with Stage 4 projected total 445 -> full morning par 86 -> 332/4 < 445
+        match_2w = {**match_5w, "current_wickets": 2, "par_score_projected": 445, "par_score_max": 510}
+        st_2w = compute_test_stumps_intelligence(match_2w, xi_bat, xi_bowl, venue)
+        self.assertIn("~332/4", st_2w["morning_session_forecast"]["lunch_score_target"])
+
+    def test_sync_stage4_score_and_ranges_unifies_test_outputs(self):
+        from backend.main import _sync_stage4_score_and_ranges
+
+        m_row = {
+            "id": "m_nz_ind_2026_test_2",
+            "format": "TEST",
+            "state": "LIVE_BALL_BY_BALL",
+            "team_a_id": "NZ",
+            "team_b_id": "IND",
+            "batting_team_id": "NZ",
+            "current_innings": 1,
+            "current_score": 246,
+            "par_score_projected": 324,
+            "par_score_min": 289,
+            "par_score_max": 364,
+        }
+        sp = {
+            "live_projection": {"live_projected_final_score": 316, "live_projected_low": 266, "live_projected_high": 375},
+            "live_test_innings_progression": {"innings_1": {"live_projected_total": 316, "range": "266 - 375"}, "win_probabilities": {"projected_1st_innings": 316}},
+            "current_playing_team_projection": {"team_id": "NZ", "projected_final_score": 316, "projected_range": "266 - 375"},
+            "four_stage_progression": {"stage_4_live": {"team_a_par": 316, "active_team_projected_final": 316, "active_team_score_range": "266 - 375"}},
+        }
+        _sync_stage4_score_and_ranges(m_row, sp)
+        self.assertEqual(m_row["par_score_projected"], 324)
+        self.assertEqual(m_row["par_score_min"], 289)
+        self.assertEqual(m_row["par_score_max"], 364)
+        self.assertEqual(sp["four_stage_progression"]["stage_4_live"]["active_team_projected_final"], 324)
+        self.assertEqual(sp["four_stage_progression"]["stage_4_live"]["active_team_score_range"], "289 - 364")
+        self.assertEqual(sp["live_test_innings_progression"]["innings_1"]["live_projected_total"], 324)
+        self.assertEqual(sp["current_playing_team_projection"]["projected_final_score"], 324)
+
 
 if __name__ == "__main__":
     unittest.main()

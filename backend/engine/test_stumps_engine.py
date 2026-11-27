@@ -241,21 +241,32 @@ def compute_test_stumps_intelligence(
     v_name = venue_profile.get("name", "Venue")
     seam_hazard_pct = 18.5 if arch in ["pace_friendly", "green", "seam", "seam / green"] else 14.0
 
-    # Morning Session Par runs & expected wickets calibrated by pitch archetype & surface wear
+    # Morning Session Par runs & expected wickets calibrated by pitch archetype, surface wear,
+    # AND Stage 4 live remaining innings capacity (so Lunch Target Par never contradicts 10-wkt total).
     if arch == "flat":
-        session_par_runs = 94 if stumps_day <= 2 else (88 if stumps_day == 3 else 78)
-        session_exp_wkts = 2
+        raw_session_runs = 94 if stumps_day <= 2 else (88 if stumps_day == 3 else 78)
+        raw_session_wkts = 2
     elif arch in ["green", "seam"]:
-        session_par_runs = 76 if stumps_day <= 2 else (84 if stumps_day == 3 else 80)
-        session_exp_wkts = 3 if stumps_day <= 2 else 2
+        raw_session_runs = 76 if stumps_day <= 2 else (84 if stumps_day == 3 else 80)
+        raw_session_wkts = 3 if stumps_day <= 2 else 2
     elif arch == "dusty":
-        session_par_runs = 82 if stumps_day <= 2 else (74 if stumps_day == 3 else 64)
-        session_exp_wkts = 3 if stumps_day >= 3 else 2
+        raw_session_runs = 82 if stumps_day <= 2 else (74 if stumps_day == 3 else 64)
+        raw_session_wkts = 3 if stumps_day >= 3 else 2
     else:  # balanced
-        session_par_runs = 86 if stumps_day <= 2 else 80
-        session_exp_wkts = 2
+        raw_session_runs = 86 if stumps_day <= 2 else 80
+        raw_session_wkts = 2
+
+    raw_stage4_total = match.get("par_score_projected")
+    raw_stage4_high = match.get("par_score_max")
+    stage4_total = int(round(float(raw_stage4_total))) if raw_stage4_total is not None else None
+    stage4_high = int(round(float(raw_stage4_high))) if raw_stage4_high is not None else None
 
     if is_innings_concluded:
+        session_par_runs = raw_session_runs
+        session_exp_wkts = raw_session_wkts
+        sess_low = max(15, session_par_runs - 15)
+        sess_high = session_par_runs + 18
+
         # The team batting tomorrow morning is the NEXT team in the multi-innings rotation
         if cur_innings == 1:
             next_bat_id = inn_2_team or (team_b_id if inn_1_team == team_a_id else team_a_id)
@@ -299,10 +310,63 @@ def compute_test_stumps_intelligence(
         lead_text = f" • {next_bat_name} leads by {lead_diff} runs" if lead_diff > 0 else (f" • {next_bat_name} trails by {abs(lead_diff)} runs" if lead_diff < 0 else "")
         score_headline = f"Day {stumps_day} Stumps: {batting_team_name} {cur_score}/{cur_wkts} (All Out){lead_text}"
     else:
-        # Innings is actively in-play overnight (resuming tomorrow, e.g. AFG 402/7 or WI 7/0)
-        proj_session_total = cur_score + session_par_runs
-        proj_session_wkts = min(10, cur_wkts + session_exp_wkts)
-        lunch_score_target = f"~{proj_session_total}/{proj_session_wkts}"
+        # Innings is actively in-play overnight (resuming tomorrow, e.g. NZ 246/5 or WI 7/0)
+        rem_wkts = max(1, 10 - cur_wkts)
+        session_exp_wkts = min(rem_wkts, raw_session_wkts)
+        rem_tail_wkts = max(0, rem_wkts - session_exp_wkts)
+
+        if stage4_total is not None and stage4_total >= cur_score:
+            total_rem_runs = max(0, stage4_total - cur_score)
+            if rem_tail_wkts <= 0:
+                # All remaining wickets are projected to fall before Lunch
+                session_par_runs = total_rem_runs
+                proj_session_total = stage4_total
+                proj_session_wkts = 10
+                lunch_score_target = f"~{proj_session_total}/10 (All Out)"
+                sess_low = max(0, int(round(session_par_runs * 0.65)))
+                if stage4_high is not None and stage4_high >= cur_score:
+                    sess_high = max(session_par_runs, min(raw_session_runs + 18, stage4_high - cur_score))
+                else:
+                    sess_high = max(session_par_runs + 6, int(round(session_par_runs * 1.30)))
+            else:
+                # Weight remaining batting slots (slots 6..10 taper realistically vs top/middle order)
+                slot_weights = [
+                    1.15 if slot <= 5 else (0.95 if slot == 6 else (0.78 if slot == 7 else (0.58 if slot == 8 else (0.40 if slot == 9 else 0.25))))
+                    for slot in range(cur_wkts + 1, 11)
+                ]
+                morning_share = sum(slot_weights[:session_exp_wkts]) / max(1e-6, sum(slot_weights))
+                avg_crease_runs = (
+                    sum(float(b.get("runs") or 0) for b in overnight_batters) / max(1, len(overnight_batters))
+                ) if overnight_batters else 0.0
+                if avg_crease_runs >= 25.0:
+                    morning_share = min(0.75, morning_share + 0.06)
+
+                tail_reserve = min(total_rem_runs, max(8, rem_tail_wkts * 5)) if total_rem_runs >= 16 else max(0, total_rem_runs // 2)
+                max_morning_allowed = max(0, total_rem_runs - tail_reserve)
+                if total_rem_runs > raw_session_runs + tail_reserve:
+                    # Deep wickets in hand (e.g. 246/2 -> Stage 4 ~440): session bounded cleanly below Stage 4 total
+                    session_par_runs = min(raw_session_runs, max_morning_allowed)
+                else:
+                    # Lower/tail wickets in hand (e.g. 246/5 -> Stage 4 ~325): Session 1 takes weighted pre-Lunch share
+                    session_par_runs = min(raw_session_runs, max_morning_allowed, max(0, int(round(total_rem_runs * morning_share))))
+
+                proj_session_total = cur_score + session_par_runs
+                proj_session_wkts = min(9, cur_wkts + session_exp_wkts)
+                lunch_score_target = f"~{proj_session_total}/{proj_session_wkts}"
+                sess_low = max(0, int(round(session_par_runs * 0.72)))
+                high_cap = (
+                    max(session_par_runs + 6, (stage4_high - cur_score) - max(4, rem_tail_wkts * 3))
+                    if (stage4_high is not None and stage4_high > cur_score)
+                    else (session_par_runs + 18)
+                )
+                sess_high = min(max(session_par_runs + 4, int(round(session_par_runs * 1.25 + 4))), max(session_par_runs + 4, high_cap))
+        else:
+            session_par_runs = raw_session_runs
+            proj_session_total = cur_score + session_par_runs
+            proj_session_wkts = min(10, cur_wkts + session_exp_wkts)
+            lunch_score_target = f"~{proj_session_total}/{proj_session_wkts}"
+            sess_low = max(0, session_par_runs - 15)
+            sess_high = session_par_runs + 18
 
         deficit = s1 - cur_score if cur_innings == 2 else 0
         overs_to_2nd_ball = max(0.0, round(80.0 - cur_overs, 1))
@@ -322,9 +386,14 @@ def compute_test_stumps_intelligence(
             new_ball_desc = f"{overs_until_new_ball} overs until 2nd New Ball (due at 80.0 ov)"
 
         active_batters_str = " & ".join(f"{b['name']} ({b['runs']}*)" for b in overnight_batters[:2]) if overnight_batters else "Lower order"
+        stage4_ref_note = (
+            f" (aligned to Stage 4 live 10-wicket total ~{stage4_total})"
+            if stage4_total is not None and stage4_total >= cur_score
+            else ""
+        )
         tactical_keys = [
             f"{batting_team_name} (Batting): {active_batters_str} must negotiate opening hour moisture" + (f" to erase the {deficit}-run deficit" if deficit > 0 else " before scoring accelerates"),
-            f"{bowling_team_name} (Bowling): Attack with reverse swing and spinners targeting rough outside off stump to claim the remaining {10 - cur_wkts} wickets before Lunch",
+            f"{bowling_team_name} (Bowling): Attack with reverse swing and spinners targeting rough outside off stump to claim the remaining {10 - cur_wkts} wickets{stage4_ref_note}",
             "Pitch Drift: Clay surface dries rapidly under afternoon heat; spinners will gain sharper turn from Session 2 onwards"
         ]
 
@@ -347,9 +416,10 @@ def compute_test_stumps_intelligence(
             "start_time_local": "09:30 AM Local",
             "weather": "Clear sunny morning • 26°C • Trapped condensation under tarpaulin covers",
             "covers_condensation_impact": f"+{seam_hazard_pct}% lateral seam deviation during opening 45-60 mins before pitch dries out",
-            "projected_session_runs": f"{session_par_runs} runs ({session_par_runs - 15} - {session_par_runs + 18})",
+            "projected_session_runs": f"{session_par_runs} runs ({sess_low} - {sess_high})",
             "projected_session_wickets": f"{session_exp_wkts} wickets",
             "lunch_score_target": lunch_score_target,
+            "projected_innings_total_ref": stage4_total,
             "tactical_keys": tactical_keys
         }
     else:

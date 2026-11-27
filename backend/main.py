@@ -485,10 +485,43 @@ class PlayerCompareRequest(BaseModel):
     lens: str = "Balanced"  # Balanced, Explosive, Purist, Clutch
     match_format: str = "T20I"
 
+_bg_health_sync_lock: Optional[asyncio.Lock] = None
+
+
+async def _background_cricapi_refresh_if_stale(min_age_seconds: float = 60.0) -> Optional[List[str]]:
+    """Triggers CricAPI live sync cleanly in the background when external keep-alive or requests wake the service."""
+    global _bg_health_sync_lock
+    if _bg_health_sync_lock is None:
+        _bg_health_sync_lock = asyncio.Lock()
+    if _bg_health_sync_lock.locked():
+        return None
+    async with _bg_health_sync_lock:
+        try:
+            from .scraper.providers.cricapi_provider import cricapi_provider
+            last_fetch_t = float(getattr(cricapi_provider, "_cached_live_scores_time", 0.0) or 0.0)
+            if (time.time() - last_fetch_t) < min_age_seconds:
+                return None
+            updated = await ingestion_manager.auto_discover_and_sync_live_matches()
+            if updated:
+                invalidate_match_response_cache(None)
+            return updated
+        except Exception as exc:
+            logger.debug(f"Background CricAPI sync hook skipped: {exc}")
+            return None
+
+
 @app.api_route("/", methods=["GET", "HEAD", "POST", "OPTIONS"])
 @app.api_route("/health", methods=["GET", "HEAD", "POST", "OPTIONS"])
 @app.api_route("/api/health", methods=["GET", "HEAD", "POST", "OPTIONS"])
 async def health_check():
+    try:
+        from .scraper.providers.cricapi_provider import cricapi_provider
+        if getattr(ingestion_manager, "scheduler", None) and ingestion_manager.scheduler.running:
+            last_fetch_t = float(getattr(cricapi_provider, "_cached_live_scores_time", 0.0) or 0.0)
+            if (time.time() - last_fetch_t) >= 75.0:
+                asyncio.create_task(_background_cricapi_refresh_if_stale(min_age_seconds=60.0))
+    except Exception:
+        pass
     return {
         "status": "online",
         "system": "CricOracle Telemetry Platform",
@@ -498,8 +531,32 @@ async def health_check():
             "health": "/health",
             "matches": "/api/matches",
             "parameters": "/api/parameters/optimized",
+            "cron_sync": "/api/cron/sync-live",
             "docs": "/docs"
         }
+    }
+
+
+@app.api_route("/api/cron/sync-live", methods=["GET", "POST"])
+async def cron_sync_live_cricapi():
+    """
+    Autonomous keep-alive + CricAPI background synchronization endpoint.
+    Ensures live scores, Playing XIs, probabilities, and Stage 4 projections stay warm
+    even when zero visitors are actively browsing the frontend.
+    """
+    from .scraper.providers.cricapi_provider import cricapi_provider
+    last_fetch_t = float(getattr(cricapi_provider, "_cached_live_scores_time", 0.0) or 0.0)
+    if (time.time() - last_fetch_t) >= 45.0:
+        cricapi_provider.fetch_live_senior_scores(force=True)
+    updated = await ingestion_manager.auto_discover_and_sync_live_matches()
+    if updated:
+        invalidate_match_response_cache(None)
+    live_scores = getattr(cricapi_provider, "_cached_live_scores", []) or []
+    return {
+        "status": "success",
+        "updated_matches": updated,
+        "live_cricapi_count": len(live_scores),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 @app.post("/api/admin/recalibrate-parameters")
@@ -901,6 +958,9 @@ async def get_matches(state: Optional[str] = None):
                 if dew_res.get("dew_detected") and dew_res.get("dew_factor_calibrated"):
                     m["dew_factor"] = dew_res["dew_factor_calibrated"]
 
+                # Synchronize Stage 4 projected score & conformal range before Test Stumps forecast
+                _sync_stage4_score_and_ranges(m, m.get("scenario_score_projections"))
+
                 # Test match stumps detection, multi-day intelligence & stoppages
                 if m.get("format") == "TEST" and m.get("state") != "COMPLETED":
                     stumps_eval = compute_test_stumps_intelligence(m, t_a_squad, t_b_squad, v_profile)
@@ -1099,26 +1159,8 @@ async def get_matches(state: Optional[str] = None):
                 if m.get("format") != "TEST":
                     m["p_draw"] = 0.0
 
-                # Synchronize Test active innings projected score
-                if m.get("format") == "TEST" and m.get("scenario_score_projections"):
-                    tp = m["scenario_score_projections"].get("live_test_innings_progression")
-                    curr_inn_num = int(m.get("current_innings") or 1)
-                    inn_key = f"innings_{curr_inn_num}"
-                    if tp and tp.get(inn_key):
-                        active_inn_proj = tp[inn_key].get("live_projected_total")
-                        if active_inn_proj:
-                            cur_sc = int(m.get("current_score") or 0)
-                            proj_val = max(cur_sc, int(active_inn_proj))
-                            m["par_score_projected"] = proj_val
-                            m["par_score_min"] = max(cur_sc, proj_val - 25)
-                            m["par_score_max"] = max(m["par_score_min"] + 5, proj_val + 25)
-
-                if m.get("state") == "LIVE_BALL_BY_BALL" and m.get("format") != "TEST" and m.get("scenario_score_projections"):
-                    lp = m["scenario_score_projections"].get("live_projection")
-                    if lp and lp.get("live_projected_final_score"):
-                        m["par_score_projected"] = lp["live_projected_final_score"]
-                        m["par_score_min"] = lp.get("live_projected_low", lp["live_projected_final_score"] - 15)
-                        m["par_score_max"] = lp.get("live_projected_high", lp["live_projected_final_score"] + 15)
+                # Re-confirm Stage 4 projected total & conformal range alignment
+                _sync_stage4_score_and_ranges(m, m.get("scenario_score_projections"))
 
                 # Calibrated Predictive Power Index & Badge
                 st_code = m.get("state")
@@ -1338,6 +1380,118 @@ async def _persist_frozen_stage3_column(
     if commit:
         await conn.commit()
     return True
+
+
+def _sync_stage4_score_and_ranges(match_row: Dict[str, Any], score_projections: Any) -> None:
+    """
+    Synchronizes Stage 4 projected innings score and uncertainty bounds across
+    match_row (par_score_projected/min/max) and score_projections
+    (four_stage_progression.stage_4_live, live_test_innings_progression, live_projection,
+    current_playing_team_projection) so Card, Header, Stage 4 Card, and Stumps Forecast
+    never show conflicting Stage 4 totals or ranges.
+    """
+    if not isinstance(match_row, dict) or match_row.get("state") not in ("LIVE_BALL_BY_BALL", "COMPLETED"):
+        return
+    if not isinstance(score_projections, dict):
+        return
+
+    fmt = str(match_row.get("format") or "T20I").upper()
+    cur_sc = int(match_row.get("current_score") or 0)
+    cur_inn = int(match_row.get("current_innings") or 1)
+    inn_key = f"innings_{cur_inn}"
+
+    proj_val: Optional[int] = None
+    lo_val: Optional[int] = None
+    hi_val: Optional[int] = None
+
+    raw_db_proj = match_row.get("par_score_projected")
+    raw_db_lo = match_row.get("par_score_min")
+    raw_db_hi = match_row.get("par_score_max")
+    if raw_db_proj is not None and raw_db_lo is not None and raw_db_hi is not None:
+        try:
+            dp = int(round(float(raw_db_proj)))
+            dlo = int(round(float(raw_db_lo)))
+            dhi = int(round(float(raw_db_hi)))
+            tgt = match_row.get("target_runs")
+            chase_ok = True
+            if fmt != "TEST" and cur_inn == 2 and tgt is not None and int(tgt) > 0:
+                chase_ok = dp <= int(tgt) + 6
+            if dp >= cur_sc and dhi > dlo and dhi >= cur_sc and chase_ok:
+                proj_val, lo_val, hi_val = dp, dlo, dhi
+        except (TypeError, ValueError):
+            pass
+
+    if proj_val is None:
+        if fmt == "TEST":
+            tp = score_projections.get("live_test_innings_progression") or {}
+            inn_obj = tp.get(inn_key) if isinstance(tp, dict) else None
+            cand = inn_obj.get("live_projected_total") if isinstance(inn_obj, dict) else None
+            if cand is not None:
+                proj_val = max(cur_sc, int(round(float(cand))))
+                rng_str = str(inn_obj.get("range") or "")
+                if " - " in rng_str:
+                    parts = rng_str.split(" - ", 1)
+                    try:
+                        lo_val = max(cur_sc, int(round(float(parts[0]))))
+                        hi_val = max(lo_val + 5, int(round(float(parts[1]))))
+                    except ValueError:
+                        lo_val, hi_val = max(cur_sc, proj_val - 35), proj_val + 40
+                else:
+                    lo_val, hi_val = max(cur_sc, proj_val - 35), proj_val + 40
+        else:
+            lp = score_projections.get("live_projection") or {}
+            cand = lp.get("live_projected_final_score") if isinstance(lp, dict) else None
+            if cand is not None:
+                proj_val = max(cur_sc, int(round(float(cand))))
+                lo_val = max(cur_sc, int(round(float(lp.get("live_projected_low") or max(cur_sc, proj_val - 15)))))
+                hi_val = max(lo_val + 5, int(round(float(lp.get("live_projected_high") or (proj_val + 15)))))
+
+    if proj_val is None:
+        return
+
+    lo_val = max(cur_sc, min(proj_val, int(lo_val if lo_val is not None else max(cur_sc, proj_val - 25))))
+    hi_val = max(lo_val + 5, proj_val, int(hi_val if hi_val is not None else (proj_val + 25)))
+    rng_text = f"{lo_val} - {hi_val}"
+
+    match_row["par_score_projected"] = proj_val
+    match_row["par_score_min"] = lo_val
+    match_row["par_score_max"] = hi_val
+
+    lp = score_projections.get("live_projection")
+    if isinstance(lp, dict):
+        lp["live_projected_final_score"] = proj_val
+        lp["live_probable_score"] = proj_val
+        lp["live_projected_low"] = lo_val
+        lp["live_projected_high"] = hi_val
+        lp["live_probable_range"] = rng_text
+
+    tp = score_projections.get("live_test_innings_progression")
+    if fmt == "TEST" and isinstance(tp, dict):
+        inn_obj = tp.get(inn_key)
+        if isinstance(inn_obj, dict):
+            inn_obj["live_projected_total"] = proj_val
+            inn_obj["range"] = rng_text
+        win_p = tp.get("win_probabilities")
+        if isinstance(win_p, dict) and cur_inn == 1:
+            win_p["projected_1st_innings"] = proj_val
+
+    cptp = score_projections.get("current_playing_team_projection")
+    if isinstance(cptp, dict):
+        cptp["projected_final_score"] = proj_val
+        cptp["projected_range"] = rng_text
+
+    fsp = score_projections.get("four_stage_progression")
+    if isinstance(fsp, dict) and isinstance(fsp.get("stage_4_live"), dict):
+        s4_live = fsp["stage_4_live"]
+        s4_live["active_team_projected_final"] = proj_val
+        s4_live["active_team_score_range"] = rng_text
+        bat_tid = match_row.get("batting_team_id") or (cptp.get("team_id") if isinstance(cptp, dict) else None)
+        if bat_tid and bat_tid == match_row.get("team_a_id"):
+            s4_live["team_a_par"] = proj_val
+        elif bat_tid and bat_tid == match_row.get("team_b_id"):
+            s4_live["team_b_par"] = proj_val
+        if fmt == "TEST":
+            s4_live["tactical_assessment"] = f"Innings {cur_inn} Live • Projected Total: ~{proj_val} runs"
 
 
 def _build_live_score_projections_view(score_projections: Any) -> Any:
@@ -2296,26 +2450,8 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
         if match_data.get("format") != "TEST":
             match_data["p_draw"] = 0.0
 
-        # Synchronize Test active innings projected score
-        if match_data.get("format") == "TEST" and score_projections.get("live_test_innings_progression"):
-            test_prog = score_projections["live_test_innings_progression"]
-            curr_inn_num = int(match_data.get("current_innings") or 1)
-            inn_key = f"innings_{curr_inn_num}"
-            if test_prog and test_prog.get(inn_key):
-                active_inn_proj = test_prog[inn_key].get("live_projected_total")
-                if active_inn_proj:
-                    cur_sc = int(match_data.get("current_score") or 0)
-                    proj_val = max(cur_sc, int(active_inn_proj))
-                    match_data["par_score_projected"] = proj_val
-                    match_data["par_score_min"] = max(cur_sc, proj_val - 25)
-                    match_data["par_score_max"] = max(match_data["par_score_min"] + 5, proj_val + 25)
-
-        if match_data.get("state") == "LIVE_BALL_BY_BALL" and match_data.get("format") != "TEST" and score_projections.get("live_projection"):
-            lp = score_projections["live_projection"]
-            if lp.get("live_projected_final_score"):
-                match_data["par_score_projected"] = lp["live_projected_final_score"]
-                match_data["par_score_min"] = lp.get("live_projected_low", lp["live_projected_final_score"] - 15)
-                match_data["par_score_max"] = lp.get("live_projected_high", lp["live_projected_final_score"] + 15)
+        # Synchronize Stage 4 active innings projected score & conformal range before Test Stumps forecast
+        _sync_stage4_score_and_ranges(match_data, score_projections)
 
         match_data["pitch_type"] = detected_pitch
 

@@ -2,34 +2,34 @@ name: Render Keep-Alive Pinger
 
 on:
   schedule:
-    # Runs every 12 minutes (Render free tier spins down after 15 minutes of inactivity)
-    - cron: "*/12 * * * *"
+    # Runs every 10 minutes (stays safely under Render free tier's 15-min idle sleep window)
+    - cron: "*/10 * * * *"
   workflow_dispatch: # Allows running manually anytime from the GitHub Actions tab
 
 jobs:
   ping:
-    name: Ping Render Instances
+    name: Ping Render Instances & Sync Live CricAPI
     runs-on: ubuntu-latest
     steps:
-      - name: Keep-Alive Ping Services
+      - name: Keep-Alive Ping & Background CricAPI Sync
         run: |
           echo "=========================================="
-          echo "Sending keep-alive pings to Render instances..."
+          echo "Sending keep-alive + CricAPI sync pings..."
           echo "Time: $(date -u)"
           echo "=========================================="
 
-          echo "1. Pinging CricOracle Backend..."
-          BACKEND_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://cricoracle-backend.onrender.com/ || echo "TIMEOUT")
-          echo "   Backend Response Status: $BACKEND_CODE"
+          echo "1. Pinging CricOracle Render Backend Health..."
+          BACKEND_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://cricoracle-backend-xzcw.onrender.com/health || echo "TIMEOUT")
+          echo "   Backend Health Status: $BACKEND_CODE"
 
-          echo "2. Pinging CricOracle Frontend..."
-          FRONTEND_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://cricoracle-frontend.onrender.com/ || echo "TIMEOUT")
-          echo "   Frontend Response Status: $FRONTEND_CODE"
+          echo "2. Triggering Autonomous Live CricAPI Sync..."
+          SYNC_RES=$(curl -s --max-time 60 https://cricoracle-backend-xzcw.onrender.com/api/cron/sync-live || echo '{"status":"timeout"}')
+          echo "   Cron Live Sync: $SYNC_RES"
 
           echo "3. Pinging Upstream Cricket Analytics Engine..."
           ANALYTICS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://cricket-analytics-ghpv.onrender.com/ || echo "TIMEOUT")
           echo "   Analytics Response Status: $ANALYTICS_CODE"
 
           echo "=========================================="
-          echo "Keep-alive ping cycle completed successfully!"
+          echo "Keep-alive & background CricAPI sync completed!"
           echo "=========================================="

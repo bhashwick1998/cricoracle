@@ -688,14 +688,14 @@ class CricApiSquadProvider:
                 self.is_match_in_break(m.get("status_text", "")) for m in cached_scores
             )
             if all_in_break:
-                cache_ttl = 300.0
+                cache_ttl = 120.0
             elif not cached_scores:
                 cache_ttl = 90.0
             else:
                 cache_ttl = 60.0
             if (now - cached_t) < cache_ttl:
                 if all_in_break:
-                    logger.debug("All live matches are in a break. Using cached scores (5-min break TTL).")
+                    logger.debug("All live matches are in a break. Using cached scores (2-min break TTL).")
                 return cached_scores
 
         paid_k = self.get_paid_live_api_key()
@@ -960,15 +960,32 @@ class CricApiSquadProvider:
                 if not match_info_meta:
                     match_info_meta = self.fetch_match_toss_and_venue(raw_cid) or {}
 
-            # --- Break-Aware API Hit Saving (only throttle already-live existing rows) ---
-            if db_m and not newly_created and db_m.get("state") == "LIVE_BALL_BY_BALL" and self.is_match_in_break(status_text):
+            # --- Break-Aware API Hit Saving (only throttle unchanged already-live rows with valid Stage 4) ---
+            prev_status_txt = str(db_m.get("match_status_text") or "").strip() if db_m else ""
+            status_changed_pre = (prev_status_txt != str(status_text or "").strip()) if db_m else True
+            missing_stats_pre = bool(
+                db_m
+                and (
+                    db_m.get("par_score_projected") is None
+                    or db_m.get("p_team_a") is None
+                    or (fmt == "TEST" and abs(float(db_m.get("p_team_a") or 50.0) - 50.0) < 0.05 and float(db_m.get("p_draw") or 0.0) == 0.0)
+                )
+            )
+            if (
+                db_m
+                and not newly_created
+                and not status_changed_pre
+                and not missing_stats_pre
+                and db_m.get("state") == "LIVE_BALL_BY_BALL"
+                and self.is_match_in_break(status_text)
+            ):
                 break_key = f"_break_poll_{c1}_{c2}"
                 last_break_poll = getattr(self, break_key, 0.0)
                 now_ts = time.time()
-                if (now_ts - last_break_poll) < 300.0:
+                if (now_ts - last_break_poll) < 120.0:
                     logger.debug(
                         f"Match {c1} vs {c2} is in break ({status_text[:40]}). "
-                        "Skipping sync to conserve API hits (throttled to 5-min cadence)."
+                        "Skipping sync to conserve API hits (throttled to 2-min cadence)."
                     )
                     continue
                 setattr(self, break_key, now_ts)
@@ -1204,8 +1221,20 @@ class CricApiSquadProvider:
                     score_changed  = (runs != prev_runs or ovs != prev_ovs or balls != int(db_m.get("current_balls") or 0))
                     wicket_fell    = (wkts > prev_wkts)  # Strictly monotone wicket counter
                     innings_changed = (inn_val != int(db_m.get("current_innings") or 1))
+                    status_changed = (str(db_m.get("match_status_text") or "").strip() != str(status_text or "").strip())
+                    stumps_changed = (int(is_stumps) != int(db_m.get("is_stumps") or 0))
+                    missing_live_stats = (
+                        db_m.get("p_team_a") is None
+                        or db_m.get("par_score_projected") is None
+                        or int(db_m.get("par_score_projected") or 0) <= int(runs or 0)
+                        or (
+                            str(db_m.get("format") or fmt).upper() == "TEST"
+                            and abs(float(db_m.get("p_team_a") or 50.0) - 50.0) < 0.05
+                            and float(db_m.get("p_draw") or 0.0) == 0.0
+                        )
+                    )
 
-                    if newly_created or score_changed or wicket_fell or innings_changed:
+                    if newly_created or score_changed or wicket_fell or innings_changed or status_changed or stumps_changed or missing_live_stats:
                         try:
                             from ...engine.stage4_live import calculate_stage4_live
                             from ...engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability, resolve_venue_dossier_context
@@ -1234,17 +1263,18 @@ class CricApiSquadProvider:
                             recent_dels: List[Dict[str, Any]] = []
                             try:
                                 async with conn.execute(
-                                    "SELECT innings, over_number, ball_number, runs_batter, extras, is_wicket, is_wide, is_noball, extra_type, commentary "
-                                    "FROM deliveries WHERE match_id = ? ORDER BY innings ASC, over_number ASC, ball_number ASC LIMIT 300",
+                                    "SELECT innings, over, ball, runs_batter, extras, is_wicket, extra_type, commentary "
+                                    "FROM match_deliveries WHERE match_id = ? ORDER BY innings ASC, over ASC, ball ASC LIMIT 300",
                                     (mid,),
                                 ) as dcur:
                                     for dr in await dcur.fetchall():
+                                        ex_t = str(dr[6] or "").lower()
                                         recent_dels.append({
                                             "innings": dr[0], "over": dr[1], "ball": dr[2],
                                             "runs_batter": dr[3], "extras": dr[4],
-                                            "is_wicket": bool(dr[5]), "is_wide": bool(dr[6]),
-                                            "is_noball": bool(dr[7]), "extra_type": dr[8],
-                                            "commentary": dr[9] or "",
+                                            "is_wicket": bool(dr[5]), "is_wide": ("wide" in ex_t),
+                                            "is_noball": ("noball" in ex_t or "no-ball" in ex_t), "extra_type": dr[6],
+                                            "commentary": dr[7] or "",
                                         })
                             except Exception:
                                 recent_dels = []
