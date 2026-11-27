@@ -194,6 +194,110 @@ class TestCricApiPaidLiveSync(unittest.TestCase):
         self.assertIn("m_ban_sa_2026_test_1", updated)
         self.assertIn(new_match["id"], updated)
 
+    def test_sync_handles_cricapi_fixture_status_with_live_score_and_empty_t1s(self):
+        """
+        Regression: When CricAPI leaves ms='fixture' and matchType='' while t1s='' and t2s='131/4 (50)',
+        sync must still treat the match as live, resolve TEST format + venue + toss from cached match_info,
+        and assign Innings 1 to t2 (NZ) without creating a phantom IND 0/10 Innings 1.
+        """
+        paid_key = "paid-test-key-666666"
+        provider = CricApiSquadProvider(api_key=paid_key, fallback_key="free-key")
+        uid = "c81e7d49-463b-478a-bc28-06608c6466d2"
+        provider._cached_match_info = {
+            uid: {
+                "status": "success",
+                "cricapi_match_id": uid,
+                "match_name": "New Zealand vs India, 2nd Test, India tour of New Zealand 2026",
+                "match_type": "",
+                "toss_winner": "india",
+                "toss_choice": "bowl",
+                "venue_name": "Hagley Oval, Christchurch",
+                "venue_id": "christchurch",
+                "match_status": "India opt to bowl",
+                "teams": ["New Zealand", "India"],
+                "_ts": 9e12,
+            }
+        }
+
+        async def _scenario():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "test_fx.db"
+                with patch("backend.database.db.DB_PATH", db_path):
+                    await init_db()
+                conn = await aiosqlite.connect(str(db_path))
+                conn.row_factory = aiosqlite.Row
+                try:
+                    await conn.execute("""
+                        INSERT INTO teams (id, name, short_name, color) VALUES
+                        ('NZ', 'New Zealand', 'NZ', '#27272A'),
+                        ('IND', 'India', 'IND', '#0284C7')
+                    """)
+                    await conn.execute("""
+                        INSERT INTO venues (id, name, city, country, region_cluster, pitch_type)
+                        VALUES ('christchurch', 'Hagley Oval', 'Christchurch', 'New Zealand', 'sena', 'green')
+                    """)
+                    # Simulate previously corrupted Innings-2 state in DB
+                    await conn.execute("""
+                        INSERT INTO matches (
+                            id, series_name, format, team_a_id, team_b_id, venue_id,
+                            scheduled_start, state, current_innings, current_score, current_wickets,
+                            innings_1_team_id, innings_1_score, innings_1_wickets,
+                            innings_2_team_id, innings_2_score, innings_2_wickets
+                        ) VALUES (
+                            'm_nz_ind_2026_test_2', 'India Tour of New Zealand 2026 - 2nd Test', 'TEST',
+                            'NZ', 'IND', 'christchurch', '2026-11-27T22:00:00Z',
+                            'LIVE_BALL_BY_BALL', 2, 131, 4,
+                            'IND', 0, 10, 'NZ', 131, 4
+                        )
+                    """)
+                    await conn.commit()
+
+                    calls = []
+                    live_payload = _MockResponse(200, {
+                        "status": "success",
+                        "info": {"hitsToday": 1, "hitsLimit": 2000},
+                        "data": [
+                            {
+                                "id": uid,
+                                "series": "India tour of New Zealand 2026",
+                                "matchType": "",
+                                "ms": "fixture",
+                                "status": "India opt to bowl",
+                                "dateTimeGMT": "2026-11-27T22:00:00",
+                                "t1": "India [IND]",
+                                "t2": "New Zealand [NZ]",
+                                "t1s": "",
+                                "t2s": "131/4 (50)",
+                            }
+                        ],
+                    })
+                    with patch(
+                        "backend.scraper.providers.cricapi_provider.httpx.Client",
+                        side_effect=lambda *a, **kw: _RecordingClient(calls, [live_payload]),
+                    ):
+                        updated = await provider.sync_live_senior_mens_matches(conn)
+
+                    async with conn.execute("SELECT * FROM matches WHERE id = 'm_nz_ind_2026_test_2'") as cur:
+                        row = dict(await cur.fetchone())
+                    return updated, row
+                finally:
+                    await conn.close()
+
+        updated, row = asyncio.run(_scenario())
+        self.assertIn("m_nz_ind_2026_test_2", updated)
+        self.assertEqual(row["state"], "LIVE_BALL_BY_BALL")
+        self.assertEqual(row["format"], "TEST")
+        self.assertEqual(row["current_innings"], 1)
+        self.assertEqual(row["current_score"], 131)
+        self.assertEqual(row["current_wickets"], 4)
+        self.assertEqual(row["innings_1_team_id"], "NZ")
+        self.assertEqual(row["innings_1_score"], 131)
+        self.assertIsNone(row["innings_2_team_id"])
+        self.assertIsNone(row["innings_2_score"])
+        self.assertEqual(row["toss_winner_id"], "IND")
+        self.assertEqual(row["toss_decision"], "bowl")
+        self.assertEqual(row["venue_id"], "christchurch")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,7 @@ import {
 
 export default function HomePage() {
   const [matches, setMatches] = useState<MatchData[]>([]);
+  const [stage3Matches, setStage3Matches] = useState<MatchData[]>([]);
   const [loading, setLoading] = useState(true);
   const [wakingBackend, setWakingBackend] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("LIVE");
@@ -54,12 +55,18 @@ export default function HomePage() {
       wakeRetryRef.current.timer = null;
     }
     const primaryUrl = apiUrl("/api/matches");
+    const stage3Url = apiUrl("/api/matches?state=XI_AND_TOSS_LOCKED");
     const wsActive = Boolean(getWsUrl());
     let keepWakingSpinner = false;
     try {
-      let res = await fetch(primaryUrl);
-      if (!res.ok && primaryUrl !== "/api/matches") {
-        res = await fetch("/api/matches");
+      const [resLive, resStage3] = await Promise.all([
+        fetch(primaryUrl).then(async (r) => (!r.ok && primaryUrl !== "/api/matches" ? fetch("/api/matches") : r)),
+        fetch(stage3Url).catch(() => null),
+      ]);
+      const res = resLive;
+      if (resStage3 && resStage3.ok) {
+        const s3Data = await resStage3.json();
+        setStage3Matches(Array.isArray(s3Data) ? s3Data : []);
       }
       if (res.ok) {
         const data = await res.json();
@@ -358,6 +365,37 @@ export default function HomePage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {liveMatches.map((match) => (
+                <MatchCard
+                  key={match.id}
+                  match={match}
+                  onStateChange={handleStateChange}
+                  onStepDelivery={handleStepDelivery}
+                  sandboxMode={sandboxMode}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Stage 3 Pre-Match Confirmed Playing 11 & Venue (CricAPI Schedule + 11v11 + Venue) */}
+        {stage3Matches.length > 0 && activeTab !== "COMPLETED" && (
+          <div className="mb-8 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-gradient-to-r from-emerald-950/35 via-slate-900/90 to-cyan-950/30 border border-emerald-500/30 shadow-2xl">
+            <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
+              <div>
+                <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
+                  <span>🏏 Stage 3 • Confirmed Playing 11 &amp; Venue Locked</span>
+                  <span className="text-xs font-bold text-emerald-300 bg-emerald-950/90 px-2.5 py-0.5 rounded-full border border-emerald-700">
+                    {stage3Matches.length} Match{stage3Matches.length > 1 ? "es" : ""} Ready
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Calibrated 6-signal Stage 3 1st-innings projections shown for both batting-first scenarios (Country A vs Country B) upon CricAPI schedule, Playing 11 &amp; venue lock.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {stage3Matches.map((match) => (
                 <MatchCard
                   key={match.id}
                   match={match}

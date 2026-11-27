@@ -47,6 +47,7 @@ class IngestionManager:
         self.is_active = True
         self.active_cricbuzz_bindings = {
             "m_nz_ind_2026_test_1": "161285",
+            "m_nz_ind_2026_test_2": "161296",
             "m_aus_eng_2026_t20_1": "151338",
             "m_zim_afg_2026_test_2": "172731",
         }
@@ -173,10 +174,17 @@ class IngestionManager:
                         f"Venue archetype: {v_profile.get('pitch_type', 'balanced')}"
                     ))
 
-            # 3. Rule Enforcement: For all upcoming matches, ensure is_confirmed_xi = 0!
+            # 3. Rule Enforcement: For upcoming fixtures without 22 confirmed XI players, keep is_confirmed_xi = 0
             await conn.execute("""
                 UPDATE match_squads SET is_confirmed_xi = 0
-                WHERE match_id IN (SELECT id FROM matches WHERE state IN ('UPCOMING_NO_SQUAD', 'SQUAD_ANNOUNCED'))
+                WHERE match_id IN (
+                    SELECT m.id FROM matches m
+                    WHERE m.state IN ('UPCOMING_NO_SQUAD', 'SQUAD_ANNOUNCED')
+                      AND (
+                        SELECT count(*) FROM match_squads ms
+                        WHERE ms.match_id = m.id AND ms.is_confirmed_xi = 1
+                      ) < 22
+                )
             """)
             await conn.commit()
             logger.info(f"Ingested & synchronized {len(fixtures)} international fixtures.")
@@ -185,6 +193,125 @@ class IngestionManager:
         finally:
             await conn.close()
         return fixtures
+
+    async def sync_cricapi_schedule_xi_and_venue(
+        self,
+        cricapi_match_id: Optional[str] = None,
+        force: bool = False,
+    ) -> List[str]:
+        """
+        Discovers/syncs CricAPI schedule + venue + confirmed Playing 11 into SQLite,
+        computing dual Stage 3 1st-innings projections (Team A bats 1st vs Team B bats 1st)
+        immediately once schedule, 11v11 players, and venue are available.
+        """
+        from .providers.cricapi_provider import cricapi_provider
+        from ..engine.cricsheet_pitch_intelligence import normalize_team_code
+
+        conn = await self.db_factory()
+        conn.row_factory = aiosqlite.Row
+        updated_ids: List[str] = []
+        try:
+            fixtures = cricapi_provider.sync_senior_international_fixtures(force=force)
+            if cricapi_match_id:
+                fixtures = [
+                    f for f in fixtures
+                    if str(f.get("cricapi_id")) == str(cricapi_match_id)
+                ] or [{"cricapi_id": cricapi_match_id}]
+
+            for fx in fixtures:
+                cid = str(fx.get("cricapi_id") or "").strip()
+                if not cid:
+                    continue
+                st_fx = str(fx.get("status_text") or "").lower()
+                if any(k in st_fx for k in ("won by", "win by", "drawn", "tied", "abandoned", "no result", "concluded")):
+                    continue
+                near_start = force or cricapi_provider.is_match_about_to_start(str(fx.get("scheduled_start") or ""), window_minutes=1440)
+                toss_info = cricapi_provider.fetch_match_toss_and_venue(cid, force=force) if near_start else {}
+                xi_res = cricapi_provider.fetch_playing_xi_for_match(
+                    cid, fx.get("scheduled_start"), force_call=force
+                )
+
+                teams_raw = toss_info.get("teams") or [fx.get("team_a_name"), fx.get("team_b_name")]
+                c1 = normalize_team_code(fx.get("team_a_code") or (teams_raw[0] if len(teams_raw) > 0 else ""))
+                c2 = normalize_team_code(fx.get("team_b_code") or (teams_raw[1] if len(teams_raw) > 1 else ""))
+                if not c1 or not c2 or c1 == c2:
+                    continue
+
+                mi_fmt_src = f"{toss_info.get('match_type') or ''} {toss_info.get('match_name') or ''} {fx.get('series_name') or ''} {fx.get('status_text') or ''}".lower()
+                if "test" in mi_fmt_src or "day 1" in mi_fmt_src or "day 2" in mi_fmt_src:
+                    fmt = "TEST"
+                elif "odi" in mi_fmt_src or "one-day" in mi_fmt_src:
+                    fmt = "ODI"
+                elif "t20" in mi_fmt_src:
+                    fmt = "T20I"
+                else:
+                    fmt = fx.get("format") or "T20I"
+                raw_cid = re.sub(r"[^a-zA-Z0-9_-]", "", cid)
+                local_mid = f"m_cricapi_{c1.lower()}_{c2.lower()}_{raw_cid[:16]}"
+                v_name = str(toss_info.get("venue_name") or "").strip()
+                v_id = toss_info.get("venue_id") or (re.sub(r"[^a-z0-9]+", "_", v_name.lower().split(",")[0]).strip("_") if v_name else "wellington")
+
+                # Ensure teams and venue rows exist before upserting match + XI
+                for code, tname in ((c1, teams_raw[0] if len(teams_raw) > 0 else c1), (c2, teams_raw[1] if len(teams_raw) > 1 else c2)):
+                    clean_tn = re.sub(r"\s*\[.*?\]\s*", "", str(tname or code)).strip() or code
+                    await conn.execute(
+                        "INSERT OR IGNORE INTO teams (id, name, short_name, color) VALUES (?, ?, ?, '#3B82F6')",
+                        (code, clean_tn, code),
+                    )
+                if v_name or v_id:
+                    city_part = v_name.split(",", 1)[1].strip() if "," in v_name else "International"
+                    await conn.execute(
+                        "INSERT OR IGNORE INTO venues (id, name, city, country, region_cluster, pitch_type) "
+                        "VALUES (?, ?, ?, 'International', 'other', 'balanced')",
+                        (v_id, v_name or v_id, city_part),
+                    )
+
+                async with conn.execute("""
+                    SELECT id, state FROM matches
+                    WHERE ((team_a_id = ? AND team_b_id = ?) OR (team_a_id = ? AND team_b_id = ?))
+                      AND UPPER(format) = ? AND state != 'COMPLETED'
+                    ORDER BY CASE WHEN id NOT LIKE 'm_cricapi_%' THEN 0 ELSE 1 END,
+                             CASE WHEN state = 'LIVE_BALL_BY_BALL' THEN 0 ELSE 1 END,
+                             scheduled_start ASC
+                    LIMIT 1
+                """, (c1, c2, c2, c1, fmt.upper())) as cur:
+                    existing = await cur.fetchone()
+                if not existing:
+                    async with conn.execute("SELECT id, state FROM matches WHERE id = ?", (local_mid,)) as cur:
+                        existing = await cur.fetchone()
+
+                target_mid = existing["id"] if existing else local_mid
+                if not existing:
+                    sched = fx.get("scheduled_start") or "2026-11-27T14:00:00Z"
+                    ser_nm = fx.get("series_name") or f"{c1} vs {c2} {fmt}"
+                    await conn.execute("""
+                        INSERT OR IGNORE INTO matches (
+                            id, series_name, format, team_a_id, team_b_id, venue_id,
+                            scheduled_start, is_day_night, state, p_team_a, p_team_b,
+                            par_score_projected, last_event_description
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'SQUAD_ANNOUNCED', 50.0, 50.0, ?, ?)
+                    """, (target_mid, ser_nm, fmt, c1, c2, v_id, sched, 275 if fmt == "ODI" else 170, f"Scheduled {fmt} via CricAPI"))
+                elif existing["state"] not in ("LIVE_BALL_BY_BALL", "COMPLETED") and v_id:
+                    await conn.execute("UPDATE matches SET venue_id = COALESCE(?, venue_id) WHERE id = ?", (v_id, target_mid))
+                await conn.commit()
+
+                if xi_res.get("status") == "success" and xi_res.get("teams"):
+                    xi_teams = xi_res["teams"]
+                    if len(xi_teams) >= 2 and all(len(t.get("playing_xi") or []) >= 11 for t in xi_teams[:2]):
+                        merged_payload = {
+                            **xi_res,
+                            "toss_winner": toss_info.get("toss_winner"),
+                            "toss_choice": toss_info.get("toss_choice"),
+                            "venue_id": v_id,
+                            "venue_name": v_name,
+                        }
+                        await self.apply_cricapi_playing_xi(target_mid, merged_payload)
+                        updated_ids.append(target_mid)
+        except Exception as e:
+            logger.error(f"Error in sync_cricapi_schedule_xi_and_venue: {e}")
+        finally:
+            await conn.close()
+        return updated_ids
 
     async def poll_squads_cadence(self):
         """Polls squad releases for upcoming matches from external sources."""
@@ -203,18 +330,17 @@ class IngestionManager:
 
     async def poll_toss_and_xi_cadence(self):
         """
-        Polls match center for confirmed toss and Playing XI 30-45 mins before first ball
+        Polls match center for confirmed toss, venue and Playing XI before first ball
         using CricAPI and official match feeds, respecting strict credit quotas.
         """
         conn = await self.db_factory()
         conn.row_factory = aiosqlite.Row
         try:
             from .providers.cricapi_provider import cricapi_provider
-            async with conn.execute("SELECT id, scheduled_start, team_a_id, team_b_id FROM matches WHERE state = 'SQUAD_ANNOUNCED'") as c:
+            async with conn.execute("SELECT id, scheduled_start, team_a_id, team_b_id FROM matches WHERE state IN ('UPCOMING_NO_SQUAD', 'SQUAD_ANNOUNCED')") as c:
                 upcoming = [dict(r) for r in await c.fetchall()]
 
             for m in upcoming:
-                # Check if match is within 45-minute toss window
                 if cricapi_provider.is_match_about_to_start(m.get("scheduled_start")):
                     cricbuzz_id = self.active_cricbuzz_bindings.get(m["id"])
                     if cricbuzz_id:
@@ -222,6 +348,7 @@ class IngestionManager:
                         res = cricapi_provider.fetch_playing_xi_for_match(cricbuzz_id, m.get("scheduled_start"))
                         if res.get("status") == "success":
                             await self.apply_cricapi_playing_xi(m["id"], res)
+            await self.sync_cricapi_schedule_xi_and_venue(force=False)
         except Exception as e:
             logger.error(f"Error in poll_toss_and_xi_cadence: {e}")
         finally:
@@ -229,9 +356,11 @@ class IngestionManager:
 
     async def apply_cricapi_playing_xi(self, match_id: str, cricapi_res: Dict[str, Any]):
         """
-        Applies CricAPI Playing XI (11 players per team), official pre-match toss, and authentic venue
-        to match_squads and advances match state to XI_AND_TOSS_LOCKED.
+        Applies CricAPI Playing XI (11 players per team), venue, and pre-match toss (when available),
+        inserts unknown CricAPI players cleanly, computes Stage 3 dual-scenario projections
+        (if Team A bats 1st vs if Team B bats 1st), and promotes match state to XI_AND_TOSS_LOCKED.
         """
+        from ..engine.cricsheet_pitch_intelligence import normalize_team_code
         conn = await self.db_factory()
         conn.row_factory = aiosqlite.Row
         try:
@@ -241,62 +370,184 @@ class IngestionManager:
                     return
                 m = dict(m_row)
 
+            ta = normalize_team_code(m.get("team_a_id") or "")
+            tb = normalize_team_code(m.get("team_b_id") or "")
             teams = cricapi_res.get("teams", [])
-            for t in teams:
-                playing_xi = t.get("playing_xi", [])
-                for p in playing_xi:
-                    p_name = p.get("name", "")
-                    await conn.execute("""
-                        UPDATE match_squads SET is_confirmed_xi = 1, is_probable_xi = 1, batting_order = ?
-                        WHERE match_id = ? AND player_id IN (
-                            SELECT id FROM players WHERE name LIKE ? OR name = ?
-                        )
-                    """, (p.get("order", 99), match_id, f"%{p_name}%", p_name))
 
-            # Pre-Match Toss & Venue Detection from CricketData.org API
+            def _map_role(raw_r: str, b_style: str) -> str:
+                rl = str(raw_r or "").lower()
+                if "wk" in rl or "keeper" in rl:
+                    return "wicket_keeper"
+                if "all" in rl:
+                    return "all_rounder"
+                if "bowl" in rl:
+                    return "frontline_spinner" if any(k in str(b_style or "").lower() for k in ("spin", "off", "leg", "ortho", "slow")) else "frontline_pacer"
+                return "top_order_batter"
+
+            def _map_bstyle(raw_b: str) -> str:
+                bl = str(raw_b or "").lower()
+                if not bl or bl == "none":
+                    return "NONE"
+                if "left" in bl and ("ortho" in bl or "arm" in bl and "spin" in bl):
+                    return "SLA"
+                if "off" in bl:
+                    return "OB"
+                if "leg" in bl or "chinaman" in bl:
+                    return "LBG"
+                if "left" in bl and ("fast" in bl or "medium" in bl):
+                    return "LF"
+                return "RF"
+
+            for t_idx, t in enumerate(teams):
+                t_code_guess = normalize_team_code(t.get("team_name") or "")
+                team_id_target = ta if t_code_guess == ta else (tb if t_code_guess == tb else (ta if t_idx == 0 else tb))
+                playing_xi = (t.get("playing_xi") or [])[:11]
+                for idx_p, p in enumerate(playing_xi, start=1):
+                    p_name = str(p.get("name") or "").strip()
+                    if not p_name:
+                        continue
+                    order_val = int(p.get("order") or idx_p)
+                    async with conn.execute(
+                        "SELECT id FROM players WHERE (LOWER(name) = LOWER(?) OR name LIKE ?) AND team_id = ? LIMIT 1",
+                        (p_name, f"%{p_name}%", team_id_target),
+                    ) as cur_p:
+                        prow = await cur_p.fetchone()
+                    if not prow:
+                        async with conn.execute(
+                            "SELECT id FROM players WHERE LOWER(name) = LOWER(?) LIMIT 1", (p_name,)
+                        ) as cur_p2:
+                            prow = await cur_p2.fetchone()
+                    if prow:
+                        pid = prow["id"]
+                    else:
+                        slug = re.sub(r"[^a-z0-9]+", "_", p_name.lower()).strip("_")
+                        pid = f"cricapi_{team_id_target.lower()}_{slug}"
+                        r_norm = _map_role(p.get("role", ""), p.get("bowling_style", ""))
+                        bs_norm = _map_bstyle(p.get("bowling_style", ""))
+                        bat_h = "left" if "left" in str(p.get("batting_style") or "").lower() else "right"
+                        await conn.execute(
+                            "INSERT OR IGNORE INTO players (id, name, team_id, role, batting_hand, bowling_style) VALUES (?, ?, ?, ?, ?, ?)",
+                            (pid, p_name, team_id_target, r_norm, bat_h, bs_norm),
+                        )
+
+                    async with conn.execute(
+                        "SELECT id FROM match_squads WHERE match_id = ? AND player_id = ?", (match_id, pid)
+                    ) as cur_ms:
+                        ms_row = await cur_ms.fetchone()
+                    if ms_row:
+                        await conn.execute(
+                            "UPDATE match_squads SET is_confirmed_xi = 1, is_probable_xi = 1, batting_order = ? WHERE id = ?",
+                            (order_val, ms_row["id"]),
+                        )
+                    else:
+                        await conn.execute(
+                            "INSERT INTO match_squads (match_id, team_id, player_id, is_in_squad, is_probable_xi, is_confirmed_xi, batting_order) "
+                            "VALUES (?, ?, ?, 1, 1, 1, ?)",
+                            (match_id, team_id_target, pid, order_val),
+                        )
+
             from .providers.cricapi_provider import cricapi_provider
             cricapi_match_id = m.get("cricapi_id") or cricapi_res.get("match_id")
-            toss_info = cricapi_provider.fetch_match_toss_and_venue(cricapi_match_id) if cricapi_match_id else {}
+            toss_info = cricapi_provider.fetch_match_toss_and_venue(cricapi_match_id) if (
+                cricapi_match_id and not cricapi_res.get("venue_name") and not cricapi_res.get("toss_winner")
+            ) else {}
 
-            ta = m.get("team_a_id", "AUS")
-            tb = m.get("team_b_id", "ENG")
-            t_winner_raw = str(toss_info.get("toss_winner") or cricapi_res.get("toss_winner") or "").lower()
-            t_choice = str(toss_info.get("toss_choice") or cricapi_res.get("toss_choice") or "bat").lower()
+            t_winner_raw = str(cricapi_res.get("toss_winner") or toss_info.get("toss_winner") or "").strip()
+            t_choice_raw = str(cricapi_res.get("toss_choice") or toss_info.get("toss_choice") or "").strip().lower()
+            tw_code = normalize_team_code(t_winner_raw) if t_winner_raw else ""
 
-            toss_win_id = None
-            if any(k in t_winner_raw for k in [tb.lower(), "england", "eng"]):
-                toss_win_id = tb
-            elif any(k in t_winner_raw for k in [ta.lower(), "australia", "aus"]):
-                toss_win_id = ta
+            toss_win_id = m.get("team_b_id") if (tw_code and tw_code == tb) else (
+                m.get("team_a_id") if (tw_code and tw_code == ta) else m.get("toss_winner_id")
+            )
+            toss_dec = ("bat" if "bat" in t_choice_raw else ("field" if ("bowl" in t_choice_raw or "field" in t_choice_raw) else None)) or m.get("toss_decision")
+            toss_confirmed = bool(toss_win_id and toss_dec)
 
-            toss_dec = "bat" if "bat" in t_choice else "bowl"
-            
-            # Determine 1st innings batting team
-            if toss_win_id:
-                first_bat_id = toss_win_id if toss_dec == "bat" else (tb if toss_win_id == ta else ta)
+            if toss_confirmed:
+                first_bat_id = toss_win_id if toss_dec == "bat" else (m.get("team_b_id") if toss_win_id == m.get("team_a_id") else m.get("team_a_id"))
             else:
-                first_bat_id = m.get("innings_1_team_id") or tb
+                first_bat_id = m.get("innings_1_team_id")
 
-            # Resolve venue if detected
-            resolved_venue = toss_info.get("venue_id") or m.get("venue_id")
-            if "hobart" in str(toss_info.get("venue_name") or "").lower():
-                resolved_venue = "hobart"
+            v_name_raw = str(cricapi_res.get("venue_name") or toss_info.get("venue_name") or "").strip()
+            resolved_venue = cricapi_res.get("venue_id") or toss_info.get("venue_id") or (
+                cricapi_provider.resolve_venue_from_text(v_name_raw) if v_name_raw else None
+            ) or m.get("venue_id")
+            if v_name_raw and resolved_venue:
+                city_part = v_name_raw.split(",", 1)[1].strip() if "," in v_name_raw else "International"
+                await conn.execute(
+                    "INSERT OR IGNORE INTO venues (id, name, city, country, region_cluster, pitch_type) "
+                    "VALUES (?, ?, ?, 'International', 'other', 'balanced')",
+                    (resolved_venue, v_name_raw, city_part),
+                )
 
-            status_msg = f"{toss_win_id or 'Winner'} won the toss and elected to {toss_dec}" if toss_win_id else "Toss locked"
+            status_msg = (
+                f"{toss_win_id} won the toss and elected to {toss_dec}"
+                if toss_confirmed
+                else "Playing XI & Venue Locked • Dual Stage 3 Projections Active"
+            )
 
-            await conn.execute("""
-                UPDATE matches SET
-                    toss_winner_id = COALESCE(?, toss_winner_id),
-                    toss_decision = COALESCE(?, toss_decision),
-                    innings_1_team_id = ?,
-                    venue_id = COALESCE(?, venue_id),
-                    match_status_text = ?,
-                    state = 'XI_AND_TOSS_LOCKED'
-                WHERE id = ?
-            """, (toss_win_id, toss_dec, first_bat_id, resolved_venue, status_msg, match_id))
+            async with conn.execute("PRAGMA table_info(matches)") as cur_cols:
+                match_cols = {r[1] for r in await cur_cols.fetchall()}
 
+            set_clauses = [
+                "toss_winner_id = COALESCE(?, toss_winner_id)",
+                "toss_decision = COALESCE(?, toss_decision)",
+                "venue_id = COALESCE(?, venue_id)",
+                "last_event_description = ?",
+                "state = 'XI_AND_TOSS_LOCKED'",
+            ]
+            params = [toss_win_id, toss_dec, resolved_venue, status_msg]
+            if "innings_1_team_id" in match_cols:
+                set_clauses.append("innings_1_team_id = COALESCE(?, innings_1_team_id)")
+                params.append(first_bat_id)
+            if "match_status_text" in match_cols:
+                set_clauses.append("match_status_text = ?")
+                params.append(status_msg)
+            params.append(match_id)
+
+            await conn.execute(f"UPDATE matches SET {', '.join(set_clauses)} WHERE id = ?", params)
             await conn.commit()
-            logger.info(f"Applied CricAPI Playing XI, toss ({toss_win_id} opt to {toss_dec}), and venue ({resolved_venue}) for {match_id}")
+
+            # Compute and store calibrated Stage 3 projections immediately in matches row
+            async with conn.execute(
+                "SELECT ms.*, p.name, p.role, p.batting_hand, p.bowling_style, p.t20_batting_avg, p.t20_batting_sr, p.t20_economy "
+                "FROM match_squads ms JOIN players p ON ms.player_id = p.id WHERE ms.match_id = ? AND ms.is_confirmed_xi = 1 ORDER BY ms.batting_order ASC",
+                (match_id,),
+            ) as cur_s:
+                xi_all = [dict(r) for r in await cur_s.fetchall()]
+            xi_a_db = [x for x in xi_all if x.get("team_id") == m.get("team_a_id")][:11]
+            xi_b_db = [x for x in xi_all if x.get("team_id") == m.get("team_b_id")][:11]
+            async with conn.execute("SELECT * FROM venues WHERE id = ?", (resolved_venue,)) as cur_v:
+                v_row = await cur_v.fetchone()
+            v_dict = dict(v_row) if v_row else {"id": resolved_venue, "name": v_name_raw or resolved_venue}
+            if len(xi_a_db) >= 11 and len(xi_b_db) >= 11:
+                s3_out = calculate_stage3_xi_locked(
+                    confirmed_xi_a=xi_a_db,
+                    confirmed_xi_b=xi_b_db,
+                    toss_winner_id=toss_win_id or "",
+                    toss_decision=toss_dec or "",
+                    venue=v_dict,
+                    team_a_id=m.get("team_a_id"),
+                    team_b_id=m.get("team_b_id"),
+                    p2_squad_prob_a=float(m.get("p_team_a") or 50.0),
+                    match_format=m.get("format", "T20I"),
+                    pitch_report=m.get("pitch_report"),
+                    match_date=m.get("scheduled_start"),
+                )
+                await conn.execute("""
+                    UPDATE matches SET
+                        p_team_a = ?, p_team_b = ?, p_draw = ?, p0_pre_match = ?,
+                        par_score_projected = ?, par_score_min = ?, par_score_max = ?,
+                        ground_pitch_archetype = ?, active_pitch_type = ?
+                    WHERE id = ?
+                """, (
+                    s3_out["p_team_a"], s3_out["p_team_b"], s3_out["p_draw"], s3_out["p0_pre_match"],
+                    s3_out["par_score_projected"], s3_out["par_score_min"], s3_out["par_score_max"],
+                    s3_out["ground_pitch_archetype"], s3_out["ground_pitch_archetype"],
+                    match_id,
+                ))
+                await conn.commit()
+
+            logger.info(f"Applied CricAPI Playing XI, venue ({resolved_venue}), toss ({toss_win_id}:{toss_dec}) & Stage 3 projections for {match_id}")
         except Exception as e:
             logger.error(f"Error applying CricAPI Playing XI for {match_id}: {e}")
         finally:
@@ -1394,7 +1645,8 @@ class IngestionManager:
 
                 # In Test matches with declaration, if Innings 1 is declared or team_a finished, advance to Innings 2
                 is_declared_check = bool(re.search(r"\bdec\b|\bd\b|\bdeclared\b", st_low))
-                if match_format == "TEST" and (is_declared_check or match.get("is_declared") or match.get("current_innings") == 2):
+                has_valid_completed_i1 = bool(match.get("innings_1_team_id") and match.get("innings_1_team_id") != t1 and int(match.get("innings_1_score") or 0) > 0)
+                if match_format == "TEST" and (is_declared_check or match.get("is_declared") or (match.get("current_innings") == 2 and has_valid_completed_i1)):
                     inn_val = 2
                     batting_team_id = match["team_b_id"] if t1 == match["team_a_id"] else match["team_a_id"]
                     bowling_team_id = t1
@@ -1977,9 +2229,14 @@ class IngestionManager:
             if scraped.get("pitch_report"):
                 await conn.execute("UPDATE matches SET pitch_report = ? WHERE id = ?", (scraped["pitch_report"], match_id))
 
-            # Toss alignment: first_bat is inn_1_team_id
-            toss_win_id = inn_1_team_id or match.get("toss_winner_id") or match["team_a_id"]
-            toss_dec = "bat"
+            # Preserve official toss decision when already set (e.g. IND won toss and opted to bowl);
+            # fall back to 1st-innings batting team only when toss is missing.
+            if match.get("toss_winner_id") and match.get("toss_decision"):
+                toss_win_id = match["toss_winner_id"]
+                toss_dec = match["toss_decision"]
+            else:
+                toss_win_id = inn_1_team_id or match.get("toss_winner_id") or match["team_a_id"]
+                toss_dec = "bat"
 
             restrictions_data = scraped.get("restrictions") or {}
             weather_condition_val = restrictions_data.get("weather_condition") or match.get("weather_condition") or "Clear"

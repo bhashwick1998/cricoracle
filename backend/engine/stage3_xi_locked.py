@@ -384,7 +384,8 @@ def calculate_stage3_xi_locked(
     team_b_id: Optional[str] = None,
     pitch_report: Optional[str] = None,
     commentary_strings: Optional[List[str]] = None,
-    match_date: Optional[str] = None
+    match_date: Optional[str] = None,
+    use_ground_pitch_model: bool = True,
 ) -> Dict[str, Any]:
     """
     Executes Stage 3 (Gear 2B: Confirmed Playing XI & Toss Locked):
@@ -747,6 +748,64 @@ def calculate_stage3_xi_locked(
         country_adapt_delta=country_adapt_delta
     )
 
+    score_model_details = None
+    dual_first_innings_scenarios = None
+    if use_ground_pitch_model and fmt in ("ODI", "T20I"):
+        try:
+            from .stage3_ground_pitch_model import (
+                compute_stage3_dual_first_innings_projections,
+            )
+            toss_known = bool(toss_winner_id and str(toss_winner_id).strip() and toss_decision)
+            dual_res = compute_stage3_dual_first_innings_projections(
+                fmt=fmt,
+                team_a_id=team_a_id,
+                team_b_id=team_b_code,
+                xi_a=confirmed_xi_a,
+                xi_b=confirmed_xi_b,
+                venue_name=venue.get("name") or dossier.get("name"),
+                city=venue.get("city"),
+                venue_id=venue_id,
+                toss_winner_id=toss_winner_id if toss_known else None,
+                toss_decision=toss_decision if toss_known else None,
+                pitch_override=pitch_archetype if is_pitch_override else None,
+                boundary_multiplier=boundary_multiplier,
+                match_date=match_date,
+            )
+            dual_first_innings_scenarios = {
+                "format": fmt,
+                "toss_confirmed": toss_known,
+                "team_a_bats_first": {
+                    **{k: v for k, v in dual_res["if_team_a_bats_first"].items() if k != "features"},
+                    "signals": {
+                        "dominant_pitch": dual_res["if_team_a_bats_first"]["features"]["dominant_pitch"],
+                        "same_ground_pitch_par": dual_res["if_team_a_bats_first"]["features"]["same_ground_pitch_par"],
+                        "global_pitch_par": dual_res["if_team_a_bats_first"]["features"]["global_pitch_par"],
+                        "country_adapt": dual_res["if_team_a_bats_first"]["features"]["bat_country_adapt"],
+                        "xi_bat_adapt": dual_res["if_team_a_bats_first"]["features"]["xi_bat_adapt"],
+                        "duel_run_delta": dual_res["if_team_a_bats_first"]["features"]["duel_run_delta"],
+                    },
+                },
+                "team_b_bats_first": {
+                    **{k: v for k, v in dual_res["if_team_b_bats_first"].items() if k != "features"},
+                    "signals": {
+                        "dominant_pitch": dual_res["if_team_b_bats_first"]["features"]["dominant_pitch"],
+                        "same_ground_pitch_par": dual_res["if_team_b_bats_first"]["features"]["same_ground_pitch_par"],
+                        "global_pitch_par": dual_res["if_team_b_bats_first"]["features"]["global_pitch_par"],
+                        "country_adapt": dual_res["if_team_b_bats_first"]["features"]["bat_country_adapt"],
+                        "xi_bat_adapt": dual_res["if_team_b_bats_first"]["features"]["xi_bat_adapt"],
+                        "duel_run_delta": dual_res["if_team_b_bats_first"]["features"]["duel_run_delta"],
+                    },
+                },
+            }
+            active_side = dual_res["if_team_a_bats_first"] if team_a_bats_first else dual_res["if_team_b_bats_first"]
+            par_proj = int(active_side["projected_score"])
+            par_min = int(active_side["min_score"])
+            par_max = int(active_side["max_score"])
+            score_model_details = active_side["features"]
+        except Exception:
+            score_model_details = None
+            dual_first_innings_scenarios = None
+
     if fmt == "TEST":
         p_draw = round(venue.get("test_draw_pct", 0.11) * 100.0, 1)
         decisive_pool = 100.0 - p_draw
@@ -815,6 +874,7 @@ def calculate_stage3_xi_locked(
         "delta_toss_shift": delta_toss_shift,
         "biggest_matchup_adv": key_adv,
         "team_a_bats_first": team_a_bats_first,
+        "dual_first_innings_scenarios": dual_first_innings_scenarios,
         "h2h_matrix_sample": h2h_matrix_a_vs_b[:4],
         "predictive_power_pct": predictive_power_pct,
         "predictive_power_badge": predictive_power_badge,
@@ -828,6 +888,8 @@ def calculate_stage3_xi_locked(
             "dew_multiplier": dew_factor,
             "format": fmt,
             "pqi": pqi_info.get("pitch_quality_index"),
-            "is_pitch_override": is_pitch_override
+            "is_pitch_override": is_pitch_override,
+            "score_model_features": score_model_details,
+            "dual_first_innings_scenarios": dual_first_innings_scenarios,
         }
     }

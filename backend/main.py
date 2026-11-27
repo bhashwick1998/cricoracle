@@ -279,22 +279,10 @@ async def lifespan(app: FastAPI):
                     last_event_description = 'Stage 1 Macro Prediction (NZ 51.0% vs IND 49.0%) • Basin Reserve'
                 WHERE id = 'm_nz_ind_2026_test_1'
             """)
+            # Repair legacy seed venue/innings only if needed; preserve live NZ vs IND 2nd Test state
             await conn.execute("""
-                UPDATE matches SET
-                    state = 'UPCOMING_NO_SQUAD',
-                    is_stumps = 0,
-                    stumps_day = NULL,
-                    stumps_label = NULL,
-                    match_status_text = 'Scheduled 2nd Test at Seddon Park, Hamilton • Squads TBA',
-                    last_event_description = 'Stage 1 Macro Prediction (NZ 50.5% vs IND 49.5%) • Seddon Park • Squads TBA',
-                    p_team_a = 50.5,
-                    p_team_b = 49.5,
-                    p_draw = 0.0,
-                    current_score = 0,
-                    current_wickets = 0,
-                    current_overs = 0,
-                    current_balls = 0
-                WHERE id = 'm_nz_ind_2026_test_2'
+                UPDATE matches SET venue_id = 'christchurch'
+                WHERE id = 'm_nz_ind_2026_test_2' AND venue_id = 'eden_park'
             """)
 
             # Enforce Centurion venue for BAN vs SA 2nd Test (never Mumbai)
@@ -986,28 +974,6 @@ async def get_matches(state: Optional[str] = None):
                     m["min_overs_remaining"] = 0.0
                     m["overs_left_today"] = 0.0
                     m["total_match_overs_remaining"] = 0.0
-                elif m.get("id") == "m_nz_ind_2026_test_2":
-                    m["format"] = "TEST"
-                    m["state"] = "UPCOMING_NO_SQUAD"
-                    m["is_completed"] = False
-                    m["is_stumps"] = False
-                    m["stumps_day"] = None
-                    m["stumps_label"] = None
-                    m["is_stopped"] = False
-                    m["stoppage_reason"] = None
-                    m["stoppage_label"] = None
-                    m["winning_team_id"] = None
-                    m["winning_team_name"] = None
-                    m["result_description"] = None
-                    m["match_status_text"] = "Scheduled 2nd Test at Seddon Park, Hamilton • Squads TBA"
-                    m["last_event_description"] = "Stage 1 Macro Prediction (NZ 50.5% vs IND 49.5%) • Seddon Park • Squads TBA"
-                    m["p_team_a"] = 50.5
-                    m["p_team_b"] = 49.5
-                    m["p_draw"] = 0.0
-                    m["current_score"] = 0
-                    m["current_wickets"] = 0
-                    m["current_overs"] = 0
-                    m["current_balls"] = 0
 
                 if m.get("format") == "TEST":
                     compute_test_overs_and_follow_on(m)
@@ -1144,19 +1110,31 @@ async def get_matches(state: Optional[str] = None):
                 if isinstance(raw_ssp, dict):
                     sc_1 = raw_ssp.get("scenario_team_1_bats_first") or {}
                     sc_2 = raw_ssp.get("scenario_team_2_bats_first") or {}
+                    s3_prog = (raw_ssp.get("four_stage_progression") or {}).get("stage_3_xi_toss") or {}
                     m["scenario_score_projections"] = {
                         "stage_name": raw_ssp.get("stage_name"),
                         "live_projection": raw_ssp.get("live_projection"),
                         "live_test_innings_progression": raw_ssp.get("live_test_innings_progression"),
+                        "stage_3_dual_first_innings": {
+                            "team_a_par": s3_prog.get("team_a_par"),
+                            "team_a_range": s3_prog.get("team_a_range"),
+                            "team_b_par": s3_prog.get("team_b_par"),
+                            "team_b_range": s3_prog.get("team_b_range"),
+                            "toss_confirmed": s3_prog.get("toss_confirmed"),
+                        } if s3_prog else None,
                         "scenario_team_1_bats_first": {
                             "innings_1_par": sc_1.get("innings_1_par"),
                             "projected_1st_innings_score": sc_1.get("projected_1st_innings_score"),
                             "probable_score": sc_1.get("probable_score"),
+                            "score_range": sc_1.get("score_range"),
+                            "methodology": sc_1.get("methodology"),
                         },
                         "scenario_team_2_bats_first": {
                             "innings_1_par": sc_2.get("innings_1_par"),
                             "projected_1st_innings_score": sc_2.get("projected_1st_innings_score"),
                             "probable_score": sc_2.get("probable_score"),
+                            "score_range": sc_2.get("score_range"),
+                            "methodology": sc_2.get("methodology"),
                         }
                     }
 
@@ -1648,12 +1626,22 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
                         p["is_out"] = 0
                         p["dismissal"] = "Yet to Bat"
 
+        # Detect if 11+ confirmed XI players already arrived from CricAPI even before toss locks
+        raw_conf_a = sum(1 for r in squad_rows if r.get("team_id") == team_a_code and r.get("is_confirmed_xi"))
+        raw_conf_b = sum(1 for r in squad_rows if r.get("team_id") == team_b_code and r.get("is_confirmed_xi"))
+        has_raw_confirmed_11v11 = (raw_conf_a >= 11 and raw_conf_b >= 11)
+
         # Enrich squad players with player strengths & 5-way pitch affinity calibrated to LIVE DETECTED PITCH
         enriched_squad_rows = []
         for p in squad_rows:
             p_dossier = get_player_dossier(p.get("player_id", ""), p.get("role", "batter"))
             affinity_mult, affinity_reason = calculate_player_venue_affinity(p, v_profile, live_pitch_type=detected_pitch)
             adaptability_data = compute_player_5way_pitch_adaptability(p)
+            p_conf_flag = (
+                (1 if p.get("is_confirmed_xi") else 0)
+                if (has_raw_confirmed_11v11 or match_data.get("state") not in ("UPCOMING_NO_SQUAD", "SQUAD_ANNOUNCED"))
+                else 0
+            )
             p_enriched = {
                 **p_dossier,
                 **p,
@@ -1668,11 +1656,9 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
                 "recency_weight_applied": adaptability_data.get("recency_weight_applied", 0.65),
                 "favored_pitch": adaptability_data["favored_pitch"],
                 "dominant_score": adaptability_data["dominant_score"],
-                "is_confirmed_xi": 0 if match_data.get("state") in ("UPCOMING_NO_SQUAD", "SQUAD_ANNOUNCED") else (1 if p.get("is_confirmed_xi") else 0),
+                "is_confirmed_xi": p_conf_flag,
                 "sub_status": (
-                    "PROBABLE_XI" if p.get("is_probable_xi") else "BENCH_RESERVE"
-                ) if match_data.get("state") in ("UPCOMING_NO_SQUAD", "SQUAD_ANNOUNCED") else (
-                    p.get("sub_status") or ("CONFIRMED_XI" if p.get("is_confirmed_xi") else ("PROBABLE_XI" if p.get("is_probable_xi") else "BENCH_RESERVE"))
+                    "CONFIRMED_XI" if p_conf_flag else ("PROBABLE_XI" if p.get("is_probable_xi") else "BENCH_RESERVE")
                 ),
                 "is_concussion_sub": p.get("is_concussion_sub", 0),
                 "is_subbed_out": p.get("is_subbed_out", 0)
@@ -1855,14 +1841,22 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
             "history": substitution_history
         }
 
-        # Stage 3 XI & Toss Locked Comprehensive Intelligence (12 Pillars, calibrated to 98.0% pre-match)
+        # Stage 3 XI & Toss Locked (or Pre-Toss Confirmed 11v11 + Venue) Comprehensive Intelligence
         stage3_intelligence = None
-        if match_data["state"] == "XI_AND_TOSS_LOCKED":
+        run_stage3_now = (
+            match_data["state"] == "XI_AND_TOSS_LOCKED"
+            or (
+                has_raw_confirmed_11v11
+                and m_format in ("ODI", "T20I")
+                and match_data["state"] not in ("LIVE_BALL_BY_BALL", "COMPLETED")
+            )
+        )
+        if run_stage3_now:
             stage3_intelligence = calculate_stage3_xi_locked(
                 confirmed_xi_a=a_xi,
                 confirmed_xi_b=b_xi,
-                toss_winner_id=match_data.get("toss_winner_id") or match_data.get("team_a_id"),
-                toss_decision=match_data.get("toss_decision") or "bat",
+                toss_winner_id=match_data.get("toss_winner_id") or "",
+                toss_decision=match_data.get("toss_decision") or "",
                 venue=v_profile,
                 team_a_id=match_data.get("team_a_id"),
                 p2_squad_prob_a=float(match_data.get("p_team_a") or 50.0),
@@ -1873,6 +1867,9 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
                 match_date=match_data.get("scheduled_start")
             )
             match_data["stage3_intelligence"] = stage3_intelligence
+            match_data["stage3_ready"] = True
+            match_data["toss_confirmed"] = bool(match_data.get("toss_winner_id") and match_data.get("toss_decision"))
+            match_data["dual_first_innings_scenarios"] = stage3_intelligence.get("dual_first_innings_scenarios")
             match_data["p_team_a"] = stage3_intelligence["p_team_a"]
             match_data["p_team_b"] = stage3_intelligence["p_team_b"]
             match_data["predictive_power_pct"] = stage3_intelligence["predictive_power_pct"]
@@ -2150,15 +2147,18 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
 
         match_data["pitch_type"] = detected_pitch
 
-        # Stage 3 (XI & Toss Locked) Score & Probability Synchronization
-        if match_data.get("state") == "XI_AND_TOSS_LOCKED":
+        # Stage 3 (XI & Toss Locked / Confirmed 11+Venue) Score & Probability Synchronization
+        if match_data.get("state") == "XI_AND_TOSS_LOCKED" or match_data.get("stage3_ready"):
             tw_id = match_data.get("toss_winner_id")
-            td_val = match_data.get("toss_decision", "bat")
+            td_val = match_data.get("toss_decision")
             t_a_id = match_data.get("team_a_id")
             t_b_id = match_data.get("team_b_id")
-            team_1st_bat = (t_a_id if td_val == "bat" else t_b_id) if tw_id == t_a_id else (t_b_id if td_val == "bat" else t_a_id)
+            if tw_id and td_val:
+                team_1st_bat = (t_a_id if td_val == "bat" else t_b_id) if tw_id == t_a_id else (t_b_id if td_val == "bat" else t_a_id)
+            else:
+                team_1st_bat = match_data.get("innings_1_team_id") or t_a_id
 
-            if score_projections:
+            if score_projections and not (match_data.get("stage3_intelligence") or {}).get("dual_first_innings_scenarios"):
                 if team_1st_bat == t_a_id and score_projections.get("scenario_team_1_bats_first"):
                     active_par = score_projections["scenario_team_1_bats_first"]["projected_1st_innings_score"]
                 elif score_projections.get("scenario_team_2_bats_first"):
@@ -2167,8 +2167,10 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
                     active_par = match_data.get("par_score_projected", 180)
 
                 match_data["par_score_projected"] = active_par
-                match_data["par_score_min"] = int(active_par - 18)
-                match_data["par_score_max"] = int(active_par + 18)
+                if not match_data.get("par_score_min"):
+                    match_data["par_score_min"] = int(active_par - (65 if m_format == "ODI" else 38))
+                if not match_data.get("par_score_max"):
+                    match_data["par_score_max"] = int(active_par + (65 if m_format == "ODI" else 38))
 
             if not match_data.get("p0_pre_match"):
                 match_data["p0_pre_match"] = match_data["p_team_a"]
@@ -2321,28 +2323,6 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
             match_data["min_overs_remaining"] = 0.0
             match_data["overs_left_today"] = 0.0
             match_data["total_match_overs_remaining"] = 0.0
-        elif match_id == "m_nz_ind_2026_test_2":
-            match_data["format"] = "TEST"
-            match_data["state"] = "UPCOMING_NO_SQUAD"
-            match_data["is_completed"] = False
-            match_data["is_stumps"] = False
-            match_data["stumps_day"] = None
-            match_data["stumps_label"] = None
-            match_data["is_stopped"] = False
-            match_data["stoppage_reason"] = None
-            match_data["stoppage_label"] = None
-            match_data["winning_team_id"] = None
-            match_data["winning_team_name"] = None
-            match_data["result_description"] = None
-            match_data["match_status_text"] = "Scheduled 2nd Test at Seddon Park, Hamilton • Squads TBA"
-            match_data["last_event_description"] = "Stage 1 Macro Prediction (NZ 50.5% vs IND 49.5%) • Seddon Park • Squads TBA"
-            match_data["p_team_a"] = 50.5
-            match_data["p_team_b"] = 49.5
-            match_data["p_draw"] = 0.0
-            match_data["current_score"] = 0
-            match_data["current_wickets"] = 0
-            match_data["current_overs"] = 0
-            match_data["current_balls"] = 0
         elif match_id == "m_aus_eng_2026_t20_2":
             match_data["state"] = "UPCOMING_NO_SQUAD"
             match_data["p_team_a"] = 57.1
@@ -3284,6 +3264,20 @@ async def sync_cricapi_live_to_matches():
         return {"status": "success", "updated_matches": updated, "live_count": len(live_matches)}
     finally:
         await conn.close()
+
+
+@app.post("/api/cricapi/sync-schedule-xi")
+async def sync_cricapi_schedule_xi(cricapi_id: Optional[str] = None, force: bool = False):
+    """
+    Syncs CricAPI schedule, venue, and confirmed Playing 11 into SQLite, computing Stage 3
+    dual 1st-innings projections (if Country A bats 1st vs if Country B bats 1st).
+    """
+    updated = await ingestion_manager.sync_cricapi_schedule_xi_and_venue(
+        cricapi_match_id=cricapi_id, force=force
+    )
+    if updated:
+        invalidate_match_response_cache(None)
+    return {"status": "success", "updated_matches": updated, "count": len(updated)}
 
 
 # =====================================================================

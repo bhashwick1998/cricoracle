@@ -1293,7 +1293,13 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                 <>
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-cyan-950/80 text-cyan-400 border border-cyan-800 mb-2">
                     <Clock className="w-3.5 h-3.5 text-cyan-400" />
-                    {match.state === "SQUAD_ANNOUNCED" ? "GEAR 2A • SQUAD ANNOUNCED" : match.state === "XI_AND_TOSS_LOCKED" ? "GEAR 2B • XI & TOSS LOCKED" : "GEAR 1 • UPCOMING FIXTURE"}
+                    {(match as any).stage3_ready && match.state !== "XI_AND_TOSS_LOCKED"
+                      ? "STAGE 3 • XI & VENUE LOCKED (PRE-TOSS)"
+                      : match.state === "SQUAD_ANNOUNCED"
+                        ? "GEAR 2A • SQUAD ANNOUNCED"
+                        : match.state === "XI_AND_TOSS_LOCKED"
+                          ? "GEAR 2B • XI & TOSS LOCKED"
+                          : "GEAR 1 • UPCOMING FIXTURE"}
                   </div>
                   <div className="text-xl sm:text-2xl font-black text-white tracking-tight">
                     {formatDateTime(match.scheduled_start).dateStr}
@@ -1301,9 +1307,21 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                   <div className="text-xs font-semibold text-cyan-300 mt-0.5">
                     {formatKickoffCountdown(match.scheduled_start)} • {formatDateTime(match.scheduled_start).timeStr}
                   </div>
-                  <div className="text-xs font-medium text-slate-400 mt-1 font-mono-numbers">
-                    Projected 1st Innings Par: <span className="text-white font-bold">~{match.par_score_projected || (match.format === "TEST" ? 255 : match.format === "ODI" ? 285 : 185)}</span> runs
-                  </div>
+                  {score_projections?.four_stage_progression?.stage_3_xi_toss?.team_a_par && score_projections?.four_stage_progression?.stage_3_xi_toss?.team_b_par ? (
+                    <div className="text-xs font-medium text-slate-300 mt-1.5 font-mono-numbers flex items-center justify-center flex-wrap gap-2">
+                      <span className="px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-800/80 text-cyan-300 font-bold">
+                        {metaA.short} 1st Inn: ~{score_projections.four_stage_progression.stage_3_xi_toss.team_a_par}
+                      </span>
+                      <span className="text-slate-500">vs</span>
+                      <span className="px-2 py-0.5 rounded bg-amber-950/80 border border-amber-800/80 text-amber-300 font-bold">
+                        {metaB.short} 1st Inn: ~{score_projections.four_stage_progression.stage_3_xi_toss.team_b_par}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-xs font-medium text-slate-400 mt-1 font-mono-numbers">
+                      Projected 1st Innings Par: <span className="text-white font-bold">~{match.par_score_projected || (match.format === "TEST" ? 255 : match.format === "ODI" ? 285 : 185)}</span> runs
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -2019,8 +2037,10 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     {
                       id: "stage_3_xi_toss",
                       num: "3",
-                      title: "Stage 3: XI & Toss Locked",
-                      badge: "CricketData.org Confirmed XI",
+                      title: score_projections.four_stage_progression.stage_3_xi_toss?.stage_name || "Stage 3: XI & Toss Locked",
+                      badge: score_projections.four_stage_progression.stage_3_xi_toss?.toss_confirmed === false
+                        ? "Pre-Toss Dual XI Scenarios • CricketData.org"
+                        : "6-Signal Calibrated • CricketData.org XI",
                       data: score_projections.four_stage_progression.stage_3_xi_toss,
                     },
                     {
@@ -2671,7 +2691,18 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                             </div>
                           </div>
                         </div>
-                        <p className="text-[11px] text-slate-400 italic pt-2 border-t border-slate-800/80">
+                        {(score_projections.four_stage_progression?.stage_3_xi_toss?.signals_a || score_projections.scenario_team_1_bats_first?.signals) && (() => {
+                          const sig = score_projections.four_stage_progression?.stage_3_xi_toss?.signals_a || score_projections.scenario_team_1_bats_first?.signals;
+                          return (
+                            <div className="mt-2 pt-2 border-t border-slate-800/60 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-300">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Pitch: {sig.dominant_pitch}</span>
+                              <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Ground-Pitch Par: {Math.round(sig.same_ground_pitch_par)}</span>
+                              <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">XI Adapt: {Math.round(sig.xi_bat_adapt)}</span>
+                              <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Duel Δ: {sig.duel_run_delta >= 0 ? "+" : ""}{sig.duel_run_delta}</span>
+                            </div>
+                          );
+                        })()}
+                        <p className="text-[11px] text-slate-400 italic pt-2 mt-2 border-t border-slate-800/80">
                           {score_projections.scenario_team_1_bats_first?.tactical_assessment}
                         </p>
                       </div>
@@ -2714,7 +2745,18 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                             </div>
                           </div>
                         </div>
-                        <p className="text-[11px] text-slate-400 italic pt-2 border-t border-slate-800/80">
+                        {(score_projections.four_stage_progression?.stage_3_xi_toss?.signals_b || score_projections.scenario_team_2_bats_first?.signals) && (() => {
+                          const sig = score_projections.four_stage_progression?.stage_3_xi_toss?.signals_b || score_projections.scenario_team_2_bats_first?.signals;
+                          return (
+                            <div className="mt-2 pt-2 border-t border-slate-800/60 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-300">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Pitch: {sig.dominant_pitch}</span>
+                              <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Ground-Pitch Par: {Math.round(sig.same_ground_pitch_par)}</span>
+                              <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">XI Adapt: {Math.round(sig.xi_bat_adapt)}</span>
+                              <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Duel Δ: {sig.duel_run_delta >= 0 ? "+" : ""}{sig.duel_run_delta}</span>
+                            </div>
+                          );
+                        })()}
+                        <p className="text-[11px] text-slate-400 italic pt-2 mt-2 border-t border-slate-800/80">
                           {score_projections.scenario_team_2_bats_first?.tactical_assessment}
                         </p>
                       </div>

@@ -1006,19 +1006,19 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                   })() : (
                     <>
                       <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-                        Probable 1st Innings Par
+                        Stage 3 • Probable 1st Innings Par
                       </span>
                       <div className="text-xs font-black text-white font-mono-numbers">
                         <span className="text-cyan-300">
-                          {metaA.short}: ~{(match as any).scenario_score_projections?.scenario_team_1_bats_first?.innings_1_par || (match as any).scenario_score_projections?.scenario_team_1_bats_first?.projected_1st_innings_score || (match as any).scenario_score_projections?.scenario_team_1_bats_first?.probable_score || match.par_score_projected}
+                          {metaA.short} 1st: ~{(match as any).scenario_score_projections?.stage_3_dual_first_innings?.team_a_par || (match as any).scenario_score_projections?.scenario_team_1_bats_first?.innings_1_par || (match as any).scenario_score_projections?.scenario_team_1_bats_first?.projected_1st_innings_score || (match as any).scenario_score_projections?.scenario_team_1_bats_first?.probable_score || match.par_score_projected}
                         </span>
                         <span className="text-slate-500 mx-1">|</span>
                         <span className="text-amber-300">
-                          {metaB.short}: ~{(match as any).scenario_score_projections?.scenario_team_2_bats_first?.innings_1_par || (match as any).scenario_score_projections?.scenario_team_2_bats_first?.projected_1st_innings_score || (match as any).scenario_score_projections?.scenario_team_2_bats_first?.probable_score || match.par_score_projected}
+                          {metaB.short} 1st: ~{(match as any).scenario_score_projections?.stage_3_dual_first_innings?.team_b_par || (match as any).scenario_score_projections?.scenario_team_2_bats_first?.innings_1_par || (match as any).scenario_score_projections?.scenario_team_2_bats_first?.projected_1st_innings_score || (match as any).scenario_score_projections?.scenario_team_2_bats_first?.probable_score || match.par_score_projected}
                         </span>
                       </div>
                       <div className="text-[9px] text-slate-400 mt-0.5">
-                        Stage: {(match as any).scenario_score_projections?.stage_name?.split("(")[0] || (match.state === "SQUAD_ANNOUNCED" ? "Squad Announced" : "Pre-Squad Scheduled")}
+                        Stage: {(match as any).scenario_score_projections?.stage_name?.split("(")[0] || (match.state === "XI_AND_TOSS_LOCKED" ? "Stage 3: XI & Venue Locked" : match.state === "SQUAD_ANNOUNCED" ? "Squad Announced" : "Pre-Squad Scheduled")}
                       </div>
                     </>
                   )}

@@ -123,6 +123,8 @@ class CricApiSquadProvider:
         """
         try:
             start_dt = datetime.fromisoformat(scheduled_start_iso.replace("Z", "+00:00"))
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
             now_dt = datetime.now(timezone.utc)
             delta = (start_dt - now_dt).total_seconds() / 60.0
 
@@ -367,13 +369,27 @@ class CricApiSquadProvider:
                 return vid
         return None
 
-    def fetch_match_toss_and_venue(self, cricapi_match_id: str) -> Dict[str, Any]:
+    def fetch_match_toss_and_venue(self, cricapi_match_id: str, force: bool = False) -> Dict[str, Any]:
         """
         Fetches official pre-match toss details and authentic venue from CricketData.org (/v1/match_info).
-        Detects toss winner and decision (bat/field) 30-45 minutes before match goes live.
+        Caches venue/status responses with a 5-minute TTL (10 minutes once toss is already locked)
+        so polling conserves CricAPI daily credits.
         """
         if not cricapi_match_id:
             return {"status": "error", "reason": "No match ID provided"}
+
+        cache_map = getattr(self, "_cached_match_info", None)
+        if cache_map is None:
+            cache_map = {}
+            self._cached_match_info = cache_map
+        cached = cache_map.get(cricapi_match_id)
+        if not force and cached:
+            ttl = 600.0 if (cached.get("toss_winner") and cached.get("venue_name")) else 300.0
+            if (time.time() - cached.get("_ts", 0.0)) < ttl:
+                return cached
+
+        if not self._check_and_increment_quota():
+            return cached or {"status": "error", "reason": "Daily API quota guard reached"}
 
         active_k = self.get_active_api_key()
         url = f"https://api.cricapi.com/v1/match_info?apikey={active_k}&id={cricapi_match_id}"
@@ -402,17 +418,22 @@ class CricApiSquadProvider:
                 elif any(k in st_low for k in ["opt to bowl", "opt to field", "chose to bowl", "chose to field", "elected to bowl", "bowl first"]):
                     toss_choice = "bowl"
 
-            return {
+            res_obj = {
                 "status": "success",
                 "cricapi_match_id": cricapi_match_id,
+                "match_name": data.get("name", ""),
+                "match_type": data.get("matchType", ""),
                 "toss_winner": toss_winner,
                 "toss_choice": toss_choice,
                 "venue_name": venue_str,
                 "venue_id": resolved_venue_id,
                 "match_status": status_str,
                 "teams": data.get("teams", []),
-                "team_info": data.get("teamInfo", [])
+                "team_info": data.get("teamInfo", []),
+                "_ts": time.time(),
             }
+            cache_map[cricapi_match_id] = res_obj
+            return res_obj
         except Exception as e:
             logger.error(f"Error fetching match toss/venue from CricAPI for {cricapi_match_id}: {e}")
             return {"status": "error", "reason": str(e)}
@@ -608,16 +629,25 @@ class CricApiSquadProvider:
                         })
                         continue
 
-                    if ms == "fixture" or any(k in st_low for k in ("starts at", "match yet to begin", "toss at")):
+                    raw_t1s = (m.get("t1s") or "").strip()
+                    raw_t2s = (m.get("t2s") or "").strip()
+                    has_score_text = bool(raw_t1s or raw_t2s)
+                    live_status_kws = (
+                        "need ", "opt to ", "won the toss", "day 1", "day 2", "day 3", "day 4", "day 5",
+                        "trail by", "lead by", "stumps", "session", "rain", "wet outfield",
+                        "lunch", "tea", "drinks", "innings break"
+                    )
+                    has_live_kw = any(k in st_low for k in live_status_kws)
+
+                    if any(k in st_low for k in ("starts at", "match yet to begin", "toss at")) and not has_score_text:
+                        continue
+                    if ms == "fixture" and not has_score_text and not has_live_kw:
                         continue
 
                     is_live = bool(
                         ms == "live"
-                        or any(k in st_low for k in (
-                            "need ", "opt to ", "day 1", "day 2", "day 3", "day 4", "day 5",
-                            "trail by", "lead by", "stumps", "session", "rain", "wet outfield",
-                            "lunch", "tea", "drinks", "innings break"
-                        ))
+                        or has_score_text
+                        or has_live_kw
                     )
                     if is_live:
                         t1_score = self.parse_score_string(m.get("t1s", ""))
@@ -739,14 +769,18 @@ class CricApiSquadProvider:
             v_id = "wellington"
         else:
             venue_ids = [r[0] for r in venue_rows]
-            ser_low = str(m.get("series_name") or "").lower()
-            v_id = next(
-                (r[0] for r in venue_rows if r[2] and str(r[2]).lower() in ser_low),
-                None,
-            )
-            if not v_id:
-                candidate = home_venues.get(c1) or home_venues.get(c2)
-                v_id = candidate if candidate in venue_ids else venue_ids[0]
+            explicit_vid = m.get("venue_id")
+            if explicit_vid and explicit_vid in venue_ids:
+                v_id = explicit_vid
+            else:
+                ser_low = str(m.get("series_name") or "").lower()
+                v_id = next(
+                    (r[0] for r in venue_rows if r[2] and str(r[2]).lower() in ser_low),
+                    None,
+                )
+                if not v_id:
+                    candidate = home_venues.get(c1) or home_venues.get(c2)
+                    v_id = candidate if candidate in venue_ids else venue_ids[0]
 
         series_name = m.get("series_name") or f"{c1} vs {c2} {fmt}"
         scheduled = m.get("date_time_gmt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -811,14 +845,33 @@ class CricApiSquadProvider:
 
             mt_low = str(m.get("match_type") or "").strip().lower()
             ser_low = str(m.get("series_name") or "").strip().lower()
-            if "test" in mt_low or "test" in ser_low:
-                fmt = "TEST"
-            elif "t20" in mt_low or "t20" in ser_low:
-                fmt = "T20I"
-            else:
-                fmt = "ODI"
-
             raw_cid = re.sub(r"[^a-zA-Z0-9_-]", "", str(m.get("cricapi_id") or ""))
+            is_real_uuid = bool(re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-", raw_cid, re.I))
+
+            # When cricScore omits matchType / venue / toss, consult cached /v1/match_info for real CricAPI fixtures
+            match_info_meta: Dict[str, Any] = {}
+            if is_real_uuid and (not mt_low or not any(k in ser_low for k in ("test", "t20", "odi", "one-day"))):
+                match_info_meta = self.fetch_match_toss_and_venue(raw_cid) or {}
+            elif is_real_uuid:
+                cached_mi = getattr(self, "_cached_match_info", {}).get(raw_cid)
+                if cached_mi:
+                    match_info_meta = cached_mi
+
+            mi_name_low = str(match_info_meta.get("match_name") or "").lower()
+            mi_type_low = str(match_info_meta.get("match_type") or "").lower()
+            max_ov_seen = max(float(t1_sc.get("overs") or 0), float(t2_sc.get("overs") or 0))
+
+            if "test" in mt_low or "test" in mi_type_low or "test" in ser_low or "test" in mi_name_low or any(
+                k in st_low for k in ("day 1", "day 2", "day 3", "day 4", "day 5", "trail by", "lead by", "follow-on", "stumps", "session")
+            ) or max_ov_seen > 50.0:
+                fmt = "TEST"
+            elif "t20" in mt_low or "t20" in mi_type_low or "t20" in ser_low or "t20" in mi_name_low:
+                fmt = "T20I"
+            elif "odi" in mt_low or "odi" in mi_type_low or "odi" in ser_low or "one-day" in mi_name_low or "odi" in mi_name_low:
+                fmt = "ODI"
+            else:
+                fmt = "TEST" if "opt to " in st_low and max_ov_seen >= 50.0 else "ODI"
+
             cricapi_mid = (
                 f"m_cricapi_{c1.lower()}_{c2.lower()}_{raw_cid[:16]}"
                 if raw_cid else f"m_cricapi_{c1.lower()}_{c2.lower()}_{fmt.lower()}"
@@ -840,23 +893,42 @@ class CricApiSquadProvider:
                     continue
                 db_m = exact_dict
 
-            # 2. Match existing non-completed DB fixture for same team pair and format
-            if not db_m:
-                async with conn.execute("""
-                    SELECT * FROM matches
-                    WHERE ((team_a_id = ? AND team_b_id = ?) OR (team_a_id = ? AND team_b_id = ?))
-                      AND state != 'COMPLETED'
-                      AND UPPER(format) = ?
-                    ORDER BY CASE WHEN state = 'LIVE_BALL_BY_BALL' THEN 0 ELSE 1 END, scheduled_start ASC LIMIT 1
-                """, (c1, c2, c2, c1, fmt)) as cur:
-                    row = await cur.fetchone()
-                    if row:
-                        db_m = dict(row)
+            # 2. Prefer canonical existing non-completed DB fixture for same team pair and format
+            async with conn.execute("""
+                SELECT * FROM matches
+                WHERE ((team_a_id = ? AND team_b_id = ?) OR (team_a_id = ? AND team_b_id = ?))
+                  AND state != 'COMPLETED'
+                  AND UPPER(format) = ?
+                ORDER BY CASE WHEN id NOT LIKE 'm_cricapi_%' THEN 0 ELSE 1 END,
+                         CASE WHEN state = 'LIVE_BALL_BY_BALL' THEN 0 ELSE 1 END,
+                         scheduled_start ASC
+                LIMIT 1
+            """, (c1, c2, c2, c1, fmt)) as cur:
+                canon_row = await cur.fetchone()
+                if canon_row:
+                    db_m = dict(canon_row)
 
             # 3. Auto-insert brand-new live match from CricAPI so it is shown live
             if not db_m and not is_finished:
+                if is_real_uuid and not match_info_meta:
+                    match_info_meta = self.fetch_match_toss_and_venue(raw_cid) or {}
+                if match_info_meta.get("venue_id") and (match_info_meta.get("venue_name") or "").strip():
+                    v_id_mi = match_info_meta["venue_id"]
+                    v_nm_mi = match_info_meta.get("venue_name") or v_id_mi
+                    city_mi = v_nm_mi.split(",", 1)[1].strip() if "," in v_nm_mi else "International"
+                    await conn.execute(
+                        "INSERT OR IGNORE INTO venues (id, name, city, country, region_cluster, pitch_type) "
+                        "VALUES (?, ?, ?, 'International', 'other', 'balanced')",
+                        (v_id_mi, v_nm_mi, city_mi),
+                    )
+                    m = {**m, "venue_id": v_id_mi}
+                if match_info_meta.get("match_name"):
+                    m = {**m, "series_name": match_info_meta["match_name"]}
                 db_m = await self._ensure_and_insert_live_match(conn, m, c1, c2, fmt, cricapi_mid)
                 newly_created = bool(db_m)
+            elif db_m and is_real_uuid and (not db_m.get("toss_winner_id") or not match_info_meta):
+                if not match_info_meta:
+                    match_info_meta = self.fetch_match_toss_and_venue(raw_cid) or {}
 
             # --- Break-Aware API Hit Saving (only throttle already-live existing rows) ---
             if db_m and not newly_created and db_m.get("state") == "LIVE_BALL_BY_BALL" and self.is_match_in_break(status_text):
@@ -898,12 +970,14 @@ class CricApiSquadProvider:
                     w2 = int(t2_sc.get("wickets") or 0)
                     r1 = t1_sc.get("runs")
                     r2 = t2_sc.get("runs")
+                    has_t1 = bool((m.get("raw_t1s") or "").strip()) if "raw_t1s" in m else (r1 is not None)
+                    has_t2 = bool((m.get("raw_t2s") or "").strip()) if "raw_t2s" in m else (r2 is not None and (r2 > 0 or w1 >= 10))
 
                     # Determine how many innings have been completed from wickets
-                    t1_all_out = (w1 >= 10)
-                    t2_all_out = (w2 >= 10)
+                    t1_all_out = has_t1 and (w1 >= 10)
+                    t2_all_out = has_t2 and (w2 >= 10)
 
-                    if r1 is not None and r2 is not None and (r2 > 0 or t1_all_out):
+                    if has_t1 and has_t2 and ((r2 or 0) > 0 or t1_all_out):
                         # Both teams have batted → 2nd innings in progress
                         inn_val = 2
 
@@ -965,8 +1039,12 @@ class CricApiSquadProvider:
                     else:
                         # Only one team has batted → 1st innings
                         inn_val = 1
-                        bat_sc = t1_sc if r1 is not None else t2_sc
-                        bat_team = c1 if r1 is not None else c2
+                        if has_t1 or not has_t2:
+                            bat_sc = t1_sc
+                            bat_team = c1
+                        else:
+                            bat_sc = t2_sc
+                            bat_team = c2
                         inn_1_team, inn_1_sc = bat_team, bat_sc
                         inn_2_team, inn_2_sc = None, None
 
@@ -975,10 +1053,11 @@ class CricApiSquadProvider:
                     ovs = bat_sc["overs"] if bat_sc.get("overs") is not None else (db_m.get("current_overs") or 0)
                     balls = bat_sc["balls"] if bat_sc.get("balls") is not None else (db_m.get("current_balls") or 0)
 
-                    # Anti-score-regression guard: only compare within the SAME innings against this innings' prior score
+                    # Anti-score-regression guard: only compare within the SAME innings & batting team against prior score
                     prev_inn_score = db_m.get(f"innings_{inn_val}_score")
                     prev_inn_wkts = db_m.get(f"innings_{inn_val}_wickets")
-                    if inn_val == db_m.get("current_innings") and prev_inn_score is not None:
+                    prev_inn_team = db_m.get(f"innings_{inn_val}_team_id")
+                    if inn_val == db_m.get("current_innings") and prev_inn_score is not None and prev_inn_team in (None, bat_team):
                         if runs < int(prev_inn_score):
                             runs = int(prev_inn_score)
                             wkts = int(prev_inn_wkts or 0)
@@ -1004,16 +1083,31 @@ class CricApiSquadProvider:
                             i1_wkts = 10
                             logger.info(f"Auto-corrected 1st innings wickets to 10 (all out) for {mid} in Test match.")
 
-                    i2_team = inn_2_team or db_m.get("innings_2_team_id")
-                    i2_runs = inn_2_sc.get("runs") if inn_2_sc else db_m.get("innings_2_score")
-                    i2_wkts = inn_2_sc.get("wickets") if inn_2_sc else db_m.get("innings_2_wickets")
-                    i2_ovs = inn_2_sc.get("overs") if inn_2_sc else db_m.get("innings_2_overs")
+                    if inn_val == 1:
+                        i2_team, i2_runs, i2_wkts, i2_ovs = None, None, None, None
+                    else:
+                        i2_team = inn_2_team or db_m.get("innings_2_team_id")
+                        i2_runs = inn_2_sc.get("runs") if inn_2_sc else db_m.get("innings_2_score")
+                        i2_wkts = inn_2_sc.get("wickets") if inn_2_sc else db_m.get("innings_2_wickets")
+                        i2_ovs = inn_2_sc.get("overs") if inn_2_sc else db_m.get("innings_2_overs")
+
+                    # Apply verified venue, toss & format from match_info_meta when available
+                    mi_vid = match_info_meta.get("venue_id")
+                    mi_tw_raw = str(match_info_meta.get("toss_winner") or "").strip().lower()
+                    mi_tc_raw = str(match_info_meta.get("toss_choice") or "").strip().lower()
+                    mi_tw_code = None
+                    if mi_tw_raw:
+                        from ...engine.cricsheet_pitch_intelligence import normalize_team_code as _norm_tc
+                        tw_guess = _norm_tc(mi_tw_raw)
+                        if tw_guess in (db_m.get("team_a_id"), db_m.get("team_b_id")):
+                            mi_tw_code = tw_guess
+                    mi_tc_norm = "bat" if "bat" in mi_tc_raw else ("bowl" if ("bowl" in mi_tc_raw or "field" in mi_tc_raw) else None)
 
                     # Parse DLS, revised overs, rain delay, and bowler restrictions via CricApiMatchParser
                     ctx: MatchStateContext = parse_cricapi_match_state(
                         data=m,
                         match_id=mid,
-                        match_format=db_m.get("format")
+                        match_format=fmt or db_m.get("format")
                     )
 
                     tgt_runs = ctx.revised_target or ctx.target_runs or db_m.get("target_runs")
@@ -1024,6 +1118,10 @@ class CricApiSquadProvider:
                     await conn.execute("""
                         UPDATE matches SET
                             state = 'LIVE_BALL_BY_BALL',
+                            format = COALESCE(?, format),
+                            venue_id = COALESCE(?, venue_id),
+                            toss_winner_id = COALESCE(?, toss_winner_id),
+                            toss_decision = COALESCE(?, toss_decision),
                             current_innings = ?,
                             current_score = ?,
                             current_wickets = ?,
@@ -1048,6 +1146,7 @@ class CricApiSquadProvider:
                             innings_2_overs = ?
                         WHERE id = ?
                     """, (
+                        fmt, mi_vid, mi_tw_code, mi_tc_norm,
                         inn_val, runs, wkts, ovs, balls, tgt_runs, dls_tgt, ov_lost, weather_cond,
                         status_text, status_text, is_stumps, s_day, s_lbl,
                         i1_team, i1_runs, i1_wkts, i1_ovs,

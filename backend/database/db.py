@@ -155,23 +155,28 @@ async def init_db():
             WHERE id = 'm_nz_ind_2026_test_1'
         """)
 
-        # Ensure m_nz_ind_2026_test_2 is an upcoming fixture
+        # Repair corrupted 1st-innings/venue state on m_nz_ind_2026_test_2 if present, without forcing UPCOMING state
         await conn.execute("""
             UPDATE matches SET
-                state = 'UPCOMING_NO_SQUAD',
-                is_stumps = 0,
-                stumps_day = NULL,
-                stumps_label = NULL,
-                match_status_text = 'Scheduled 2nd Test at Seddon Park, Hamilton • Squads TBA',
-                last_event_description = 'Stage 1 Macro Prediction (NZ 50.5% vs IND 49.5%) • Seddon Park • Squads TBA',
-                p_team_a = 50.5,
-                p_team_b = 49.5,
-                p_draw = 0.0,
-                current_score = 0,
-                current_wickets = 0,
-                current_overs = 0,
-                current_balls = 0
+                venue_id = 'christchurch',
+                innings_1_team_id = COALESCE(innings_2_team_id, innings_1_team_id),
+                innings_1_score = innings_2_score,
+                innings_1_wickets = innings_2_wickets,
+                innings_1_overs = innings_2_overs,
+                current_innings = 1,
+                innings_2_team_id = NULL,
+                innings_2_score = NULL,
+                innings_2_wickets = NULL,
+                innings_2_overs = NULL
             WHERE id = 'm_nz_ind_2026_test_2'
+              AND innings_1_team_id = 'IND'
+              AND innings_1_score = 0
+              AND innings_2_team_id = 'NZ'
+              AND innings_2_score > 0
+        """)
+        await conn.execute("""
+            UPDATE matches SET venue_id = 'christchurch'
+            WHERE id = 'm_nz_ind_2026_test_2' AND venue_id = 'eden_park'
         """)
 
         # Ensure deliveries for m_nz_ind_2026_test_1 are complete up to over 44.6

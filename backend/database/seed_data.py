@@ -802,25 +802,6 @@ async def seed_database():
             WHERE id = 'm_nz_ind_2026_test_1'
         """)
 
-        # NZ vs IND 2nd Test - Upcoming Fixture
-        await conn.execute("""
-            UPDATE matches SET
-                state = 'UPCOMING_NO_SQUAD',
-                is_stumps = 0,
-                stumps_day = NULL,
-                stumps_label = NULL,
-                match_status_text = 'Scheduled 2nd Test at Seddon Park, Hamilton • Squads TBA',
-                last_event_description = 'Stage 1 Macro Prediction (NZ 50.5% vs IND 49.5%) • Seddon Park • Squads TBA',
-                p_team_a = 50.5,
-                p_team_b = 49.5,
-                p_draw = 0.0,
-                current_score = 0,
-                current_wickets = 0,
-                current_overs = 0,
-                current_balls = 0
-            WHERE id = 'm_nz_ind_2026_test_2'
-        """)
-
         # 6. Seed Official 15-Man Match Squads for all fixtures
         async with conn.execute("SELECT id, team_id, role FROM players ORDER BY id") as p_cur:
             all_players = [dict(r) for r in await p_cur.fetchall()]

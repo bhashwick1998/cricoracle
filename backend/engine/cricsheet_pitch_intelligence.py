@@ -46,6 +46,14 @@ def canonicalize_pitch_type(pitch: str) -> str:
         return "flat"
     if p in ["balanced", "seam", "sporting", "two_paced", "neutral", "seam_/_green", "green_/_seam", "pace"]:
         return "balanced"
+    if any(k in p for k in ("dust", "turn", "spin", "dry", "crumb")):
+        return "dusty"
+    if any(k in p for k in ("green", "grass", "lush", "seamer")):
+        return "green"
+    if any(k in p for k in ("bounc", "pace_friendly", "steep", "hard")):
+        return "bouncy"
+    if any(k in p for k in ("flat", "road", "belter", "paradise", "high_scor")):
+        return "flat"
     return "balanced"
 
 
