@@ -57,13 +57,16 @@ def _sample_xi(prefix: str, team: str):
 class TestStage3ScoreProjection(unittest.TestCase):
     def test_calibrated_priors_loaded_and_constrained(self):
         priors = load_stage3_calibrated_priors()
-        for fmt in ("ODI", "T20I"):
+        for fmt in ("ODI", "T20I", "TEST"):
             self.assertIn(fmt, priors)
             gp = priors[fmt]["global_pitch_pars"]
             for pitch in CANONICAL_PITCHES:
                 self.assertIn(pitch, gp)
             self.assertGreater(gp["flat"], gp["green"])
-            self.assertGreater(gp["flat"], gp["dusty"])
+            if fmt != "TEST":
+                self.assertGreater(gp["flat"], gp["dusty"])
+            else:
+                self.assertGreater(gp["dusty"], gp["green"])
 
             w = priors[fmt]["score_model"]["weights"]
             self.assertGreater(w["same_ground_pitch_par"], 0.0)
@@ -334,6 +337,102 @@ class TestStage3ScoreProjection(unittest.TestCase):
             self.assertEqual(m_row["venue_id"], "wankhede")
             self.assertEqual(xi_cnt, 22)
             self.assertGreater(m_row["par_score_projected"], 120)
+            self.assertIsNotNone(m_row["stage3_frozen_json"])
+            self.assertIn("stage3_6signal_v3", m_row["stage3_frozen_json"])
+
+    def test_test_format_6_signal_stage3_and_stage4_freeze_invariance(self):
+        import json
+
+        xi_nz = _sample_xi("nz", "NZ")
+        xi_ind = _sample_xi("ind", "IND")
+        xi_nz[2]["name"] = "Kane Williamson"
+        xi_nz[7]["name"] = "Tim Southee"
+        xi_ind[2]["name"] = "Virat Kohli"
+        xi_ind[7]["name"] = "Jasprit Bumrah"
+
+        venue = {
+            "id": "hagley",
+            "name": "Hagley Oval",
+            "city": "Christchurch",
+            "country": "New Zealand",
+            "pitch_type": "green",
+            "dimensions_avg_boundary_m": 69.0,
+            "avg_first_innings_score_test": 318,
+        }
+        pre_match = {
+            "id": "m_nz_ind_test_freeze",
+            "format": "TEST",
+            "state": "XI_AND_TOSS_LOCKED",
+            "team_a_id": "NZ",
+            "team_b_id": "IND",
+            "venue_id": "hagley",
+            "venue_name": "Hagley Oval",
+            "venue_city": "Christchurch",
+            "toss_winner_id": "IND",
+            "toss_decision": "field",
+            "historic_ground_archetype": "green",
+            "scheduled_start": "2026-11-27T00:00:00Z",
+        }
+        out_pre = compute_match_scenario_score_projections(
+            match_data=pre_match,
+            team_a_squad=xi_nz,
+            team_b_squad=xi_ind,
+            venue_profile=venue,
+            live_pitch_type="green",
+        )
+        s3_pre = out_pre["four_stage_progression"]["stage_3_xi_toss"]
+        frozen = out_pre["stage3_frozen"]
+        self.assertIsNotNone(frozen)
+        self.assertGreater(s3_pre["team_a_par"], 220)
+        self.assertLess(s3_pre["team_a_par"], 480)
+        self.assertIsNotNone(s3_pre["signals_a"])
+        self.assertIsNotNone(s3_pre["signals_b"])
+        self.assertIsNotNone(s3_pre["four_innings_projection"])
+        self.assertEqual(out_pre["scenario_team_1_bats_first"]["methodology"], "stage3_6signal_calibrated")
+
+        # Simulate heavy Stage 4 live match drift (score collapses, pitch mutates to dusty, rain/players mutated)
+        xi_nz_live = [dict(p) for p in xi_nz]
+        xi_ind_live = [dict(p) for p in xi_ind]
+        xi_nz_live[2]["current_match_runs"] = 6
+        xi_nz_live[2]["is_out"] = 1
+        xi_ind_live[7]["wickets_taken"] = 4
+        live_match = {
+            **pre_match,
+            "state": "LIVE_BALL_BY_BALL",
+            "current_innings": 1,
+            "current_score": 48,
+            "current_wickets": 5,
+            "current_overs": 14,
+            "current_balls": 2,
+            "ground_pitch_archetype": "dusty",
+            "stage3_frozen_json": json.dumps(frozen),
+        }
+        out_live = compute_match_scenario_score_projections(
+            match_data=live_match,
+            team_a_squad=xi_nz_live,
+            team_b_squad=xi_ind_live,
+            venue_profile=venue,
+            weather_report={"condition": "Heavy Rain", "overs_lost": 12},
+            live_pitch_type="dusty",
+        )
+        from backend.engine.player_projections import parse_frozen_stage3_snapshot
+
+        parsed_roundtrip = parse_frozen_stage3_snapshot(json.dumps(frozen))
+        self.assertIsNotNone(parsed_roundtrip)
+        self.assertEqual(parsed_roundtrip["frozen_at"], frozen["frozen_at"])
+        self.assertEqual(out_live["stage3_frozen"]["frozen_at"], frozen["frozen_at"])
+
+        s3_live = out_live["four_stage_progression"]["stage_3_xi_toss"]
+        self.assertEqual(s3_live["team_a_par"], s3_pre["team_a_par"])
+        self.assertEqual(s3_live["team_b_par"], s3_pre["team_b_par"])
+        self.assertEqual(s3_live["team_a_range"], s3_pre["team_a_range"])
+        self.assertEqual(s3_live["team_b_range"], s3_pre["team_b_range"])
+        self.assertEqual(s3_live["signals_a"], s3_pre["signals_a"])
+        self.assertEqual(s3_live["signals_b"], s3_pre["signals_b"])
+        self.assertEqual(s3_live["pitch_type"], s3_pre["pitch_type"])
+        self.assertEqual(s3_live["four_innings_projection"], s3_pre["four_innings_projection"])
+        self.assertEqual(s3_live["top_performers"], s3_pre["top_performers"])
+        self.assertNotEqual(out_live["four_stage_progression"]["stage_4_live"]["active_team_projected_final"], s3_live["team_a_par"])
 
 
 if __name__ == "__main__":

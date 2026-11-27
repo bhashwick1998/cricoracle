@@ -88,6 +88,7 @@ async def init_db():
         await add_col("matches", "day_3_overs", "REAL DEFAULT NULL")
         await add_col("matches", "day_4_overs", "REAL DEFAULT NULL")
         await add_col("matches", "day_start_overs", "REAL DEFAULT NULL")
+        await add_col("matches", "stage3_frozen_json", "TEXT DEFAULT NULL")
         await add_col("matches", "innings_1_declared", "INTEGER DEFAULT 0")
         await add_col("matches", "innings_2_declared", "INTEGER DEFAULT 0")
         await add_col("matches", "innings_3_declared", "INTEGER DEFAULT 0")

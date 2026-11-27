@@ -2038,7 +2038,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                       id: "stage_3_xi_toss",
                       num: "3",
                       title: score_projections.four_stage_progression.stage_3_xi_toss?.stage_name || "Stage 3: XI & Toss Locked",
-                      badge: score_projections.four_stage_progression.stage_3_xi_toss?.toss_confirmed === false
+                      badge: (match.state === "LIVE_BALL_BY_BALL" || match.state === "COMPLETED")
+                        ? "Frozen Pre-Match • 6-Signal Calibrated"
+                        : score_projections.four_stage_progression.stage_3_xi_toss?.toss_confirmed === false
                         ? "Pre-Toss Dual XI Scenarios • CricketData.org"
                         : "6-Signal Calibrated • CricketData.org XI",
                       data: score_projections.four_stage_progression.stage_3_xi_toss,
@@ -2052,6 +2054,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     },
                   ].map((stg) => {
                     const isSelected = selectedStageTab === stg.id;
+                    const isLiveOrDone = match.state === "LIVE_BALL_BY_BALL" || match.state === "COMPLETED";
+                    const isFrozenStage3 = stg.id === "stage_3_xi_toss" && isLiveOrDone;
+                    const isStageActive = isLiveOrDone ? stg.id === "stage_4_live" : stg.id === "stage_3_xi_toss";
                     const d = stg.data;
                     if (!d) return null;
                     return (
@@ -2065,17 +2070,25 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                         } flex flex-col justify-between`}
                       >
                         <div>
-                          <div className="flex items-center justify-between text-xs mb-2">
+                          <div className="flex items-center justify-between text-xs mb-2 gap-1.5">
                             <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                              isSelected ? "bg-cyan-950 text-cyan-300 border border-cyan-700" : "bg-slate-800 text-slate-300"
+                              isFrozenStage3
+                                ? "bg-emerald-950/70 text-emerald-300 border border-emerald-800/70"
+                                : isSelected
+                                ? "bg-cyan-950 text-cyan-300 border border-cyan-700"
+                                : "bg-slate-800 text-slate-300"
                             }`}>
                               STAGE {stg.num} • {stg.badge}
                             </span>
-                            {isSelected && (
-                              <span className="text-[9px] font-mono font-bold text-cyan-400">
+                            {isFrozenStage3 ? (
+                              <span className="text-[9px] font-mono font-bold text-emerald-400 shrink-0">
+                                {isSelected ? "FROZEN • VIEWING" : "FROZEN PRE-MATCH"}
+                              </span>
+                            ) : isStageActive ? (
+                              <span className="text-[9px] font-mono font-bold text-cyan-400 shrink-0">
                                 ACTIVE
                               </span>
-                            )}
+                            ) : null}
                           </div>
 
                           <div className="text-sm font-black text-white mb-2">
@@ -2472,7 +2485,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     <div className="p-2.5 rounded-xl bg-slate-900 border border-cyan-700/80 flex items-center justify-between text-xs font-mono">
                       <span className="text-cyan-300 font-bold flex items-center gap-1.5">
                         <Layers className="w-3.5 h-3.5" />
-                        Viewing {selectedStageTab === "stage_3_xi_toss" ? "Stage 3: XI & Toss Locked" : "Stage 4: Live In-Play"} Expected Scores &amp; Matchups
+                        {selectedStageTab === "stage_3_xi_toss"
+                          ? "Viewing Frozen Pre-Match Stage 3 Baseline (Locked before 1st ball • immutable during Stage 4)"
+                          : "Viewing Stage 4: Live In-Play Expected Scores & Matchups"}
                       </span>
                       <button
                         onClick={() => setSelectedStageTab("stage_4_live")}
@@ -2607,8 +2622,19 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                                 </div>
                               </div>
                             </div>
-                            <p className="text-[11px] text-slate-400 italic pt-2 border-t border-slate-800/80">
-                              If {metaA.name} bats first, 1st Inn par is {fProj.scenario_a_team_1_bats_first.inn1_par}. {metaB.name} responds with {fProj.scenario_a_team_1_bats_first.inn2_par}. Day 4 wear brings 3rd Inn par to {fProj.scenario_a_team_1_bats_first.inn3_par}, setting a 4th Inn target of {fProj.scenario_a_team_1_bats_first.inn4_target} runs.
+                            {(score_projections.four_stage_progression?.stage_3_xi_toss?.signals_a || score_projections.scenario_team_1_bats_first?.signals) && (() => {
+                              const sig = score_projections.four_stage_progression?.stage_3_xi_toss?.signals_a || score_projections.scenario_team_1_bats_first?.signals;
+                              return (
+                                <div className="mt-2 pt-2 border-t border-slate-800/60 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-300">
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Pitch: {sig.dominant_pitch}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Ground-Pitch Par: {Math.round(sig.same_ground_pitch_par)}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">XI Adapt: {Math.round(sig.xi_bat_adapt)}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Duel Δ: {sig.duel_run_delta >= 0 ? "+" : ""}{sig.duel_run_delta}</span>
+                                </div>
+                              );
+                            })()}
+                            <p className="text-[11px] text-slate-400 italic pt-2 mt-2 border-t border-slate-800/80">
+                              If {metaA.name} bats first, 1st Inn par is {fProj.scenario_a_team_1_bats_first.inn1_par} ({fProj.innings_1?.team_a_range}). {metaB.name} responds with {fProj.scenario_a_team_1_bats_first.inn2_par}. Day 4 wear brings 3rd Inn par to {fProj.scenario_a_team_1_bats_first.inn3_par}, setting a 4th Inn target of {fProj.scenario_a_team_1_bats_first.inn4_target} runs.
                             </p>
                           </div>
 
@@ -2643,8 +2669,19 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                                 </div>
                               </div>
                             </div>
-                            <p className="text-[11px] text-slate-400 italic pt-2 border-t border-slate-800/80">
-                              If {metaB.name} bats first, 1st Inn par is {fProj.scenario_b_team_2_bats_first.inn1_par}. {metaA.name} responds with {fProj.scenario_b_team_2_bats_first.inn2_par}. Day 4 wear brings 3rd Inn par to {fProj.scenario_b_team_2_bats_first.inn3_par}, setting a 4th Inn target of {fProj.scenario_b_team_2_bats_first.inn4_target} runs.
+                            {(score_projections.four_stage_progression?.stage_3_xi_toss?.signals_b || score_projections.scenario_team_2_bats_first?.signals) && (() => {
+                              const sig = score_projections.four_stage_progression?.stage_3_xi_toss?.signals_b || score_projections.scenario_team_2_bats_first?.signals;
+                              return (
+                                <div className="mt-2 pt-2 border-t border-slate-800/60 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-300">
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Pitch: {sig.dominant_pitch}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Ground-Pitch Par: {Math.round(sig.same_ground_pitch_par)}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">XI Adapt: {Math.round(sig.xi_bat_adapt)}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">Duel Δ: {sig.duel_run_delta >= 0 ? "+" : ""}{sig.duel_run_delta}</span>
+                                </div>
+                              );
+                            })()}
+                            <p className="text-[11px] text-slate-400 italic pt-2 mt-2 border-t border-slate-800/80">
+                              If {metaB.name} bats first, 1st Inn par is {fProj.scenario_b_team_2_bats_first.inn1_par} ({fProj.innings_1?.team_b_range}). {metaA.name} responds with {fProj.scenario_b_team_2_bats_first.inn2_par}. Day 4 wear brings 3rd Inn par to {fProj.scenario_b_team_2_bats_first.inn3_par}, setting a 4th Inn target of {fProj.scenario_b_team_2_bats_first.inn4_target} runs.
                             </p>
                           </div>
                         </div>

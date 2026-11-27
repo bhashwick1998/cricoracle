@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS matches (
     follow_on_threshold INTEGER DEFAULT NULL,
     follow_on_avoided INTEGER DEFAULT 0,
     runs_needed_to_avoid_follow_on INTEGER DEFAULT NULL,
+    stage3_frozen_json TEXT DEFAULT NULL,
     FOREIGN KEY(team_a_id) REFERENCES teams(id),
     FOREIGN KEY(team_b_id) REFERENCES teams(id),
     FOREIGN KEY(venue_id) REFERENCES venues(id)

@@ -195,6 +195,10 @@ async def refresh_render_snapshots(refresh_stale_duels_limit: int = 20) -> Dict[
     lookup_merged: Dict[str, Any] = dict(_read_json_safe(LOOKUP_CACHE_PATH, {}))
 
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        # 0. Probe upstream Cricket Analytics /api/stats health before bulk sync
+        upstream_stats = await _fetch_json_with_retry(client, f"{RENDER_BASE_URL}/api/stats", retries=1)
+        summary["upstream_stats"] = upstream_stats
+
         # 1. Per-format Player Profiles & 5-Way Pitch Adaptability
         for fmt in RENDER_FORMATS:
             p_path = DATA_DIR / f"render_players_{fmt.lower()}.json"

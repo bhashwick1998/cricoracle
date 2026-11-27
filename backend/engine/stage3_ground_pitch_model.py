@@ -132,6 +132,82 @@ _NEUTRAL_BAT_SIM = {"player_id": "neutral_bat", "b_power": 55.0, "bw_power": 35.
 _NEUTRAL_BWL_SIM = {"player_id": "neutral_bwl", "b_power": 35.0, "bw_power": 55.0, "bowling_style": "RF"}
 
 
+_FMT_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "TEST": {
+        "render_fmt": "TEST",
+        "overall_mean": 318.0,
+        "global_pars": {"flat": 430.0, "bouncy": 310.0, "balanced": 325.0, "green": 240.0, "dusty": 285.0},
+        "k_ven": 2.8,
+        "k_vp": 2.2,
+        "k_smooth": 2.8,
+        "base_avg": 32.0,
+        "base_sr": 54.0,
+        "base_econ": 3.25,
+        "base_wkt": 0.55,
+        "base_rpo": 3.30,
+        "innings_overs": 95.0,
+        "me_bowl_econ_scale": 0.008,
+        "bowl_idx_econ_scale": 18.0,
+        "bowl_idx_wkt_scale": 12.0,
+        "default_wkt_prob": 0.032,
+        "default_resid_std": 95.0,
+        "clip": (110.0, 620.0),
+        "b_shift": 140.0,
+    },
+    "ODI": {
+        "render_fmt": "ODI",
+        "overall_mean": 268.0,
+        "global_pars": {"flat": 335.0, "bouncy": 262.0, "balanced": 240.0, "green": 195.0, "dusty": 220.0},
+        "k_ven": 3.5,
+        "k_vp": 3.0,
+        "k_smooth": 3.5,
+        "base_avg": 34.0,
+        "base_sr": 88.0,
+        "base_econ": 5.4,
+        "base_wkt": 0.72,
+        "base_rpo": 5.36,
+        "innings_overs": 50.0,
+        "me_bowl_econ_scale": 0.015,
+        "bowl_idx_econ_scale": 10.0,
+        "bowl_idx_wkt_scale": 8.0,
+        "default_wkt_prob": 0.022,
+        "default_resid_std": 45.0,
+        "clip": (150.0, 400.0),
+        "b_shift": 110.0,
+    },
+    "T20I": {
+        "render_fmt": "T20",
+        "overall_mean": 168.0,
+        "global_pars": {"flat": 198.0, "bouncy": 165.0, "balanced": 154.0, "green": 127.0, "dusty": 141.0},
+        "k_ven": 2.2,
+        "k_vp": 2.2,
+        "k_smooth": 2.8,
+        "base_avg": 24.0,
+        "base_sr": 132.0,
+        "base_econ": 8.1,
+        "base_wkt": 1.25,
+        "base_rpo": 8.20,
+        "innings_overs": 20.0,
+        "me_bowl_econ_scale": 0.03,
+        "bowl_idx_econ_scale": 6.0,
+        "bowl_idx_wkt_scale": 8.0,
+        "default_wkt_prob": 0.055,
+        "default_resid_std": 28.0,
+        "clip": (105.0, 250.0),
+        "b_shift": 70.0,
+    },
+}
+
+
+def _normalize_fmt_key(fmt: Optional[str]) -> str:
+    up = str(fmt or "").upper()
+    if "TEST" in up:
+        return "TEST"
+    if "ODI" in up:
+        return "ODI"
+    return "T20I"
+
+
 def invalidate_stage3_priors_cache() -> None:
     """Clears cached Stage 3 empirical priors so updated calibrations reload immediately."""
     global _PRIORS_MEM_CACHE
@@ -307,15 +383,12 @@ def resolve_stage3_pitch_distribution_and_pars(
     - Global format average score per pitch type
     - Weighted ground-pitch par & global pitch-type par
     """
-    fmt_key = "ODI" if "ODI" in str(fmt).upper() else "T20I"
+    fmt_key = _normalize_fmt_key(fmt)
+    cfg = _FMT_DEFAULTS[fmt_key]
     pr = priors if priors is not None else load_stage3_calibrated_priors()
     fmt_priors = pr.get(fmt_key, {})
 
-    default_global_pars = (
-        {"flat": 335.0, "bouncy": 262.0, "balanced": 240.0, "green": 195.0, "dusty": 220.0}
-        if fmt_key == "ODI"
-        else {"flat": 198.0, "bouncy": 165.0, "balanced": 154.0, "green": 127.0, "dusty": 141.0}
-    )
+    default_global_pars = cfg["global_pars"]
     global_pitch_pars = {
         p: float(fmt_priors.get("global_pitch_pars", {}).get(p, default_global_pars[p]))
         for p in CANONICAL_PITCHES
@@ -324,7 +397,7 @@ def resolve_stage3_pitch_distribution_and_pars(
         p: float(fmt_priors.get("global_pitch_probs", {}).get(p, 0.20))
         for p in CANONICAL_PITCHES
     }
-    overall_fmt_mean = float(fmt_priors.get("overall_mean", 268.0 if fmt_key == "ODI" else 168.0))
+    overall_fmt_mean = float(fmt_priors.get("overall_mean", cfg["overall_mean"]))
 
     v_key = normalize_venue_key(venue_name or venue_id)
     c_key = normalize_city_key(city)
@@ -352,7 +425,7 @@ def resolve_stage3_pitch_distribution_and_pars(
     host_par = float(host_means.get(host_code, overall_fmt_mean)) if host_code else overall_fmt_mean
 
     # Base ground par shrunk gently toward host/format prior preserving strong venue identity
-    k_ven = 3.5 if fmt_key == "ODI" else 2.2
+    k_ven = cfg["k_ven"]
     if v_entry and float(v_entry.get("w_eff") or v_entry.get("n") or 0) > 0:
         n_v = float(v_entry.get("n") or 0)
         w_eff = float(v_entry.get("w_eff") or n_v)
@@ -372,7 +445,7 @@ def resolve_stage3_pitch_distribution_and_pars(
         raw_means = {p: None for p in CANONICAL_PITCHES}
 
     # Same-ground pitch-type Empirical Bayes score means (60% ground identity + 40% pitch archetype anchor)
-    k_vp = 3.0 if fmt_key == "ODI" else 2.2
+    k_vp = cfg["k_vp"]
     ground_pitch_eb_pars: Dict[str, float] = {}
     for p in CANONICAL_PITCHES:
         anchor_p = 0.60 * ground_par + 0.40 * global_pitch_pars[p]
@@ -390,7 +463,7 @@ def resolve_stage3_pitch_distribution_and_pars(
         pitch_probs = {p: (1.0 if p == p_canon else 0.0) for p in CANONICAL_PITCHES}
         dominant_pitch = p_canon
     else:
-        k_smooth = 3.5 if fmt_key == "ODI" else 2.8
+        k_smooth = cfg["k_smooth"]
         pitch_probs = {
             p: (raw_counts[p] + k_smooth * global_pitch_probs[p]) / (tot_vw + k_smooth)
             for p in CANONICAL_PITCHES
@@ -592,8 +665,9 @@ def compute_stage3_xi_score_features(
     separated country batting/bowling ratings + pitch adaptability, Render/career player adaptability & form,
     and Render-backed 7×5 Duel Simulator matrix).
     """
-    fmt_key = "ODI" if "ODI" in str(fmt).upper() else "T20I"
-    render_fmt = "ODI" if fmt_key == "ODI" else "T20"
+    fmt_key = _normalize_fmt_key(fmt)
+    cfg = _FMT_DEFAULTS[fmt_key]
+    render_fmt = cfg["render_fmt"]
     pr = priors if priors is not None else load_stage3_calibrated_priors()
     fmt_priors = pr.get(fmt_key, {})
 
@@ -649,14 +723,14 @@ def compute_stage3_xi_score_features(
     train_bat_adapt = fmt_priors.get("player_bat_adapt", {})
     train_bowl_adapt = fmt_priors.get("player_bowl_adapt", {})
 
-    base_avg_fmt = 34.0 if fmt_key == "ODI" else 24.0
-    base_sr_fmt = 88.0 if fmt_key == "ODI" else 132.0
-    base_econ_fmt = 5.4 if fmt_key == "ODI" else 8.1
-    base_wkt_fmt = 0.72 if fmt_key == "ODI" else 1.25
+    base_avg_fmt = cfg["base_avg"]
+    base_sr_fmt = cfg["base_sr"]
+    base_econ_fmt = cfg["base_econ"]
+    base_wkt_fmt = cfg["base_wkt"]
 
     bench_avg = base_avg_fmt + me_bat * 0.12
-    bench_sr = base_sr_fmt + me_bat * 0.25
-    bench_econ = base_econ_fmt + me_bowl * (0.015 if fmt_key == "ODI" else 0.03)
+    bench_sr = base_sr_fmt + me_bat * (0.10 if fmt_key == "TEST" else 0.25)
+    bench_econ = base_econ_fmt + me_bowl * cfg["me_bowl_econ_scale"]
     bench_wkt = base_wkt_fmt
 
     bat_weights = [1.25, 1.25, 1.15, 1.10, 1.0, 0.90, 0.75]
@@ -762,10 +836,10 @@ def compute_stage3_xi_score_features(
     xi_bowl_strength = float(np.mean(bowl_power_vals)) if bowl_power_vals else 55.0
     xi_bowl_econ = float(np.mean(bowl_econ_vals)) if bowl_econ_vals else bench_econ
     xi_bowl_wkt = float(np.mean(bowl_wkt_vals)) if bowl_wkt_vals else bench_wkt
-    xi_bowl_index = (xi_bowl_econ - base_econ_fmt) * (10.0 if fmt_key == "ODI" else 6.0) - (xi_bowl_wkt - base_wkt_fmt) * 8.0
+    xi_bowl_index = (xi_bowl_econ - base_econ_fmt) * cfg["bowl_idx_econ_scale"] - (xi_bowl_wkt - base_wkt_fmt) * cfg["bowl_idx_wkt_scale"]
 
     # 6. Confirmed XI (7×5) Duel Simulator Matrix anchored to a neutral simulator baseline
-    base_fmt_rpo = 5.36 if fmt_key == "ODI" else 8.20
+    base_fmt_rpo = cfg["base_rpo"]
     neutral_sim = compute_duel_simulation(
         batter_attrs=_NEUTRAL_BAT_SIM,
         bowler_attrs=_NEUTRAL_BWL_SIM,
@@ -819,9 +893,9 @@ def compute_stage3_xi_score_features(
     else:
         mean_delta_rpo = 0.0
         duel_mean_rpo = base_fmt_rpo
-        duel_mean_wkt_prob = 0.022 if fmt_key == "ODI" else 0.055
+        duel_mean_wkt_prob = cfg["default_wkt_prob"]
 
-    innings_overs = 50.0 if fmt_key == "ODI" else 20.0
+    innings_overs = cfg["innings_overs"]
     duel_run_delta = mean_delta_rpo * (innings_overs * 0.45)
 
     mo = str(match_date or "")[5:7]
@@ -866,7 +940,8 @@ def predict_stage3_calibrated_score(
     Applies L2-regularized, sign-constrained weights (fitted strictly on 2018-2024 historical matches)
     to project 1st-innings score + calibrated 10th/90th percentile band.
     """
-    fmt_key = features["format"]
+    fmt_key = _normalize_fmt_key(features["format"])
+    cfg = _FMT_DEFAULTS[fmt_key]
     pr = priors if priors is not None else load_stage3_calibrated_priors()
     model = pr.get(fmt_key, {}).get("score_model", {})
 
@@ -902,7 +977,7 @@ def predict_stage3_calibrated_score(
         )
         for k, v in c_vals.items():
             raw_pred += float(w.get(k, 0.0)) * v
-        resid_std = float(model.get("residual_std", 45.0 if fmt_key == "ODI" else 28.0))
+        resid_std = float(model.get("residual_std", cfg["default_resid_std"]))
     else:
         raw_pred = (
             0.35 * sg_par
@@ -917,9 +992,9 @@ def predict_stage3_calibrated_score(
             + 0.25 * (features["bat_country_adapt"] - features["bowl_country_adapt"])
             + 0.25 * features["duel_run_delta"]
         )
-        resid_std = 45.0 if fmt_key == "ODI" else 28.0
+        resid_std = cfg["default_resid_std"]
 
-    clip_lo, clip_hi = (150.0, 400.0) if fmt_key == "ODI" else (105.0, 250.0)
+    clip_lo, clip_hi = cfg["clip"]
     proj = int(round(max(clip_lo, min(clip_hi, raw_pred))))
     band = int(round(1.2816 * resid_std))
     proj_min = int(round(max(clip_lo - 20.0, proj - band)))
@@ -949,12 +1024,12 @@ def compute_stage3_dual_first_innings_projections(
     - If Country B plays 1st inning
     ready immediately once CricAPI provides schedule + Playing 11 + venue (with or without toss).
     """
-    fmt_key = "ODI" if "ODI" in str(fmt).upper() else "T20I"
+    fmt_key = _normalize_fmt_key(fmt)
     code_a = normalize_team_code(team_a_id)
     code_b = normalize_team_code(team_b_id)
     toss_known = bool(toss_winner_id and toss_decision)
     toss_code = normalize_team_code(toss_winner_id) if toss_known else ""
-    b_shift = int(round((float(boundary_multiplier) - 1.0) * (110.0 if fmt_key == "ODI" else 70.0)))
+    b_shift = int(round((float(boundary_multiplier) - 1.0) * _FMT_DEFAULTS[fmt_key]["b_shift"]))
 
     def _run_side(bat_id: str, bat_code: str, bowl_id: str, b_xi: List[Dict[str, Any]], bw_xi: List[Dict[str, Any]]) -> Dict[str, Any]:
         feats = compute_stage3_xi_score_features(

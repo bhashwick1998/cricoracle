@@ -16,6 +16,7 @@ Calculates:
    - Top run scorer and top wicket-taker dynamically identified across all 3 stages
 """
 
+import json
 import math
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
@@ -1498,7 +1499,10 @@ def extract_stage_performers(
     is_live: bool,
     match_data: Dict[str, Any],
     weather_report: Optional[Dict[str, Any]] = None,
-    venue_profile: Optional[Dict[str, Any]] = None
+    venue_profile: Optional[Dict[str, Any]] = None,
+    pre_match_pitch: Optional[str] = None,
+    pre_team_a_players: Optional[List[Dict[str, Any]]] = None,
+    pre_team_b_players: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Computes authentic top run scorer and top wicket taker for both teams across all 4 stages:
@@ -1523,8 +1527,11 @@ def extract_stage_performers(
         cp["runs_conceded"] = 0
         return cp
 
-    team_a_clean = [clean_player_pre_match(p) for p in team_a_players]
-    team_b_clean = [clean_player_pre_match(p) for p in team_b_players]
+    pm_pitch = (pre_match_pitch or ground_arch or "balanced").lower()
+    src_a = pre_team_a_players if pre_team_a_players is not None else team_a_players
+    src_b = pre_team_b_players if pre_team_b_players is not None else team_b_players
+    team_a_clean = [clean_player_pre_match(p) for p in src_a]
+    team_b_clean = [clean_player_pre_match(p) for p in src_b]
 
     # Pre-match copy of match_data with current scores zeroed
     match_data_pre_match = {
@@ -1548,8 +1555,8 @@ def extract_stage_performers(
         match_data={**match_data_pre_match, "state": "UPCOMING_NO_SQUAD"},
         team_a_players=team_a_macro,
         team_b_players=team_b_macro,
-        venue_profile={"pitch_type": ground_arch},
-        live_pitch_type=ground_arch,
+        venue_profile={"pitch_type": pm_pitch},
+        live_pitch_type=pm_pitch,
         weather_report=None
     )
 
@@ -1558,19 +1565,19 @@ def extract_stage_performers(
         match_data={**match_data_pre_match, "state": "SQUAD_ANNOUNCED"},
         team_a_players=team_a_clean,
         team_b_players=team_b_clean,
-        venue_profile={"pitch_type": ground_arch},
-        live_pitch_type=ground_arch,
+        venue_profile={"pitch_type": pm_pitch},
+        live_pitch_type=pm_pitch,
         weather_report=None
     )
 
-    # Stage 3: Confirmed XI & Toss Locked
+    # Stage 3: Confirmed XI & Toss Locked (Strictly pre-match; immune to Stage 4 live weather/pitch drift)
     p3 = compute_player_runs_and_wickets_projections(
         match_data={**match_data_pre_match, "state": "XI_AND_TOSS_LOCKED"},
         team_a_players=team_a_clean,
         team_b_players=team_b_clean,
-        venue_profile={"pitch_type": ground_arch},
-        live_pitch_type=ground_arch,
-        weather_report=weather_report
+        venue_profile={"pitch_type": pm_pitch},
+        live_pitch_type=pm_pitch,
+        weather_report=None
     )
 
     # Stage 4: Live In-Play (Always evaluates real live scorecard state & actual dismissals)
@@ -2643,6 +2650,177 @@ def predict_live_innings_score_monte_carlo(
             "tension_hazard": tension_hazard
         }
 
+STAGE3_FROZEN_MODEL_VERSION = "stage3_6signal_v3"
+
+
+def _clean_prematch_xi(squad: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Returns deterministically ordered pre-match player dicts stripped of Stage 4 live scorecard telemetry."""
+    cleaned = []
+    for p in squad or []:
+        cp = dict(p)
+        cp["current_match_runs"] = 0
+        cp["balls_faced"] = 0
+        cp["fours"] = 0
+        cp["sixes"] = 0
+        cp["is_out"] = 0
+        cp["dismissal"] = None
+        cp["status"] = "PRE_MATCH"
+        cp["overs_bowled"] = 0.0
+        cp["maidens_bowled"] = 0
+        cp["runs_conceded"] = 0
+        cp["wickets_taken"] = 0
+        cleaned.append(cp)
+    cleaned.sort(key=lambda x: (int(x.get("batting_order") or 99), str(x.get("player_id") or x.get("id") or "")))
+    return cleaned
+
+
+def _resolve_prematch_pitch(match_data: Dict[str, Any], venue_profile: Dict[str, Any]) -> str:
+    """Resolves pre-match surface archetype strictly without Stage 4 live pitch drift."""
+    return str(
+        match_data.get("historic_ground_archetype")
+        or (venue_profile or {}).get("pitch_type")
+        or "balanced"
+    ).lower()
+
+
+def parse_frozen_stage3_snapshot(raw_val: Any) -> Optional[Dict[str, Any]]:
+    """Parses stored Stage 3 frozen baseline JSON if valid and matching current calibrated model version."""
+    if not raw_val:
+        return None
+    obj = raw_val
+    if isinstance(raw_val, str):
+        try:
+            obj = json.loads(raw_val)
+        except Exception:
+            return None
+    if not isinstance(obj, dict):
+        return None
+    if obj.get("model_version") != STAGE3_FROZEN_MODEL_VERSION:
+        return None
+    if obj.get("team_a_par") is None or obj.get("team_b_par") is None:
+        return None
+    return obj
+
+
+def build_frozen_stage3_snapshot(
+    match_data: Dict[str, Any],
+    team_a_squad: List[Dict[str, Any]],
+    team_b_squad: List[Dict[str, Any]],
+    venue_profile: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """
+    Returns an immutable pre-match Stage 3 snapshot (`stage3_frozen_json`).
+    Once play begins (`LIVE_BALL_BY_BALL` / `COMPLETED` / balls > 0), stored Stage 3 values
+    are returned verbatim and never recomputed from Stage 4 live telemetry.
+    """
+    existing = parse_frozen_stage3_snapshot(
+        match_data.get("stage3_frozen") or match_data.get("stage3_frozen_json")
+    )
+    state = str(match_data.get("state") or "").upper()
+    match_started = (
+        state in ("LIVE_BALL_BY_BALL", "COMPLETED")
+        or _safe_float(match_data.get("current_overs"), 0.0) > 0.0
+        or int(match_data.get("current_score") or 0) > 0
+    )
+    toss_known_now = bool(match_data.get("toss_winner_id") and match_data.get("toss_decision"))
+
+    if existing is not None:
+        if match_started:
+            return existing
+        if existing.get("toss_confirmed") or not toss_known_now:
+            return existing
+
+    fmt = str(match_data.get("format") or "T20I").upper()
+    if fmt not in ("ODI", "T20I", "TEST"):
+        return existing
+
+    pre_a = _clean_prematch_xi(team_a_squad)
+    pre_b = _clean_prematch_xi(team_b_squad)
+    conf_a = [p for p in pre_a if p.get("is_confirmed_xi")]
+    conf_b = [p for p in pre_b if p.get("is_confirmed_xi")]
+    xi_a = (conf_a or [p for p in pre_a if p.get("is_probable_xi")] or pre_a)[:11]
+    xi_b = (conf_b or [p for p in pre_b if p.get("is_probable_xi")] or pre_b)[:11]
+    if not xi_a or not xi_b:
+        return existing
+
+    team_a_id = match_data.get("team_a_id", "Team 1")
+    team_b_id = match_data.get("team_b_id", "Team 2")
+    avg_b_m = float((venue_profile or {}).get("dimensions_avg_boundary_m") or (venue_profile or {}).get("boundary_avg_m") or 70.0)
+    b_mult = max(0.86, min(1.16, 1.0 + (70.0 - avg_b_m) * 0.008))
+
+    try:
+        from .stage3_ground_pitch_model import compute_stage3_dual_first_innings_projections
+
+        dual_res = compute_stage3_dual_first_innings_projections(
+            fmt=fmt,
+            team_a_id=team_a_id,
+            team_b_id=team_b_id,
+            xi_a=xi_a,
+            xi_b=xi_b,
+            venue_name=(venue_profile or {}).get("name") or match_data.get("venue_name"),
+            city=(venue_profile or {}).get("city") or match_data.get("venue_city"),
+            venue_id=(venue_profile or {}).get("id") or match_data.get("venue_id"),
+            toss_winner_id=match_data.get("toss_winner_id"),
+            toss_decision=match_data.get("toss_decision"),
+            pitch_override=None,
+            boundary_multiplier=b_mult,
+            match_date=match_data.get("scheduled_start"),
+        )
+        side_a = dual_res["if_team_a_bats_first"]
+        side_b = dual_res["if_team_b_bats_first"]
+        f_a, f_b = side_a["features"], side_b["features"]
+        signals_a = {
+            "dominant_pitch": f_a["dominant_pitch"],
+            "same_ground_pitch_par": f_a["same_ground_pitch_par"],
+            "global_pitch_par": f_a["global_pitch_par"],
+            "country_adapt": f_a["bat_country_adapt"],
+            "xi_bat_adapt": f_a["xi_bat_adapt"],
+            "duel_run_delta": f_a["duel_run_delta"],
+        }
+        signals_b = {
+            "dominant_pitch": f_b["dominant_pitch"],
+            "same_ground_pitch_par": f_b["same_ground_pitch_par"],
+            "global_pitch_par": f_b["global_pitch_par"],
+            "country_adapt": f_b["bat_country_adapt"],
+            "xi_bat_adapt": f_b["xi_bat_adapt"],
+            "duel_run_delta": f_b["duel_run_delta"],
+        }
+        dual_scenarios = {
+            "format": fmt,
+            "toss_confirmed": bool(dual_res.get("toss_confirmed")),
+            "team_a_bats_first": {
+                **{k: v for k, v in side_a.items() if k != "features"},
+                "signals": signals_a,
+            },
+            "team_b_bats_first": {
+                **{k: v for k, v in side_b.items() if k != "features"},
+                "signals": signals_b,
+            },
+        }
+        from datetime import datetime, timezone
+        return {
+            "model_version": STAGE3_FROZEN_MODEL_VERSION,
+            "format": fmt,
+            "toss_confirmed": bool(dual_res.get("toss_confirmed")),
+            "dominant_pitch": f_a["dominant_pitch"],
+            "team_a_par": int(side_a["projected_score"]),
+            "team_a_min": int(side_a["min_score"]),
+            "team_a_max": int(side_a["max_score"]),
+            "team_a_range": str(side_a["score_range"]),
+            "team_b_par": int(side_b["projected_score"]),
+            "team_b_min": int(side_b["min_score"]),
+            "team_b_max": int(side_b["max_score"]),
+            "team_b_range": str(side_b["score_range"]),
+            "signals_a": signals_a,
+            "signals_b": signals_b,
+            "dual_first_innings_scenarios": dual_scenarios,
+            "locked_before_play": True,
+            "frozen_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+    except Exception:
+        return existing
+
+
 def compute_match_scenario_score_projections(
     match_data: Dict[str, Any],
     team_a_squad: List[Dict[str, Any]],
@@ -2684,6 +2862,9 @@ def compute_match_scenario_score_projections(
         venue_profile.get("pitch_type") or
         "flat"
     ).lower()
+    pre_match_pitch = _resolve_prematch_pitch(match_data, venue_profile)
+    pre_team_a_squad = _clean_prematch_xi(team_a_squad)
+    pre_team_b_squad = _clean_prematch_xi(team_b_squad)
 
     dew_factor = _safe_float(venue_profile.get("dew_factor", 0.25), 0.25)
     if fmt == "TEST":
@@ -2718,19 +2899,19 @@ def compute_match_scenario_score_projections(
     # ==========================================
     dew_chase_boost = dew_factor * (12.0 if fmt == "ODI" else (8.0 if fmt == "T20I" else 0.0))
 
-    # Asymmetric Attack-vs-Defense calculation:
+    # Asymmetric Attack-vs-Defense calculation (strictly pre-match pitch & cleaned squads, never Stage 4 live drift):
     # Scenario A: Team 1 Bats First facing Team 2 Bowlers
     inn1_a, details_a = calculate_asymmetric_1st_innings_par(
         batting_team_id=team_a_id,
         bowling_team_id=team_b_id,
         fmt=fmt,
-        ground_arch=ground_arch,
+        ground_arch=pre_match_pitch,
         base_par=base_par,
-        bat_squad=team_a_squad,
-        bowl_squad=team_b_squad,
+        bat_squad=pre_team_a_squad,
+        bowl_squad=pre_team_b_squad,
         venue_profile=venue_profile,
         match_data=match_data,
-        weather_report=weather_report
+        weather_report=None
     )
 
     # Scenario B: Team 2 Bats First facing Team 1 Bowlers
@@ -2738,20 +2919,20 @@ def compute_match_scenario_score_projections(
         batting_team_id=team_b_id,
         bowling_team_id=team_a_id,
         fmt=fmt,
-        ground_arch=ground_arch,
+        ground_arch=pre_match_pitch,
         base_par=base_par,
-        bat_squad=team_b_squad,
-        bowl_squad=team_a_squad,
+        bat_squad=pre_team_b_squad,
+        bowl_squad=pre_team_a_squad,
         venue_profile=venue_profile,
         match_data=match_data,
-        weather_report=weather_report
+        weather_report=None
     )
 
     if fmt == "TEST":
-        # Scenario A: Team 1 Bats First (4 Innings Total)
+        # Scenario A: Team 1 Bats First (4 Innings Total) - strictly pre_match_pitch
         inn2_b = round(inn1_b * 0.96)  # Team 2 response on Days 2-3
-        wear_inn3 = 0.74 if ground_arch == "spin heavy" else 0.78
-        wear_inn4 = 0.68 if ground_arch == "spin heavy" else 0.72
+        wear_inn3 = 0.74 if pre_match_pitch in ("spin heavy", "dusty", "turner") else 0.78
+        wear_inn4 = 0.68 if pre_match_pitch in ("spin heavy", "dusty", "turner") else 0.72
 
         inn3_a = round(inn1_a * wear_inn3)  # Day 4 wear
         inn4_target_b = max(80, inn1_a - inn2_b + inn3_a + 1)
@@ -2774,7 +2955,7 @@ def compute_match_scenario_score_projections(
             "innings_4_chase_exp": inn4_chase_b,
             "win_probability_batting_1st_pct": prob_a_bat_1st,
             "win_probability_chasing_pct": round(100.0 - prob_a_bat_1st, 1),
-            "tactical_assessment": f"Test Match 2-Innings Trajectory: If {team_a_id} bats first on {ground_arch} surface, 1st Inn par is {inn1_a}. {team_b_id} projected at {inn2_b} in response. Day 4 wear brings 3rd Inn par to {inn3_a}, setting a 4th Inn target of {inn4_target_b} runs."
+            "tactical_assessment": f"Test Match 2-Innings Trajectory: If {team_a_id} bats first on {pre_match_pitch} surface, 1st Inn par is {inn1_a}. {team_b_id} projected at {inn2_b} in response. Day 4 wear brings 3rd Inn par to {inn3_a}, setting a 4th Inn target of {inn4_target_b} runs."
         }
 
         # Scenario B: Team 2 Bats First (4 Innings Total)
@@ -2800,7 +2981,7 @@ def compute_match_scenario_score_projections(
             "innings_4_chase_exp": inn4_chase_a,
             "win_probability_batting_1st_pct": prob_b_bat_1st,
             "win_probability_chasing_pct": round(100.0 - prob_b_bat_1st, 1),
-            "tactical_assessment": f"Test Match 2-Innings Trajectory: If {team_b_id} bats first on {ground_arch} surface, 1st Inn par is {inn1_b}. {team_a_id} projected at {inn2_a} in response. Day 4 wear brings 3rd Inn par to {inn3_b}, setting a 4th Inn target of {inn4_target_a} runs."
+            "tactical_assessment": f"Test Match 2-Innings Trajectory: If {team_b_id} bats first on {pre_match_pitch} surface, 1st Inn par is {inn1_b}. {team_a_id} projected at {inn2_a} in response. Day 4 wear brings 3rd Inn par to {inn3_b}, setting a 4th Inn target of {inn4_target_a} runs."
         }
     else:
         # Limited Overs (ODI / T20I)
@@ -3571,63 +3752,60 @@ def compute_match_scenario_score_projections(
         }
 
     # -------------------------------------------------------------
-    # STAGE PERFORMERS & 4-STAGE SCORE PROGRESSION CALCULATION
+    # 4-STAGE SCORE PROGRESSION & FROZEN STAGE 3 BASELINE
     # -------------------------------------------------------------
-    match_data_for_stages = {
-        **match_data,
-        "scenario_score_projections": {
-            "live_projection": live_projection,
-            "scenario_team_1_bats_first": scenario_team_1,
-            "scenario_team_2_bats_first": scenario_team_2
-        }
-    }
-    stage_performers = extract_stage_performers(
-        team_a_players=team_a_squad,
-        team_b_players=team_b_squad,
-        ground_arch=ground_arch,
-        fmt=fmt,
-        is_live=is_live,
-        match_data=match_data_for_stages,
-        weather_report=weather_report,
-        venue_profile=venue_profile
-    )
-
-    # Calculate 4-Stage Par Scores:
+    # Calculate 4-Stage Par Scores (Stages 1-3 strictly invariant to Stage 4 live pitch/score/weather drift):
     # Stage 1: Macro Prior (Historical ground prior par & national baseline)
     s1_par_a, _ = calculate_asymmetric_1st_innings_par(
         batting_team_id=team_a_id, bowling_team_id=team_b_id, fmt=fmt,
-        ground_arch=ground_arch, base_par=base_par,
+        ground_arch=pre_match_pitch, base_par=base_par,
         bat_squad=[], bowl_squad=[], venue_profile=venue_profile, match_data=match_data, weather_report=None
     )
     s1_par_b, _ = calculate_asymmetric_1st_innings_par(
         batting_team_id=team_b_id, bowling_team_id=team_a_id, fmt=fmt,
-        ground_arch=ground_arch, base_par=base_par,
+        ground_arch=pre_match_pitch, base_par=base_par,
         bat_squad=[], bowl_squad=[], venue_profile=venue_profile, match_data=match_data, weather_report=None
     )
 
     # Stage 2: Squad Fit (15-Player Squad Condition Adaptability)
     s2_par_a, _ = calculate_asymmetric_1st_innings_par(
         batting_team_id=team_a_id, bowling_team_id=team_b_id, fmt=fmt,
-        ground_arch=ground_arch, base_par=base_par,
-        bat_squad=team_a_squad, bowl_squad=team_b_squad, venue_profile=venue_profile, match_data=match_data, weather_report=None
+        ground_arch=pre_match_pitch, base_par=base_par,
+        bat_squad=pre_team_a_squad, bowl_squad=pre_team_b_squad, venue_profile=venue_profile, match_data=match_data, weather_report=None
     )
     s2_par_b, _ = calculate_asymmetric_1st_innings_par(
         batting_team_id=team_b_id, bowling_team_id=team_a_id, fmt=fmt,
-        ground_arch=ground_arch, base_par=base_par,
-        bat_squad=team_b_squad, bowl_squad=team_a_squad, venue_profile=venue_profile, match_data=match_data, weather_report=None
+        ground_arch=pre_match_pitch, base_par=base_par,
+        bat_squad=pre_team_b_squad, bowl_squad=pre_team_a_squad, venue_profile=venue_profile, match_data=match_data, weather_report=None
     )
 
-    # Stage 3: XI & Toss Locked (or Pre-Toss Confirmed XI + Venue) via 6-Signal Calibrated Ground-Pitch Model
-    confirmed_xi_a = [p for p in team_a_squad if p.get("is_confirmed_xi")]
-    confirmed_xi_b = [p for p in team_b_squad if p.get("is_confirmed_xi")]
+    # Stage 3: XI & Toss Locked (or Pre-Toss Confirmed XI + Venue) via Calibrated 6-Signal Model (ODI, T20I & TEST)
+    # Frozen once play starts so Stage 4 live pitch/score updates never alter Stage 3 projections.
+    confirmed_xi_a = [p for p in pre_team_a_squad if p.get("is_confirmed_xi")]
+    confirmed_xi_b = [p for p in pre_team_b_squad if p.get("is_confirmed_xi")]
     has_confirmed_xi_11 = (len(confirmed_xi_a) >= 11 and len(confirmed_xi_b) >= 11)
-    xi_a = confirmed_xi_a or [p for p in team_a_squad if p.get("is_probable_xi")] or team_a_squad[:11]
-    xi_b = confirmed_xi_b or [p for p in team_b_squad if p.get("is_probable_xi")] or team_b_squad[:11]
+    xi_a = confirmed_xi_a or [p for p in pre_team_a_squad if p.get("is_probable_xi")] or pre_team_a_squad[:11]
+    xi_b = confirmed_xi_b or [p for p in pre_team_b_squad if p.get("is_probable_xi")] or pre_team_b_squad[:11]
 
     s3_min_a = s3_max_a = s3_min_b = s3_max_b = None
     s3_signals_a = s3_signals_b = None
+    s3_pitch_label = pre_match_pitch
+    s3_toss_confirmed = bool(match_data.get("toss_winner_id") and match_data.get("toss_decision"))
+    frozen_s3 = build_frozen_stage3_snapshot(match_data, team_a_squad, team_b_squad, venue_profile)
     pre_computed_dual = (match_data.get("stage3_intelligence") or {}).get("dual_first_innings_scenarios")
-    if fmt in ("ODI", "T20I") and pre_computed_dual and pre_computed_dual.get("team_a_bats_first") and pre_computed_dual.get("team_b_bats_first"):
+
+    if frozen_s3 is not None:
+        s3_par_a = int(frozen_s3["team_a_par"])
+        s3_min_a = int(frozen_s3["team_a_min"])
+        s3_max_a = int(frozen_s3["team_a_max"])
+        s3_par_b = int(frozen_s3["team_b_par"])
+        s3_min_b = int(frozen_s3["team_b_min"])
+        s3_max_b = int(frozen_s3["team_b_max"])
+        s3_signals_a = frozen_s3.get("signals_a")
+        s3_signals_b = frozen_s3.get("signals_b")
+        s3_pitch_label = str(frozen_s3.get("dominant_pitch") or pre_match_pitch)
+        s3_toss_confirmed = bool(frozen_s3.get("toss_confirmed", s3_toss_confirmed))
+    elif fmt in ("ODI", "T20I", "TEST") and pre_computed_dual and pre_computed_dual.get("team_a_bats_first") and pre_computed_dual.get("team_b_bats_first"):
         ta_info = pre_computed_dual["team_a_bats_first"]
         tb_info = pre_computed_dual["team_b_bats_first"]
         s3_par_a = int(ta_info["projected_score"])
@@ -3638,64 +3816,19 @@ def compute_match_scenario_score_projections(
         s3_max_b = int(tb_info["max_score"])
         s3_signals_a = ta_info.get("signals")
         s3_signals_b = tb_info.get("signals")
-    elif fmt in ("ODI", "T20I") and xi_a and xi_b:
-        try:
-            from .stage3_ground_pitch_model import compute_stage3_dual_first_innings_projections
-            avg_b_m = float(venue_profile.get("dimensions_avg_boundary_m") or venue_profile.get("boundary_avg_m") or 70.0)
-            b_mult = max(0.86, min(1.16, 1.0 + (70.0 - avg_b_m) * 0.008))
-            dual_res = compute_stage3_dual_first_innings_projections(
-                fmt=fmt,
-                team_a_id=team_a_id,
-                team_b_id=team_b_id,
-                xi_a=xi_a[:11],
-                xi_b=xi_b[:11],
-                venue_name=venue_profile.get("name") or match_data.get("venue_name"),
-                city=venue_profile.get("city") or match_data.get("venue_city"),
-                venue_id=venue_profile.get("id") or match_data.get("venue_id"),
-                toss_winner_id=match_data.get("toss_winner_id"),
-                toss_decision=match_data.get("toss_decision"),
-                pitch_override=ground_arch if match_data.get("is_pitch_override") else None,
-                boundary_multiplier=b_mult,
-                match_date=match_data.get("scheduled_start"),
-            )
-            side_a = dual_res["if_team_a_bats_first"]
-            side_b = dual_res["if_team_b_bats_first"]
-            s3_par_a = int(side_a["projected_score"])
-            s3_min_a = int(side_a["min_score"])
-            s3_max_a = int(side_a["max_score"])
-            s3_par_b = int(side_b["projected_score"])
-            s3_min_b = int(side_b["min_score"])
-            s3_max_b = int(side_b["max_score"])
-            f_a, f_b = side_a["features"], side_b["features"]
-            s3_signals_a = {
-                "dominant_pitch": f_a["dominant_pitch"],
-                "same_ground_pitch_par": f_a["same_ground_pitch_par"],
-                "global_pitch_par": f_a["global_pitch_par"],
-                "country_adapt": f_a["bat_country_adapt"],
-                "xi_bat_adapt": f_a["xi_bat_adapt"],
-                "duel_run_delta": f_a["duel_run_delta"],
-            }
-            s3_signals_b = {
-                "dominant_pitch": f_b["dominant_pitch"],
-                "same_ground_pitch_par": f_b["same_ground_pitch_par"],
-                "global_pitch_par": f_b["global_pitch_par"],
-                "country_adapt": f_b["bat_country_adapt"],
-                "xi_bat_adapt": f_b["xi_bat_adapt"],
-                "duel_run_delta": f_b["duel_run_delta"],
-            }
-        except Exception:
-            s3_min_a = None
+        s3_pitch_label = str((s3_signals_a or {}).get("dominant_pitch") or pre_match_pitch)
+        s3_toss_confirmed = bool(pre_computed_dual.get("toss_confirmed", s3_toss_confirmed))
 
     if s3_min_a is None:
         s3_par_a, _ = calculate_asymmetric_1st_innings_par(
             batting_team_id=team_a_id, bowling_team_id=team_b_id, fmt=fmt,
-            ground_arch=ground_arch, base_par=base_par,
-            bat_squad=xi_a, bowl_squad=xi_b, venue_profile=venue_profile, match_data=match_data, weather_report=weather_report
+            ground_arch=pre_match_pitch, base_par=base_par,
+            bat_squad=xi_a, bowl_squad=xi_b, venue_profile=venue_profile, match_data=match_data, weather_report=None
         )
         s3_par_b, _ = calculate_asymmetric_1st_innings_par(
             batting_team_id=team_b_id, bowling_team_id=team_a_id, fmt=fmt,
-            ground_arch=ground_arch, base_par=base_par,
-            bat_squad=xi_b, bowl_squad=xi_a, venue_profile=venue_profile, match_data=match_data, weather_report=weather_report
+            ground_arch=pre_match_pitch, base_par=base_par,
+            bat_squad=xi_b, bowl_squad=xi_a, venue_profile=venue_profile, match_data=match_data, weather_report=None
         )
         toss_winner = match_data.get("toss_winner_id")
         toss_dec = match_data.get("toss_decision", "bat")
@@ -3717,9 +3850,9 @@ def compute_match_scenario_score_projections(
     s3_range_a = f"{s3_min_a} - {s3_max_a}"
     s3_range_b = f"{s3_min_b} - {s3_max_b}"
 
-    # Align Scenario A & Scenario B with the active match progression stage (activate Stage 3 as soon as XI is confirmed!)
+    use_stage3_active = (state in ("XI_AND_TOSS_LOCKED", "LIVE_BALL_BY_BALL", "COMPLETED")) or has_confirmed_xi_11
+    # Align Scenario A & Scenario B with the active pre-match progression stage (ODI, T20I & TEST)
     if fmt != "TEST":
-        use_stage3_active = (state in ("XI_AND_TOSS_LOCKED", "LIVE_BALL_BY_BALL", "COMPLETED")) or has_confirmed_xi_11
         active_par_a = s3_par_a if use_stage3_active else (s2_par_a if state == "SQUAD_ANNOUNCED" else s1_par_a)
         active_par_b = s3_par_b if use_stage3_active else (s2_par_b if state == "SQUAD_ANNOUNCED" else s1_par_b)
         active_range_a = s3_range_a if use_stage3_active else f"{int(active_par_a - std_score * 1.1)} - {int(active_par_a + std_score * 1.2)}"
@@ -3739,7 +3872,7 @@ def compute_match_scenario_score_projections(
             "win_probability_chasing_pct": round(100.0 - prob_a_bat_1st, 1),
             "methodology": "stage3_6signal_calibrated" if (use_stage3_active and fmt in ("ODI", "T20I")) else "asymmetric_stage_prior",
             "signals": s3_signals_a,
-            "tactical_assessment": f"If {team_a_id} bats first, Stage 3 projected 1st-inn par is {active_par_a} ({active_range_a}) on {ground_arch} deck; defending gives {prob_a_bat_1st}% win equity against {team_b_id} (chase expectancy ~{chase_b})."
+            "tactical_assessment": f"If {team_a_id} bats first, Stage 3 projected 1st-inn par is {active_par_a} ({active_range_a}) on {s3_pitch_label} deck; defending gives {prob_a_bat_1st}% win equity against {team_b_id} (chase expectancy ~{chase_b})."
         })
 
         t_b = active_par_b + 1
@@ -3756,8 +3889,79 @@ def compute_match_scenario_score_projections(
             "win_probability_chasing_pct": round(100.0 - prob_b_bat_1st, 1),
             "methodology": "stage3_6signal_calibrated" if (use_stage3_active and fmt in ("ODI", "T20I")) else "asymmetric_stage_prior",
             "signals": s3_signals_b,
-            "tactical_assessment": f"If {team_b_id} bats first, Stage 3 projected 1st-inn par is {active_par_b} ({active_range_b}) on {ground_arch} deck; defending gives {prob_b_bat_1st}% win equity against {team_a_id} (chase expectancy ~{chase_a})."
+            "tactical_assessment": f"If {team_b_id} bats first, Stage 3 projected 1st-inn par is {active_par_b} ({active_range_b}) on {s3_pitch_label} deck; defending gives {prob_b_bat_1st}% win equity against {team_a_id} (chase expectancy ~{chase_a})."
         })
+    elif use_stage3_active and frozen_s3 is not None:
+        w3 = 0.74 if s3_pitch_label in ("dusty", "spin heavy", "turner") else 0.78
+        w4 = 0.68 if s3_pitch_label in ("dusty", "spin heavy", "turner") else 0.72
+        i2_b = round(s3_par_b * 0.96)
+        i3_a = round(s3_par_a * w3)
+        t4_b = max(80, s3_par_a - i2_b + i3_a + 1)
+        c4_b = round(i2_b * w4)
+        p_a_def = round(min(92.0, max(8.0, 50.0 + (t4_b - c4_b) * 0.16 + (s3_par_a - i2_b) * 0.08)), 1)
+        scenario_team_1.update({
+            "innings_1_par": s3_par_a,
+            "projected_1st_innings_score": s3_par_a,
+            "probable_score": s3_par_a,
+            "innings_1_range": s3_range_a,
+            "score_range": s3_range_a,
+            "innings_2_par": i2_b,
+            "innings_2_range": f"{int(i2_b - std_score * 1.1)} - {int(i2_b + std_score * 1.2)}",
+            "innings_3_par": i3_a,
+            "innings_3_range": f"{int(i3_a - std_score * 1.0)} - {int(i3_a + std_score * 1.0)}",
+            "innings_4_target": t4_b,
+            "innings_4_chase_exp": c4_b,
+            "win_probability_batting_1st_pct": p_a_def,
+            "win_probability_chasing_pct": round(100.0 - p_a_def, 1),
+            "methodology": "stage3_6signal_calibrated",
+            "signals": s3_signals_a,
+            "tactical_assessment": f"Frozen Stage 3 Pre-Match Test Trajectory: If {team_a_id} bats first on {s3_pitch_label} deck, 1st Inn par is {s3_par_a} ({s3_range_a}); {team_b_id} responds ~{i2_b}; Day 4 3rd Inn ~{i3_a} (4th Inn target {t4_b})."
+        })
+        i2_a = round(s3_par_a * 0.96)
+        i3_b = round(s3_par_b * w3)
+        t4_a = max(80, s3_par_b - i2_a + i3_b + 1)
+        c4_a = round(i2_a * w4)
+        p_b_def = round(min(92.0, max(8.0, 50.0 + (t4_a - c4_a) * 0.16 + (s3_par_b - i2_a) * 0.08)), 1)
+        scenario_team_2.update({
+            "innings_1_par": s3_par_b,
+            "projected_1st_innings_score": s3_par_b,
+            "probable_score": s3_par_b,
+            "innings_1_range": s3_range_b,
+            "score_range": s3_range_b,
+            "innings_2_par": i2_a,
+            "innings_2_range": f"{int(i2_a - std_score * 1.1)} - {int(i2_a + std_score * 1.2)}",
+            "innings_3_par": i3_b,
+            "innings_3_range": f"{int(i3_b - std_score * 1.0)} - {int(i3_b + std_score * 1.0)}",
+            "innings_4_target": t4_a,
+            "innings_4_chase_exp": c4_a,
+            "win_probability_batting_1st_pct": p_b_def,
+            "win_probability_chasing_pct": round(100.0 - p_b_def, 1),
+            "methodology": "stage3_6signal_calibrated",
+            "signals": s3_signals_b,
+            "tactical_assessment": f"Frozen Stage 3 Pre-Match Test Trajectory: If {team_b_id} bats first on {s3_pitch_label} deck, 1st Inn par is {s3_par_b} ({s3_range_b}); {team_a_id} responds ~{i2_a}; Day 4 3rd Inn ~{i3_b} (4th Inn target {t4_a})."
+        })
+
+    match_data_for_stages = {
+        **match_data,
+        "scenario_score_projections": {
+            "live_projection": live_projection,
+            "scenario_team_1_bats_first": scenario_team_1,
+            "scenario_team_2_bats_first": scenario_team_2
+        }
+    }
+    stage_performers = extract_stage_performers(
+        team_a_players=team_a_squad,
+        team_b_players=team_b_squad,
+        ground_arch=ground_arch,
+        fmt=fmt,
+        is_live=is_live,
+        match_data=match_data_for_stages,
+        weather_report=weather_report,
+        venue_profile=venue_profile,
+        pre_match_pitch=s3_pitch_label,
+        pre_team_a_players=pre_team_a_squad,
+        pre_team_b_players=pre_team_b_squad,
+    )
 
     # Determine currently playing team
     current_playing_team_projection = None
@@ -3872,9 +4076,15 @@ def compute_match_scenario_score_projections(
             dls_live_dynamics = None
 
     # Authentic 4-Innings Projection Matrix for Test Matches across Pre-Match Stages
-    def _make_test_4_innings(inn1_a_val: int, inn1_b_val: int, pitch_type_str: str) -> Dict[str, Any]:
+    def _make_test_4_innings(
+        inn1_a_val: int,
+        inn1_b_val: int,
+        pitch_type_str: str,
+        inn1_a_range: Optional[str] = None,
+        inn1_b_range: Optional[str] = None,
+    ) -> Dict[str, Any]:
         p_low = (pitch_type_str or "balanced").lower()
-        if any(k in p_low for k in ["spin", "turn"]):
+        if any(k in p_low for k in ["spin", "turn", "dusty"]):
             w3, w4 = 0.74, 0.66
             wear_desc = "Spin heavy abrasion: sharp Day 4-5 turn and low bounce"
         elif any(k in p_low for k in ["seam", "green"]):
@@ -3905,9 +4115,9 @@ def compute_match_scenario_score_projections(
             "innings_1": {
                 "label": "1st Innings",
                 "team_a_par": inn1_a_val,
-                "team_a_range": f"{int(inn1_a_val - std_score * 1.1)} - {int(inn1_a_val + std_score * 1.2)}",
+                "team_a_range": inn1_a_range or f"{int(inn1_a_val - std_score * 1.1)} - {int(inn1_a_val + std_score * 1.2)}",
                 "team_b_par": inn1_b_val,
-                "team_b_range": f"{int(inn1_b_val - std_score * 1.1)} - {int(inn1_b_val + std_score * 1.2)}",
+                "team_b_range": inn1_b_range or f"{int(inn1_b_val - std_score * 1.1)} - {int(inn1_b_val + std_score * 1.2)}",
                 "condition": "Days 1-2 Fresh Surface Benchmark"
             },
             "innings_2": {
@@ -3968,10 +4178,10 @@ def compute_match_scenario_score_projections(
             "team_b_par": s1_par_b,
             "team_a_range": f"{int(s1_par_a - std_score * 1.1)} - {int(s1_par_a + std_score * 1.2)}",
             "team_b_range": f"{int(s1_par_b - std_score * 1.1)} - {int(s1_par_b + std_score * 1.2)}",
-            "pitch_condition_summary": f"Historical {ground_arch} ground prior par: ~{base_par} runs",
+            "pitch_condition_summary": f"Historical {pre_match_pitch} ground prior par: ~{base_par} runs",
             "tactical_assessment": f"Macro Prior relies purely on historical Cricsheet ground archetype par (~{base_par} runs) and national team baseline Elo.",
             "top_performers": stage_performers["stage_1_macro"],
-            "four_innings_projection": _make_test_4_innings(s1_par_a, s1_par_b, ground_arch) if fmt == "TEST" else None
+            "four_innings_projection": _make_test_4_innings(s1_par_a, s1_par_b, pre_match_pitch) if fmt == "TEST" else None
         },
         "stage_2_squad": {
             "stage_number": 2,
@@ -3982,27 +4192,30 @@ def compute_match_scenario_score_projections(
             "team_b_par": s2_par_b,
             "team_a_range": f"{int(s2_par_a - std_score * 1.1)} - {int(s2_par_a + std_score * 1.2)}",
             "team_b_range": f"{int(s2_par_b - std_score * 1.1)} - {int(s2_par_b + std_score * 1.2)}",
-            "pitch_condition_summary": f"15-man squad condition adaptability (65% recency weighted on {ground_arch})",
+            "pitch_condition_summary": f"15-man squad condition adaptability (65% recency weighted on {pre_match_pitch})",
             "tactical_assessment": f"Squad Fit incorporates full 15-player squad depth and rolling 1-year deck adaptability.",
             "top_performers": stage_performers["stage_2_squad"],
-            "four_innings_projection": _make_test_4_innings(s2_par_a, s2_par_b, ground_arch) if fmt == "TEST" else None
+            "four_innings_projection": _make_test_4_innings(s2_par_a, s2_par_b, pre_match_pitch) if fmt == "TEST" else None
         },
         "stage_3_xi_toss": {
             "stage_number": 3,
             "stage_key": "XI_AND_TOSS_LOCKED",
-            "stage_name": "Stage 3: XI & Venue Locked" if (has_confirmed_xi_11 and not match_data.get("toss_winner_id")) else "Stage 3: XI & Toss Locked",
+            "stage_name": "Stage 3: XI & Venue Locked" if (has_confirmed_xi_11 and not s3_toss_confirmed) else "Stage 3: XI & Toss Locked",
             "stage_badge": "6-Signal Calibrated Ground-Pitch & Duel Model",
+            "frozen_pre_match": True,
+            "frozen_at": frozen_s3.get("frozen_at") if frozen_s3 else None,
             "team_a_par": s3_par_a,
             "team_b_par": s3_par_b,
             "team_a_range": s3_range_a,
             "team_b_range": s3_range_b,
-            "toss_confirmed": bool(match_data.get("toss_winner_id") and match_data.get("toss_decision")),
+            "pitch_type": s3_pitch_label,
+            "toss_confirmed": s3_toss_confirmed,
             "signals_a": s3_signals_a,
             "signals_b": s3_signals_b,
-            "pitch_condition_summary": f"Calibrated 6-signal Stage 3 ({team_a_id} 1st: ~{s3_par_a} vs {team_b_id} 1st: ~{s3_par_b} on {ground_arch} deck)",
-            "tactical_assessment": f"Stage 3 projects both 1st-innings scenarios ({team_a_id}: {s3_par_a} [{s3_range_a}] vs {team_b_id}: {s3_par_b} [{s3_range_b}]) using ground pitch distribution, same-ground pitch means, country/player surface adaptability, and 7x5 duel simulator.",
+            "pitch_condition_summary": f"Frozen pre-match Stage 3 ({team_a_id} 1st: ~{s3_par_a} vs {team_b_id} 1st: ~{s3_par_b} on {s3_pitch_label} deck)",
+            "tactical_assessment": f"Frozen before play begins: projects both 1st-innings scenarios ({team_a_id}: {s3_par_a} [{s3_range_a}] vs {team_b_id}: {s3_par_b} [{s3_range_b}]) using ground pitch distribution, same-ground pitch means, country/player surface adaptability, and 7x5 duel simulator.",
             "top_performers": stage_performers["stage_3_xi_toss"],
-            "four_innings_projection": _make_test_4_innings(s3_par_a, s3_par_b, ground_arch) if fmt == "TEST" else None
+            "four_innings_projection": _make_test_4_innings(s3_par_a, s3_par_b, s3_pitch_label, s3_range_a, s3_range_b) if fmt == "TEST" else None
         },
         "stage_4_live": {
             "stage_number": 4,
@@ -4031,7 +4244,9 @@ def compute_match_scenario_score_projections(
         "stage_level": stage_level,
         "is_live_match": is_live,
         "ground_pitch_archetype": ground_arch,
+        "pre_match_pitch_archetype": s3_pitch_label,
         "base_venue_par": base_par,
+        "stage3_frozen": frozen_s3,
         "scenario_team_1_bats_first": scenario_team_1,
         "scenario_team_2_bats_first": scenario_team_2,
         "live_projection": live_projection,

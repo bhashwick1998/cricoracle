@@ -78,7 +78,9 @@ from .engine.concussion_intelligence import (
 )
 from .engine.player_projections import (
     compute_player_runs_and_wickets_projections,
-    compute_match_scenario_score_projections
+    compute_match_scenario_score_projections,
+    build_frozen_stage3_snapshot,
+    parse_frozen_stage3_snapshot,
 )
 from .engine.test_stumps_engine import compute_test_stumps_intelligence
 from .engine.series_squad_propagator import propagate_series_squads_async
@@ -549,7 +551,7 @@ async def get_matches(state: Optional[str] = None):
                    tb.powerplay_rating as team_b_powerplay_rating, tb.middle_overs_rating as team_b_middle_overs_rating, tb.death_overs_rating as team_b_death_overs_rating,
                    v.name as venue_name, v.city as venue_city, v.country as venue_country,
                    v.spin_wicket_ratio, v.pitch_type, v.avg_first_innings_score_t20, v.avg_first_innings_score_odi,
-                   v.chase_win_pct, v.dew_factor
+                   v.chase_win_pct, v.dew_factor, v.dimensions_avg_boundary_m
             FROM matches m
             JOIN teams ta ON m.team_a_id = ta.id
             JOIN teams tb ON m.team_b_id = tb.id
@@ -610,6 +612,7 @@ async def get_matches(state: Optional[str] = None):
         async with conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
             enriched_matches = []
+            _dirty_stage3_freeze_commit = False
             for r in rows:
                 m = dict(r)
 
@@ -789,6 +792,14 @@ async def get_matches(state: Optional[str] = None):
                     venue_profile=v_profile,
                     live_pitch_type=detected_pitch
                 )
+                frozen_s3 = m["scenario_score_projections"].get("stage3_frozen") if isinstance(m.get("scenario_score_projections"), dict) else None
+                if _should_persist_frozen_stage3(m, frozen_s3):
+                    frozen_str = json.dumps(frozen_s3)
+                    if await _persist_frozen_stage3_column(conn, m["id"], frozen_str, commit=False):
+                        m["stage3_frozen_json"] = frozen_str
+                        _dirty_stage3_freeze_commit = True
+                if isinstance(frozen_s3, dict):
+                    m["stage3_frozen"] = frozen_s3
 
                 if m_fmt == "TEST" and m.get("scenario_score_projections") and isinstance(m["scenario_score_projections"], dict):
                     ltip = m["scenario_score_projections"].get("live_test_innings_progression")
@@ -1121,6 +1132,10 @@ async def get_matches(state: Optional[str] = None):
                             "team_b_par": s3_prog.get("team_b_par"),
                             "team_b_range": s3_prog.get("team_b_range"),
                             "toss_confirmed": s3_prog.get("toss_confirmed"),
+                            "pitch_type": s3_prog.get("pitch_type"),
+                            "frozen_pre_match": bool(s3_prog.get("frozen_pre_match", True)),
+                            "signals_a": s3_prog.get("signals_a"),
+                            "signals_b": s3_prog.get("signals_b"),
                         } if s3_prog else None,
                         "scenario_team_1_bats_first": {
                             "innings_1_par": sc_1.get("innings_1_par"),
@@ -1139,6 +1154,9 @@ async def get_matches(state: Optional[str] = None):
                     }
 
                 enriched_matches.append(m)
+
+            if _dirty_stage3_freeze_commit:
+                await conn.commit()
 
             # Strict ICC International Match Filter: Exclude all non-international, A-team, domestic & youth fixtures, and strictly purge completed matches
             enriched_matches = [m for m in enriched_matches if is_official_international_match(m) and m.get("state") != "COMPLETED"]
@@ -1222,6 +1240,42 @@ _LIVE_STRIPPED_MATCH_KEYS = (
     "duel_simulations",
     "scenario_score_projections",
 )
+
+
+def _should_persist_frozen_stage3(match_row: Dict[str, Any], new_frozen: Any) -> bool:
+    """Persists Stage 3 baseline once before play starts (or on first v3 upgrade), never mutating after ball 1."""
+    if not isinstance(new_frozen, dict):
+        return False
+    existing_parsed = parse_frozen_stage3_snapshot(match_row.get("stage3_frozen_json"))
+    state = str(match_row.get("state") or "").upper()
+    started = (
+        state in ("LIVE_BALL_BY_BALL", "COMPLETED")
+        or float(match_row.get("current_overs") or 0.0) > 0.0
+        or int(match_row.get("current_score") or 0) > 0
+    )
+    if existing_parsed is None:
+        return True
+    if not started and (not existing_parsed.get("toss_confirmed")) and bool(new_frozen.get("toss_confirmed")):
+        return True
+    return False
+
+
+async def _persist_frozen_stage3_column(conn: Any, match_id: str, frozen_str: str, commit: bool = False) -> bool:
+    """Writes stage3_frozen_json, auto-adding the column on legacy DBs if init_db hasn't run yet."""
+    try:
+        await conn.execute("UPDATE matches SET stage3_frozen_json = ? WHERE id = ?", (frozen_str, match_id))
+    except Exception as exc:
+        if "stage3_frozen_json" in str(exc):
+            try:
+                await conn.execute("ALTER TABLE matches ADD COLUMN stage3_frozen_json TEXT DEFAULT NULL")
+                await conn.execute("UPDATE matches SET stage3_frozen_json = ? WHERE id = ?", (frozen_str, match_id))
+            except Exception:
+                return False
+        else:
+            return False
+    if commit:
+        await conn.commit()
+    return True
 
 
 def _build_live_score_projections_view(score_projections: Any) -> Any:
@@ -1847,7 +1901,7 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
             match_data["state"] == "XI_AND_TOSS_LOCKED"
             or (
                 has_raw_confirmed_11v11
-                and m_format in ("ODI", "T20I")
+                and m_format in ("ODI", "T20I", "TEST")
                 and match_data["state"] not in ("LIVE_BALL_BY_BALL", "COMPLETED")
             )
         )
@@ -1999,6 +2053,17 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
             live_pitch_type=detected_pitch
         )
         match_data["scenario_score_projections"] = score_projections
+        frozen_s3_detail = score_projections.get("stage3_frozen") if isinstance(score_projections, dict) else None
+        if _should_persist_frozen_stage3(match_data, frozen_s3_detail):
+            frozen_str_detail = json.dumps(frozen_s3_detail)
+            if await _persist_frozen_stage3_column(conn, match_id, frozen_str_detail, commit=True):
+                match_data["stage3_frozen_json"] = frozen_str_detail
+        if isinstance(frozen_s3_detail, dict):
+            match_data["stage3_frozen"] = frozen_s3_detail
+            match_data["dual_first_innings_scenarios"] = (
+                match_data.get("dual_first_innings_scenarios")
+                or frozen_s3_detail.get("dual_first_innings_scenarios")
+            )
 
         if match_data.get("format") == "TEST" and score_projections and isinstance(score_projections, dict):
             ltip = score_projections.get("live_test_innings_progression")

@@ -750,7 +750,7 @@ def calculate_stage3_xi_locked(
 
     score_model_details = None
     dual_first_innings_scenarios = None
-    if use_ground_pitch_model and fmt in ("ODI", "T20I"):
+    if use_ground_pitch_model and fmt in ("ODI", "T20I", "TEST"):
         try:
             from .stage3_ground_pitch_model import (
                 compute_stage3_dual_first_innings_projections,
@@ -767,7 +767,7 @@ def calculate_stage3_xi_locked(
                 venue_id=venue_id,
                 toss_winner_id=toss_winner_id if toss_known else None,
                 toss_decision=toss_decision if toss_known else None,
-                pitch_override=pitch_archetype if is_pitch_override else None,
+                pitch_override=pitch_archetype if (is_pitch_override and pitch_report) else None,
                 boundary_multiplier=boundary_multiplier,
                 match_date=match_date,
             )

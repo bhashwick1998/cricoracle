@@ -493,8 +493,9 @@ class IngestionManager:
                 "toss_decision = COALESCE(?, toss_decision)",
                 "venue_id = COALESCE(?, venue_id)",
                 "last_event_description = ?",
-                "state = 'XI_AND_TOSS_LOCKED'",
             ]
+            if m.get("state") not in ("LIVE_BALL_BY_BALL", "COMPLETED"):
+                set_clauses.append("state = 'XI_AND_TOSS_LOCKED'")
             params = [toss_win_id, toss_dec, resolved_venue, status_msg]
             if "innings_1_team_id" in match_cols:
                 set_clauses.append("innings_1_team_id = COALESCE(?, innings_1_team_id)")
@@ -507,9 +508,9 @@ class IngestionManager:
             await conn.execute(f"UPDATE matches SET {', '.join(set_clauses)} WHERE id = ?", params)
             await conn.commit()
 
-            # Compute and store calibrated Stage 3 projections immediately in matches row
+            # Compute and store calibrated Stage 3 projections immediately in matches row (frozen before play begins)
             async with conn.execute(
-                "SELECT ms.*, p.name, p.role, p.batting_hand, p.bowling_style, p.t20_batting_avg, p.t20_batting_sr, p.t20_economy "
+                "SELECT ms.*, p.* "
                 "FROM match_squads ms JOIN players p ON ms.player_id = p.id WHERE ms.match_id = ? AND ms.is_confirmed_xi = 1 ORDER BY ms.batting_order ASC",
                 (match_id,),
             ) as cur_s:
@@ -520,31 +521,58 @@ class IngestionManager:
                 v_row = await cur_v.fetchone()
             v_dict = dict(v_row) if v_row else {"id": resolved_venue, "name": v_name_raw or resolved_venue}
             if len(xi_a_db) >= 11 and len(xi_b_db) >= 11:
-                s3_out = calculate_stage3_xi_locked(
-                    confirmed_xi_a=xi_a_db,
-                    confirmed_xi_b=xi_b_db,
-                    toss_winner_id=toss_win_id or "",
-                    toss_decision=toss_dec or "",
-                    venue=v_dict,
-                    team_a_id=m.get("team_a_id"),
-                    team_b_id=m.get("team_b_id"),
-                    p2_squad_prob_a=float(m.get("p_team_a") or 50.0),
-                    match_format=m.get("format", "T20I"),
-                    pitch_report=m.get("pitch_report"),
-                    match_date=m.get("scheduled_start"),
+                import json
+                from ..engine.player_projections import build_frozen_stage3_snapshot, parse_frozen_stage3_snapshot
+
+                m_snapshot = {
+                    **m,
+                    "venue_id": resolved_venue or m.get("venue_id"),
+                    "toss_winner_id": toss_win_id or m.get("toss_winner_id"),
+                    "toss_decision": toss_dec or m.get("toss_decision"),
+                    "historic_ground_archetype": v_dict.get("pitch_type") or m.get("ground_pitch_archetype") or "balanced",
+                }
+                existing_frozen = parse_frozen_stage3_snapshot(m.get("stage3_frozen_json"))
+                match_started = (
+                    m.get("state") in ("LIVE_BALL_BY_BALL", "COMPLETED")
+                    or float(m.get("current_overs") or 0.0) > 0.0
+                    or int(m.get("current_score") or 0) > 0
                 )
-                await conn.execute("""
-                    UPDATE matches SET
-                        p_team_a = ?, p_team_b = ?, p_draw = ?, p0_pre_match = ?,
-                        par_score_projected = ?, par_score_min = ?, par_score_max = ?,
-                        ground_pitch_archetype = ?, active_pitch_type = ?
-                    WHERE id = ?
-                """, (
-                    s3_out["p_team_a"], s3_out["p_team_b"], s3_out["p_draw"], s3_out["p0_pre_match"],
-                    s3_out["par_score_projected"], s3_out["par_score_min"], s3_out["par_score_max"],
-                    s3_out["ground_pitch_archetype"], s3_out["ground_pitch_archetype"],
-                    match_id,
-                ))
+                frozen_s3 = build_frozen_stage3_snapshot(m_snapshot, xi_a_db, xi_b_db, v_dict)
+                frozen_json_val = json.dumps(frozen_s3) if (frozen_s3 and (existing_frozen is None or (not match_started and not existing_frozen.get("toss_confirmed") and frozen_s3.get("toss_confirmed")))) else m.get("stage3_frozen_json")
+
+                if not match_started:
+                    s3_out = calculate_stage3_xi_locked(
+                        confirmed_xi_a=xi_a_db,
+                        confirmed_xi_b=xi_b_db,
+                        toss_winner_id=toss_win_id or "",
+                        toss_decision=toss_dec or "",
+                        venue=v_dict,
+                        team_a_id=m.get("team_a_id"),
+                        team_b_id=m.get("team_b_id"),
+                        p2_squad_prob_a=float(m.get("p_team_a") or 50.0),
+                        match_format=m.get("format", "T20I"),
+                        pitch_report=m.get("pitch_report"),
+                        match_date=m.get("scheduled_start"),
+                    )
+                    await conn.execute("""
+                        UPDATE matches SET
+                            p_team_a = ?, p_team_b = ?, p_draw = ?, p0_pre_match = ?,
+                            par_score_projected = ?, par_score_min = ?, par_score_max = ?,
+                            ground_pitch_archetype = ?, active_pitch_type = ?,
+                            stage3_frozen_json = COALESCE(?, stage3_frozen_json)
+                        WHERE id = ?
+                    """, (
+                        s3_out["p_team_a"], s3_out["p_team_b"], s3_out["p_draw"], s3_out["p0_pre_match"],
+                        s3_out["par_score_projected"], s3_out["par_score_min"], s3_out["par_score_max"],
+                        s3_out["ground_pitch_archetype"], s3_out["ground_pitch_archetype"],
+                        frozen_json_val,
+                        match_id,
+                    ))
+                elif frozen_json_val and "stage3_frozen_json" in match_cols:
+                    await conn.execute(
+                        "UPDATE matches SET stage3_frozen_json = ? WHERE id = ? AND stage3_frozen_json IS NULL",
+                        (frozen_json_val, match_id),
+                    )
                 await conn.commit()
 
             logger.info(f"Applied CricAPI Playing XI, venue ({resolved_venue}), toss ({toss_win_id}:{toss_dec}) & Stage 3 projections for {match_id}")

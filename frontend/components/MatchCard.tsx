@@ -1001,6 +1001,11 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                             <span>Par Score: ~{match.par_score_projected || 175}</span>
                           )}
                         </div>
+                        {(match as any).scenario_score_projections?.stage_3_dual_first_innings?.team_a_par != null && (
+                          <div className="text-[9px] text-emerald-400/90 mt-1 font-mono truncate" title="Stage 3 Calibrated Pre-Match Baseline (Frozen before play)">
+                            Stage 3 Frozen: {metaA.short} ~{(match as any).scenario_score_projections.stage_3_dual_first_innings.team_a_par} | {metaB.short} ~{(match as any).scenario_score_projections.stage_3_dual_first_innings.team_b_par}
+                          </div>
+                        )}
                       </>
                     );
                   })() : (

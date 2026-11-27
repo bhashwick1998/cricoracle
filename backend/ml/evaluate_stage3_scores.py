@@ -53,6 +53,46 @@ SENIOR_TEAMS = {
 }
 
 
+_CALIBRATION_CFG: Dict[str, Dict[str, Any]] = {
+    "ODI": {
+        "half_life": 900.0,
+        "overall_default": 268.0,
+        "lam_t": 28.0,
+        "lam_v": 8.0,
+        "lam_home": 60.0,
+        "l2_val": 600.0,
+        "huber_delta": 55.0,
+        "tol_a": 30.0,
+        "tol_b": 45.0,
+        "default_band": 45,
+    },
+    "T20I": {
+        "half_life": 420.0,
+        "overall_default": 168.0,
+        "lam_t": 8.0,
+        "lam_v": 4.0,
+        "lam_home": 60.0,
+        "l2_val": 260.0,
+        "huber_delta": None,
+        "tol_a": 20.0,
+        "tol_b": 30.0,
+        "default_band": 28,
+    },
+    "TEST": {
+        "half_life": 1100.0,
+        "overall_default": 318.0,
+        "lam_t": 20.0,
+        "lam_v": 8.0,
+        "lam_home": 50.0,
+        "l2_val": 450.0,
+        "huber_delta": 85.0,
+        "tol_a": 50.0,
+        "tol_b": 80.0,
+        "default_band": 95,
+    },
+}
+
+
 def classify_match_pitch_telemetry(match_json: Dict[str, Any], fmt: str, players_cache: Dict[str, Any]) -> str:
     """Classifies historical match surface into one of the 5 canonical archetypes from match telemetry."""
     innings = match_json.get("innings", [])
@@ -91,6 +131,17 @@ def classify_match_pitch_telemetry(match_json: Dict[str, Any], fmt: str, players
     spin_econ = spin_runs / max(1.0, spin_balls / 6.0) if spin_balls >= 12 else 99.0
     pace_econ = pace_runs / max(1.0, pace_balls / 6.0) if pace_balls >= 12 else 99.0
 
+    if fmt == "TEST":
+        if match_rpo >= 3.67 or (total_wkts <= 18 and match_rpo >= 3.45):
+            return "flat"
+        if spin_wkt_share >= 0.36 or (spin_ball_share >= 0.34 and spin_econ < pace_econ):
+            return "dusty"
+        if match_rpo <= 2.95 and pace_wkts >= max(10, int(total_wkts * 0.65)):
+            return "green"
+        if (pace_wkts / max(1, total_wkts)) >= 0.72 and match_rpo > 2.95:
+            return "bouncy"
+        return "balanced"
+
     flat_rpo = 6.15 if fmt == "ODI" else 8.95
     low_rpo = 4.65 if fmt == "ODI" else 7.15
     if match_rpo >= flat_rpo or (total_wkts <= 11 and match_rpo >= (flat_rpo - 0.35)):
@@ -106,7 +157,7 @@ def classify_match_pitch_telemetry(match_json: Dict[str, Any], fmt: str, players
 
 def extract_clean_matches_from_zip(zip_path: Path, fmt_label: str) -> List[Dict[str, Any]]:
     """Parses senior men's matches with full clean 1st innings (no rain washout/curtailment)."""
-    render_fmt = "ODI" if fmt_label == "ODI" else "T20"
+    render_fmt = "TEST" if fmt_label == "TEST" else ("ODI" if fmt_label == "ODI" else "T20")
     players_cache = _load_players_cache(render_fmt)
     rows: List[Dict[str, Any]] = []
 
@@ -153,9 +204,13 @@ def extract_clean_matches_from_zip(zip_path: Path, fmt_label: str) -> List[Dict[
                             bat_stats[po][2] += 1
 
             max_ov1 = overs_list[-1].get("over", 0) + 1
-            min_full = 45 if fmt_label == "ODI" else 18
-            if max_ov1 < min_full and wkts1 < 10:
-                continue
+            if fmt_label == "TEST":
+                if len(innings) < 2 and wkts1 < 10 and not inn0.get("declared"):
+                    continue
+            else:
+                min_full = 45 if fmt_label == "ODI" else 18
+                if max_ov1 < min_full and wkts1 < 10:
+                    continue
 
             bat_team_name = inn0.get("team") or teams[0]
             bowl_team_name = teams[1] if bat_team_name == teams[0] else teams[0]
@@ -262,12 +317,13 @@ def _recency_weight(dt_str: str, ref_dt_str: str, half_life_days: float = 900.0)
 
 def build_empirical_priors_from_train_rows(fmt: str, train_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Builds recency-weighted ground/pitch, mixed-effects team/venue/home, and player priors strictly from `train_rows`."""
-    half_life = 900.0 if fmt == "ODI" else 420.0
+    cfg = _CALIBRATION_CFG[fmt]
+    half_life = cfg["half_life"]
     ref_date = max((r["date"] for r in train_rows), default="2024-12-31")
     w_all = [_recency_weight(r["date"], ref_date, half_life_days=half_life) for r in train_rows]
     w_arr = np.array(w_all, dtype=float)
     ys = np.array([r["actual_score"] for r in train_rows], dtype=float)
-    overall_mean = float(np.average(ys, weights=w_arr)) if len(ys) > 0 else (268.0 if fmt == "ODI" else 168.0)
+    overall_mean = float(np.average(ys, weights=w_arr)) if len(ys) > 0 else cfg["overall_default"]
 
     by_pitch: Dict[str, List[Tuple[int, float]]] = defaultdict(list)
     by_venue: Dict[str, List[Tuple[int, float]]] = defaultdict(list)
@@ -342,9 +398,9 @@ def build_empirical_priors_from_train_rows(fmt: str, train_rows: List[Dict[str, 
             X_me[row_i, -2] = 1.0 if r["bat_code"] == hc else 0.0
             X_me[row_i, -1] = 1.0 if r["bowl_code"] == hc else 0.0
 
-    lam_t = 28.0 if fmt == "ODI" else 8.0
-    lam_v = 8.0 if fmt == "ODI" else 4.0
-    lam_vec = np.array([lam_t] * nb + [lam_t] * nbw + [lam_v] * nv + [60.0, 60.0], dtype=float)
+    lam_t = cfg["lam_t"]
+    lam_v = cfg["lam_v"]
+    lam_vec = np.array([lam_t] * nb + [lam_t] * nbw + [lam_v] * nv + [cfg["lam_home"], cfg["lam_home"]], dtype=float)
     Xw = X_me * np.sqrt(w_arr)[:, None]
     beta = np.linalg.solve(Xw.T @ Xw + np.diag(lam_vec), Xw.T @ ((ys - overall_mean) * np.sqrt(w_arr)))
     me_bat = {c: round(float(beta[i]), 3) for i, c in enumerate(bat_teams)}
@@ -485,9 +541,10 @@ def fit_ridge_stage3_model(
     Fits softmax-convex, sign-constrained, recency-weighted Ridge weights using 5-fold out-of-fold priors
     strictly inside `train_rows`.
     """
-    half_life = 900.0 if fmt == "ODI" else 420.0
-    l2_val = 600.0 if fmt == "ODI" else 260.0
-    huber_delta = 55.0 if fmt == "ODI" else None
+    cfg = _CALIBRATION_CFG[fmt]
+    half_life = cfg["half_life"]
+    l2_val = cfg["l2_val"]
+    huber_delta = cfg["huber_delta"]
 
     n = len(train_rows)
     n_folds = 5
@@ -637,8 +694,8 @@ def _compute_metrics(preds: List[int], lows: List[int], highs: List[int], actual
     bias = float(np.mean(p - y))
     mae = float(np.mean(err))
     rmse = float(np.sqrt(np.mean((y - p) ** 2)))
-    tol_a = 30.0 if fmt == "ODI" else 20.0
-    tol_b = 45.0 if fmt == "ODI" else 30.0
+    tol_a = _CALIBRATION_CFG[fmt]["tol_a"]
+    tol_b = _CALIBRATION_CFG[fmt]["tol_b"]
     rel_err = err / np.maximum(1.0, y)
     ss_res = float(np.sum((y - p) ** 2))
     ss_tot = float(np.sum((y - np.mean(y)) ** 2))
@@ -679,6 +736,7 @@ def _match_baseline_legacy_stage3(r: Dict[str, Any]) -> Tuple[int, int, int]:
             "dew_factor": dossier.get("dew_factor", 0.25),
             "avg_first_innings_score_odi": dossier.get("format_pars", {}).get("ODI", 275),
             "avg_first_innings_score_t20": dossier.get("format_pars", {}).get("T20I", 166),
+            "avg_first_innings_score_test": dossier.get("format_pars", {}).get("TEST", 330),
         }
     else:
         vp = get_historical_venue_profile(r["city_key"] or v_low, fmt)
@@ -690,6 +748,7 @@ def _match_baseline_legacy_stage3(r: Dict[str, Any]) -> Tuple[int, int, int]:
             "dew_factor": vp.get("dew_factor", 0.30),
             "avg_first_innings_score_odi": vp.get("avg_first_innings_score_odi", 275),
             "avg_first_innings_score_t20": vp.get("avg_first_innings_score_t20", 166),
+            "avg_first_innings_score_test": vp.get("avg_first_innings_score_test", 330),
         }
 
     # Note: temporarily skip upgraded model inside baseline helper if patched
@@ -725,8 +784,11 @@ def run_calibration_and_evaluation(
     }
     eval_report: Dict[str, Any] = {"split_date": split_date, "formats": {}}
 
-    for fmt, zname in [("ODI", "odis_male_json.zip"), ("T20I", "t20s_male_json.zip")]:
-        rows = extract_clean_matches_from_zip(DEFAULT_CRICSHEET_ZIP_DIR / zname, fmt)
+    for fmt, zname in [("ODI", "odis_male_json.zip"), ("T20I", "t20s_male_json.zip"), ("TEST", "tests_male_json.zip")]:
+        zpath = DEFAULT_CRICSHEET_ZIP_DIR / zname
+        if not zpath.exists():
+            continue
+        rows = extract_clean_matches_from_zip(zpath, fmt)
         train_rows = [r for r in rows if r["date"] < split_date]
         test_rows = [r for r in rows if r["date"] >= split_date]
         post_render_rows = [r for r in test_rows if r["date"] > "2026-10-25"]
@@ -741,9 +803,10 @@ def run_calibration_and_evaluation(
         fmt_mean = int(round(fmt_priors["overall_mean"]))
 
         # Baseline 1: Format Global Mean
+        def_band = _CALIBRATION_CFG[fmt]["default_band"]
         b1_preds = [fmt_mean] * len(test_rows)
-        b1_lo = [fmt_mean - (45 if fmt == "ODI" else 28)] * len(test_rows)
-        b1_hi = [fmt_mean + (45 if fmt == "ODI" else 28)] * len(test_rows)
+        b1_lo = [fmt_mean - def_band] * len(test_rows)
+        b1_hi = [fmt_mean + def_band] * len(test_rows)
 
         # Baseline 2: Legacy Stage 3 Heuristic
         b2_preds, b2_lo, b2_hi = [], [], []
