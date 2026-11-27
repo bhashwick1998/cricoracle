@@ -1689,11 +1689,16 @@ class IngestionManager:
                 inn_1_wickets = inn_1["wickets"]
                 inn_1_overs = inn_1["overs"] if (inn_1.get("overs") is not None and float(inn_1["overs"]) > 0) else float(match.get("innings_1_overs") or 118.4)
 
-                # In Test cricket, if Innings 1 is completed and Innings 2 is underway, Innings 1 is ALL OUT (10 wickets) unless declared!
-                if match_format == "TEST" and (inn_1_wickets == 0 or inn_1_wickets is None):
-                    if not any(k in st_low for k in ["dec", "declared", " d"]):
+                # If Innings 1 is completed and Innings 2 is underway, Innings 1 with omitted wickets (0/None) is ALL OUT (10)
+                if (inn_1_wickets == 0 or inn_1_wickets is None) and int(inn_1_score or 0) > 0:
+                    max_fmt_ov = 20.0 if match_format in ("T20", "T20I") else (50.0 if match_format == "ODI" else 999.0)
+                    if match_format == "TEST":
+                        if not any(k in st_low for k in ["dec", "declared", " d"]):
+                            inn_1_wickets = 10
+                            logger.info(f"Auto-corrected 1st innings wickets to 10 (all out) for {match_id} in Test match.")
+                    elif float(inn_1_overs or 0.0) < max_fmt_ov or "all out" in st_low:
                         inn_1_wickets = 10
-                        logger.info(f"Auto-corrected 1st innings wickets to 10 (all out) for {match_id} in Test match.")
+                        logger.info(f"Auto-corrected 1st innings wickets to 10 (all out) for {match_id} ({match_format}).")
 
                 inn_2_team_id = t2
                 inn_2_score = inn_2["runs"]

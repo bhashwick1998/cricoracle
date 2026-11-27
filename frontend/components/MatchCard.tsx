@@ -656,7 +656,7 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                         const reqRR = (runsNeeded / (ballsRem / 6)).toFixed(2);
                         return (
                           <span>
-                            1st Inn: {(match as any).innings_1_score}/{(match as any).innings_1_wickets} ({(match as any).innings_1_overs} ov) • Req RR: {reqRR} RPO
+                            1st Inn: {(match as any).innings_1_score}/{(Number((match as any).innings_1_wickets || 0) === 0 && Number((match as any).innings_1_overs || 0) > 0 && Number((match as any).innings_1_overs || 0) < maxOv && !(match as any).innings_1_declared) ? 10 : (match as any).innings_1_wickets} ({(match as any).innings_1_overs} ov) • Req RR: {reqRR} RPO
                           </span>
                         );
                       })()}
@@ -682,7 +682,13 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                       <span>{inn1Team.flag}</span>
                       <span className="text-slate-400 font-bold">{inn1Team.name}{match.format === "TEST" ? " (1st Inn):" : ":"}</span>
                       <span className="text-white font-bold">
-                        {(match as any).innings_1_score}{(match as any).innings_1_wickets != null ? `/${(match as any).innings_1_wickets}` : ""}
+                        {(match as any).innings_1_score}{(match as any).innings_1_wickets != null ? `/${(() => {
+                          const wRaw = Number((match as any).innings_1_wickets || 0);
+                          const ovRaw = Number((match as any).innings_1_overs || 0);
+                          const maxFmtOv = match.format === "ODI" ? 50 : (match.format === "TEST" ? 999 : 20);
+                          const isAllOutOmitted = wRaw === 0 && Number((match as any).innings_1_score || 0) > 0 && !((match as any).innings_1_declared || (match as any).is_declared) && (match.format === "TEST" || (ovRaw > 0 && ovRaw < maxFmtOv));
+                          return isAllOutOmitted ? 10 : wRaw;
+                        })()}` : ""}
                         {((match as any).innings_1_declared || (match as any).is_declared) ? " d" : ""}
                       </span>
                       {(match as any).innings_1_overs ? (

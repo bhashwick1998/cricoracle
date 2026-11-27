@@ -650,8 +650,18 @@ class CricApiSquadProvider:
                         or has_live_kw
                     )
                     if is_live:
-                        t1_score = self.parse_score_string(m.get("t1s", ""))
-                        t2_score = self.parse_score_string(m.get("t2s", ""))
+                        t1_is_done = bool(raw_t2s or ms == "result" or "innings break" in st_low or "won by" in st_low or "need " in st_low)
+                        t2_is_done = bool(ms == "result" or "won by" in st_low)
+                        t1_score = self.parse_score_string(
+                            m.get("t1s", ""),
+                            is_completed=t1_is_done,
+                            is_declared=("dec" in raw_t1s.lower()),
+                        )
+                        t2_score = self.parse_score_string(
+                            m.get("t2s", ""),
+                            is_completed=t2_is_done,
+                            is_declared=("dec" in raw_t2s.lower()),
+                        )
                         live_matches.append({
                             "cricapi_id": m.get("id"),
                             "series_name": m.get("series"),
@@ -1094,13 +1104,22 @@ class CricApiSquadProvider:
                     i1_wkts = inn_1_sc.get("wickets") if inn_1_sc else db_m.get("innings_1_wickets")
                     i1_ovs = inn_1_sc.get("overs") if inn_1_sc else db_m.get("innings_1_overs")
 
-                    # In Test cricket (or completed limited-overs innings), if Innings 1 has finished and Innings 2 is underway,
-                    # the 1st innings batting team is ALL OUT (10 wickets) unless explicitly declared!
+                    # In Test cricket or completed limited-overs 1st innings (all-out omitted like "108 (16.5)"),
+                    # if Innings 1 has finished and Innings 2 is underway, Innings 1 is ALL OUT (10) unless declared!
                     m_fmt_check = str(db_m.get("format") or "").upper()
-                    if inn_val >= 2 and ("TEST" in m_fmt_check or "test" in str(db_m.get("series_name", "")).lower()):
-                        if (i1_wkts is None or int(i1_wkts) == 0) and not any(k in st_low for k in ["dec", "declared", " d"]):
+                    max_fmt_ov = 20.0 if "T20" in m_fmt_check else (50.0 if m_fmt_check == "ODI" else 999.0)
+                    if inn_val >= 2 and (i1_wkts is None or int(i1_wkts) == 0) and int(i1_runs or 0) > 0:
+                        if "TEST" in m_fmt_check or "test" in str(db_m.get("series_name", "")).lower():
+                            if not any(k in st_low for k in ["dec", "declared", " d"]):
+                                i1_wkts = 10
+                                logger.info(f"Auto-corrected 1st innings wickets to 10 (all out) for {mid} in Test match.")
+                        elif i1_ovs is None or float(i1_ovs) < max_fmt_ov or "all out" in st_low:
                             i1_wkts = 10
-                            logger.info(f"Auto-corrected 1st innings wickets to 10 (all out) for {mid} in Test match.")
+                            logger.info(f"Auto-corrected 1st innings wickets to 10 (all out) for {mid} ({m_fmt_check}).")
+                    if inn_val == 1 and (wkts is None or int(wkts) == 0) and int(runs or 0) > 0:
+                        if ("all out" in st_low or "innings break" in st_low or "need " in st_low) and float(ovs or 0) < max_fmt_ov:
+                            wkts = 10
+                            i1_wkts = 10
 
                     if inn_val == 1:
                         i2_team, i2_runs, i2_wkts, i2_ovs = None, None, None, None

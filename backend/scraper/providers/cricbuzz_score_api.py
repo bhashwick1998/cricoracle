@@ -293,6 +293,8 @@ class CricbuzzScoreApi:
                                         raw_m = list(re.finditer(pattern_innings, txt))
                                         cands = []
                                         seen_keys = set()
+                                        status_low = (match_status or "").lower()
+                                        all_out_ctx = any(k in txt.lower() or k in status_low for k in ("all out", "all-out", "innings break", "won by", "innings and", "need "))
                                         for m in raw_m:
                                             tm, r, w, ov = m.groups()
                                             tm = tm.upper()
@@ -302,14 +304,22 @@ class CricbuzzScoreApi:
                                             if key not in seen_keys:
                                                 seen_keys.add(key)
                                                 r_int = int(r)
-                                                w_val = int(w) if w is not None else (10 if ("all out" in txt.lower() or r_int >= 200) else 0)
+                                                w_val = int(w) if w is not None else (10 if (all_out_ctx or r_int >= 200) else 0)
                                                 cands.append({
                                                     "team": tm,
                                                     "runs": r_int,
                                                     "wickets": w_val,
+                                                    "_explicit_w": w is not None,
                                                     "overs": float(ov) if ov is not None else None,
                                                     "innings_index": len(cands) + 1
                                                 })
+                                        # Any completed earlier innings without explicit '/w' (and not declared) was all out (10)
+                                        if len(cands) >= 2:
+                                            for prev_c in cands[:-1]:
+                                                if not prev_c.get("_explicit_w") and prev_c["wickets"] == 0 and prev_c["runs"] > 0:
+                                                    prev_c["wickets"] = 10
+                                        for c_item in cands:
+                                            c_item.pop("_explicit_w", None)
                                         if len(cands) >= 2:
                                             best_inns = cands
                                             break

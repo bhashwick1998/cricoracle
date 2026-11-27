@@ -196,6 +196,21 @@ async def init_db():
             WHERE id = 'm_nz_ind_2026_test_1'
         """)
 
+        # Self-heal omitted all-out 1st-innings wickets (e.g. 108/0 -> 108/10 when 2nd innings underway & overs < format cap)
+        await conn.execute("""
+            UPDATE matches
+            SET innings_1_wickets = 10
+            WHERE COALESCE(innings_1_wickets, 0) = 0
+              AND COALESCE(innings_1_score, 0) > 0
+              AND COALESCE(innings_1_declared, 0) = 0
+              AND COALESCE(current_innings, 1) >= 2
+              AND (
+                  format = 'TEST'
+                  OR (format IN ('T20', 'T20I') AND COALESCE(innings_1_overs, 0) > 0 AND innings_1_overs < 20.0)
+                  OR (format = 'ODI' AND COALESCE(innings_1_overs, 0) > 0 AND innings_1_overs < 50.0)
+              )
+        """)
+
         # Repair corrupted 1st-innings/venue state on m_nz_ind_2026_test_2 if present, without forcing UPCOMING state
         await conn.execute("""
             UPDATE matches SET

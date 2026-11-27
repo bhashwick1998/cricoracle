@@ -248,6 +248,18 @@ class TestStage4StabilityAndStage3P0(unittest.TestCase):
         pa2, pb2, pd2 = resolve_break_frozen_probs(valid_row, {"p_team_a": 60.0, "p_team_b": 30.0, "p_draw": 10.0}, "TEST")
         self.assertEqual((pa2, pb2, pd2), (41.3, 40.5, 18.2))
 
+    def test_all_out_omitted_wickets_parsed_as_10_not_0(self):
+        from backend.scraper.providers.cricapi_provider import CricApiSquadProvider
+        prov = CricApiSquadProvider(api_key="test_dummy")
+        # Completed 1st innings like "108 (16.5)" in AUS vs ENG T20I must parse as 108/10, not 108/0
+        sc_done = prov.parse_score_string("108 (16.5)", is_completed=True, is_declared=False)
+        self.assertEqual(sc_done["runs"], 108)
+        self.assertEqual(sc_done["wickets"], 10)
+        self.assertEqual(sc_done["overs"], 16)
+        self.assertEqual(sc_done["balls"], 5)
+        sc_allout = prov.parse_score_string("108 all out (16.5)")
+        self.assertEqual(sc_allout["wickets"], 10)
+
 
 if __name__ == "__main__":
     unittest.main()
