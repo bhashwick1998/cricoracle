@@ -11,9 +11,48 @@ Sub-50ms inference engine providing:
 4. Win Probability Added (WPA) delta per delivery
 """
 
+import hashlib
 import math
 import numpy as np
 from typing import Dict, Any, List, Tuple, Optional, Union
+
+
+def resolve_break_frozen_probs(
+    match_row: Dict[str, Any],
+    stage4_res: Dict[str, Any],
+    match_format: str,
+) -> tuple[float, float, float]:
+    """Preserves valid stored live probabilities during breaks/idle polls, else uses Stage 4 output.
+
+    Prevents falsy `p_draw == 0.0` fallbacks from stacking draw equity onto an already 100%-summed
+    `(p_team_a, p_team_b)` pair.
+    """
+    fmt = str(match_format or "T20I").upper()
+    old_a = match_row.get("p_team_a")
+    old_b = match_row.get("p_team_b")
+    old_d = match_row.get("p_draw")
+    if old_a is not None and old_b is not None:
+        a_f = round(float(old_a), 1)
+        b_f = round(float(old_b), 1)
+        d_f = round(float(old_d), 1) if (fmt == "TEST" and old_d is not None) else 0.0
+        if fmt != "TEST":
+            if 99.5 <= (a_f + b_f) <= 100.5 and a_f >= 0.0 and b_f >= 0.0:
+                return a_f, round(100.0 - a_f, 1), 0.0
+        else:
+            # In an active TEST match (e.g. score > 0 and draw == 0.0 pre-hydration), don't freeze a 0%-draw stub
+            cur_score_row = float(match_row.get("current_score") or 0)
+            is_unhydrated_zero_draw = cur_score_row > 0 and d_f <= 0.0 and float(stage4_res.get("p_draw", 0.0)) > 0.0
+            if (not is_unhydrated_zero_draw) and 99.5 <= (a_f + b_f + d_f) <= 100.5 and a_f >= 0.0 and b_f >= 0.0 and d_f >= 0.0:
+                return a_f, b_f, d_f
+    res_a = round(float(stage4_res.get("p_team_a", 50.0)), 1)
+    res_d = round(float(stage4_res.get("p_draw", 0.0)), 1) if fmt == "TEST" else 0.0
+    res_b = round(max(0.0, 100.0 - res_d - res_a), 1)
+    return res_a, res_b, res_d
+
+
+def _deterministic_rng_seed(seed_key: str) -> int:
+    """Process-stable 32-bit integer seed derived from SHA-256 (avoids randomized Python hash())."""
+    return int(hashlib.sha256(seed_key.encode("utf-8")).hexdigest()[:8], 16)
 
 def compute_settledness_factor(balls_faced: int, gamma: float = 0.18) -> float:
     """
@@ -1057,7 +1096,8 @@ def run_live_vectorized_monte_carlo(
     spin_grip_penalty_pct: float = 0.0,
     outfield_friction_pct: float = 0.0,
     venue_name: Optional[str] = None,
-    historical_venue_par: Optional[float] = None
+    historical_venue_par: Optional[float] = None,
+    rng_override_seed: Optional[str] = None,
 ) -> Tuple[float, float, float]:
     """
     Sub-15ms vectorized Monte Carlo match simulation from current delivery to finish.
@@ -1073,7 +1113,7 @@ def run_live_vectorized_monte_carlo(
     pitch_type = (live_pitch_type or "spin heavy").lower()
 
     seed_key = f"{team_a}_{team_b}_{fmt}_{innings}_{current_score}_{current_wickets}_{current_overs}_{current_balls}_{pitch_type}_{round(float(p0_pre_match), 1)}"
-    rng = np.random.default_rng(abs(hash(seed_key)) % (2**31 - 1))
+    rng = np.random.default_rng(_deterministic_rng_seed(rng_override_seed or seed_key))
 
     adapt_diff = (team_a_pitch_adapt - team_b_pitch_adapt) / 100.0
     duel_edge = (duel_win_shift if team_a_batting else -duel_win_shift)
@@ -1218,8 +1258,13 @@ def run_live_vectorized_monte_carlo(
 
             p_bat_final = round(decisive_pool * p_bat_blended, 1)
             p_bowl_final = round(decisive_pool - p_bat_final, 1)
-            p_team_a = p_bat_final if team_a_batting else p_bowl_final
-            p_team_b = p_bowl_final if team_a_batting else p_bat_final
+            p_team_a_raw = p_bat_final if team_a_batting else p_bowl_final
+            if previous_p_team_a is not None and float(previous_p_team_a) > 0:
+                p_prev_clamped = max(1.0, min(decisive_pool - 1.0, float(previous_p_team_a)))
+                p_team_a = round(max(1.0, min(decisive_pool - 1.0, 0.72 * p_prev_clamped + 0.28 * p_team_a_raw)), 1)
+            else:
+                p_team_a = p_team_a_raw
+            p_team_b = round(max(0.0, decisive_pool - p_team_a), 1)
             return round(p_team_a, 1), round(p_team_b, 1), p_draw_val
 
         elif innings == 2:
@@ -1717,7 +1762,13 @@ def calculate_stage4_live(
     commentary: Optional[str] = None,
     scheduled_overs: Optional[float] = None,
     overs_lost: float = 0.0,
-    venue_name: Optional[str] = None
+    venue_name: Optional[str] = None,
+    prev_score: Optional[int] = None,
+    prev_wickets: Optional[int] = None,
+    prev_overs: Optional[int] = None,
+    prev_balls: Optional[int] = None,
+    prev_innings: Optional[int] = None,
+    is_progress_step: bool = True,
 ) -> Dict[str, Any]:
     """
     Performs full Stage 4 Live inference on arrival of a delivery with real-time pitch awareness,
@@ -1926,7 +1977,100 @@ def calculate_stage4_live(
         except Exception:
             piml_live_res = None
 
-    wpa = round(p_team_a_live - previous_p_team_a, 1) if previous_p_team_a is not None else 0.0
+    # Counterfactual Pitch-Held, Deterministic CRN Delivery WPA & Progress/Stumps Gating:
+    # Eliminates non-attributed WPA swings from pitch flips, model switches, Stumps breaks, or idle polls.
+    state_unchanged = (
+        prev_score is not None
+        and prev_wickets is not None
+        and prev_overs is not None
+        and prev_balls is not None
+        and (prev_innings is None or prev_innings == innings)
+        and int(prev_score) == int(score)
+        and int(prev_wickets) == int(wickets)
+        and int(prev_overs) == int(overs)
+        and int(prev_balls) == int(balls)
+    )
+    if (not is_progress_step) or bool(is_stumps) or state_unchanged:
+        if previous_p_team_a is not None and float(previous_p_team_a) > 0:
+            prev_a_f = round(float(previous_p_team_a), 1)
+            if fmt == "TEST":
+                prev_d_f = round(float(previous_p_draw if previous_p_draw is not None else p_draw_live), 1)
+                prev_d_f = max(0.0, min(95.0, prev_d_f))
+                if prev_a_f + prev_d_f <= 100.0:
+                    p_draw_live = prev_d_f
+                    p_team_a_live = prev_a_f
+                    p_team_b_live = round(max(0.0, 100.0 - p_draw_live - p_team_a_live), 1)
+                else:
+                    decisive_pool = max(0.0, 100.0 - prev_d_f)
+                    p_draw_live = prev_d_f
+                    p_team_a_live = round(min(decisive_pool, prev_a_f * (decisive_pool / 100.0)), 1)
+                    p_team_b_live = round(max(0.0, 100.0 - p_draw_live - p_team_a_live), 1)
+            else:
+                p_draw_live = 0.0
+                p_team_a_live = round(max(0.0, min(100.0, prev_a_f)), 1)
+                p_team_b_live = round(max(0.0, 100.0 - p_team_a_live), 1)
+        wpa = 0.0
+    elif (
+        prev_score is not None
+        and prev_wickets is not None
+        and prev_overs is not None
+        and prev_balls is not None
+        and (prev_innings is None or prev_innings == innings)
+    ):
+        cf_seed = f"cf_{team_a}_{team_b}_{fmt}_{innings}_{score}_{wickets}_{overs}_{balls}_{canon_pitch}"
+        cf_common_kwargs = dict(
+            innings=innings,
+            target_runs=target,
+            p0_pre_match=p0_pre_match,
+            team_a_batting=team_a_batting,
+            team_a=team_a,
+            team_b=team_b,
+            n_sims=2000,
+            match_format=match_format,
+            live_pitch_type=canon_pitch,
+            team_a_pitch_adapt=team_a_pitch_adapt,
+            team_b_pitch_adapt=team_b_pitch_adapt,
+            innings_1_score=innings_1_score,
+            innings_2_score=innings_2_score,
+            match_day=match_day,
+            is_stumps=False,
+            duel_win_shift=crease_duel["duel_win_shift"],
+            batting_quality_mult=resource_tanks["batting_quality_mult"],
+            bowling_quality_mult=resource_tanks["bowling_quality_mult"],
+            is_day_night=is_day_night,
+            dew_factor=dew_factor,
+            previous_p_team_a=None,
+            previous_p_draw=None,
+            finisher_count=resource_tanks.get("finisher_count", 0),
+            death_bowlers_exhausted=resource_tanks.get("death_bowlers_exhausted", False),
+            recent_momentum_shift=0.0,
+            leverage_shift=0.0,
+            scheduled_overs=resolved_sched_ov,
+            overs_lost=overs_lost,
+            pitch_sweat_index=pitch_sweat_index,
+            spin_grip_penalty_pct=spin_grip_penalty_pct,
+            outfield_friction_pct=outfield_friction_pct,
+            venue_name=venue_name,
+            historical_venue_par=eff_hist_venue_par,
+            rng_override_seed=cf_seed,
+        )
+        cf_after_a, _, _ = run_live_vectorized_monte_carlo(
+            current_score=score, current_wickets=wickets, current_overs=overs, current_balls=balls,
+            **cf_common_kwargs,
+        )
+        cf_before_a, _, _ = run_live_vectorized_monte_carlo(
+            current_score=int(prev_score), current_wickets=int(prev_wickets),
+            current_overs=int(prev_overs), current_balls=int(prev_balls),
+            **cf_common_kwargs,
+        )
+        raw_cf_wpa = round(cf_after_a - cf_before_a, 1)
+        if int(wickets) <= int(prev_wickets):
+            max_non_wkt = 1.8 if fmt == "TEST" else (3.5 if fmt == "ODI" else 5.0)
+            wpa = round(max(-max_non_wkt, min(max_non_wkt, raw_cf_wpa)), 1)
+        else:
+            wpa = raw_cf_wpa
+    else:
+        wpa = round(p_team_a_live - previous_p_team_a, 1) if previous_p_team_a is not None else 0.0
     striker_settledness = round(compute_settledness_factor(striker.get("balls_faced", 10)), 2)
 
     # 5. Target / Par Projections & Dynamic Chase Dynamics

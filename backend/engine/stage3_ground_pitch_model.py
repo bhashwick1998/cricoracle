@@ -13,6 +13,7 @@ Combines all 6 empirical & tactical signals prior to first ball (XI_AND_TOSS_LOC
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -1064,9 +1065,44 @@ def compute_stage3_dual_first_innings_projections(
     side_a = _run_side(team_a_id, code_a, team_b_id, xi_a, xi_b)
     side_b = _run_side(team_b_id, code_b, team_a_id, xi_b, xi_a)
 
+    # Calibrated Stage 3 Pre-Match Win Probability aligned with the 6-signal score differential,
+    # Playing XI / country pitch adaptability, and 7x5 duel simulator edges.
+    f_a, f_b = side_a["features"], side_b["features"]
+    par_diff = float(side_a["projected_score"] - side_b["projected_score"])
+    duel_edge = (float(f_a.get("duel_run_delta", 0.0)) - float(f_b.get("duel_run_delta", 0.0))) * 0.25
+    adapt_edge = (
+        (float(f_a.get("xi_bat_adapt", 55.0)) - float(f_b.get("xi_bat_adapt", 55.0))) * 0.20
+        + (float(f_a.get("xi_bowl_adapt", 55.0)) - float(f_b.get("xi_bowl_adapt", 55.0))) * 0.12
+        + (float(f_a.get("bat_country_adapt", 75.0)) - float(f_b.get("bat_country_adapt", 75.0))) * 0.28
+        + (float(f_a.get("me_bat_rating", 0.0)) - float(f_b.get("me_bat_rating", 0.0))) * 0.18
+        + (float(f_a.get("me_bowl_rating", 0.0)) - float(f_b.get("me_bowl_rating", 0.0))) * 0.14
+    )
+    toss_bat_bias = 0.0
+    if toss_known:
+        toss_bat_bias = 2.5 if toss_code == code_a else -2.5
+
+    log_scale = 48.0 if fmt_key == "TEST" else (34.0 if fmt_key == "ODI" else 19.0)
+    combined_edge = par_diff + duel_edge + adapt_edge + toss_bat_bias
+    logit = max(-3.5, min(3.5, combined_edge / max(8.0, log_scale)))
+    decisive_prob_a = 1.0 / (1.0 + math.exp(-logit))
+
+    dom_p = str(f_a.get("dominant_pitch") or "balanced").lower()
+    if fmt_key == "TEST":
+        p0_draw = {"flat": 20.0, "balanced": 15.0, "bouncy": 12.0, "dusty": 10.0, "green": 8.0}.get(dom_p, 14.0)
+        decisive_pool = 100.0 - p0_draw
+        p0_team_a = round(max(6.0, min(decisive_pool - 6.0, decisive_pool * decisive_prob_a)), 1)
+        p0_team_b = round(decisive_pool - p0_team_a, 1)
+    else:
+        p0_draw = 0.0
+        p0_team_a = round(max(6.0, min(94.0, 100.0 * decisive_prob_a)), 1)
+        p0_team_b = round(100.0 - p0_team_a, 1)
+
     return {
         "format": fmt_key,
         "toss_confirmed": toss_known,
+        "p0_team_a": p0_team_a,
+        "p0_team_b": p0_team_b,
+        "p0_draw": p0_draw,
         "if_team_a_bats_first": side_a,
         "if_team_b_bats_first": side_b,
     }

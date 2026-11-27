@@ -89,6 +89,7 @@ async def init_db():
         await add_col("matches", "day_4_overs", "REAL DEFAULT NULL")
         await add_col("matches", "day_start_overs", "REAL DEFAULT NULL")
         await add_col("matches", "stage3_frozen_json", "TEXT DEFAULT NULL")
+        await add_col("matches", "live_pitch_state_json", "TEXT DEFAULT NULL")
         await add_col("matches", "innings_1_declared", "INTEGER DEFAULT 0")
         await add_col("matches", "innings_2_declared", "INTEGER DEFAULT 0")
         await add_col("matches", "innings_3_declared", "INTEGER DEFAULT 0")
@@ -117,6 +118,45 @@ async def init_db():
         await add_col("match_squads", "wickets_taken", "INTEGER DEFAULT 0")
         await add_col("match_squads", "bowling_economy", "REAL DEFAULT 0.0")
         await add_col("venues", "avg_first_innings_score_test", "INTEGER DEFAULT 310")
+
+        # Clean up legacy synthetic scorecard filler rows & out-of-format over artifacts
+        await conn.execute("""
+            DELETE FROM match_deliveries
+            WHERE striker_id LIKE '%_batter'
+               OR commentary LIKE '%to Batter%'
+               OR (match_id IN (SELECT id FROM matches WHERE format IN ('T20', 'T20I')) AND over > 20)
+               OR (match_id IN (SELECT id FROM matches WHERE format = 'ODI') AND over > 50)
+        """)
+
+        # Self-heal any unnormalized TEST match probabilities (sum != 100 or active Day 1..3 0% draw stub)
+        corrupt_test_rows = await (await conn.execute("""
+            SELECT id, p_team_a, p_team_b, p_draw, stumps_day, state, current_score
+            FROM matches
+            WHERE format = 'TEST'
+              AND p_team_a IS NOT NULL
+              AND p_team_b IS NOT NULL
+              AND (
+                  ABS(p_team_a + p_team_b + COALESCE(p_draw, 0.0) - 100.0) > 0.5
+                  OR (state = 'LIVE_BALL_BY_BALL' AND COALESCE(current_score, 0) > 0 AND COALESCE(p_draw, 0.0) <= 0.0 AND COALESCE(stumps_day, 1) <= 3)
+              )
+        """)).fetchall()
+        for mid_c, pa_raw, pb_raw, pd_raw, sd_raw, _, _ in corrupt_test_rows:
+            c_a = float(pa_raw or 50.0)
+            c_b = float(pb_raw or 50.0)
+            c_d = float(pd_raw or 0.0)
+            s_day = int(sd_raw or 1)
+            # Early days cannot inherit 0.0 stub or the 39.4% Day-4 close draw placeholder
+            if c_d <= 0.0 or (s_day <= 2 and abs(c_d - 39.4) < 0.2):
+                c_d = 18.2
+            c_d = round(max(0.0, min(95.0, c_d)), 1)
+            decisive_rem = max(0.0, 100.0 - c_d)
+            denom = c_a + c_b
+            new_a = round(decisive_rem * (c_a / denom), 1) if denom > 0 else round(decisive_rem * 0.5, 1)
+            new_b = round(max(0.0, 100.0 - c_d - new_a), 1)
+            await conn.execute(
+                "UPDATE matches SET p_team_a = ?, p_team_b = ?, p_draw = ?, last_wpa_swing = 0.0 WHERE id = ?",
+                (new_a, new_b, c_d, mid_c),
+            )
 
         # Ground-Truth Innings Integrity Migration for NZ vs IND 1st Test:
         # Match drawn: NZ 1st Innings (368), IND 1st Innings (720/9d), NZ 2nd Innings (239/5).

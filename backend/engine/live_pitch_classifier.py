@@ -135,7 +135,8 @@ def get_match_phase(fmt: str, current_over: float, ball_age: float = 0.0, match_
     else:  # TEST
         if match_day in [4, 5]:
             return "P4"
-        eff_ball_age = ball_age if ball_age > 0 else (current_over % 80.0)
+        # Use continuous innings over unless caller provides an explicit post-new-ball age (< current_over)
+        eff_ball_age = ball_age if (ball_age > 0 and ball_age < current_over - 0.5) else current_over
         if eff_ball_age <= 25.0:
             return "P1"
         elif eff_ball_age <= 80.0:
@@ -236,7 +237,8 @@ class LivePitchClassifier:
         commentary_strings: Optional[List[str]] = None,
         pitch_report: Optional[str] = None,
         ball_age: float = 0.0,
-        match_day: int = 1
+        match_day: int = 1,
+        previous_pitch_state: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Executes:
@@ -488,24 +490,24 @@ class LivePitchClassifier:
             dt_trace.append("STEP 5 (BALANCED): None of Dusty, Green, Bouncy, Flat satisfied. Defaulting to BALANCED.")
             dt_trace.append("STEP 5 (BALANCED): None of Dusty, Green, Bouncy, Flat satisfied. Defaulting to BALANCED.")
 
-        # Construct calibrated 5-way probability distribution for Approach 1
-        base_app1 = {arch: 8.0 for arch in PITCH_ARCHETYPES}
-        base_app1[dt_classified_pitch] = 68.0
+        # Construct smoothed 5-way probability distribution for Approach 1 (avoids stark 68-vs-8 one-hot flips)
+        base_app1 = {arch: 12.0 for arch in PITCH_ARCHETYPES}
+        base_app1[dt_classified_pitch] = 44.0
         if dt_classified_pitch == "dusty":
-            base_app1["balanced"] = 14.0
-            base_app1["flat"] = 10.0
+            base_app1["balanced"] = 18.0
+            base_app1["flat"] = 14.0
         elif dt_classified_pitch == "green":
-            base_app1["balanced"] = 14.0
-            base_app1["bouncy"] = 10.0
+            base_app1["balanced"] = 18.0
+            base_app1["bouncy"] = 14.0
         elif dt_classified_pitch == "bouncy":
-            base_app1["balanced"] = 12.0
-            base_app1["green"] = 12.0
+            base_app1["balanced"] = 16.0
+            base_app1["green"] = 16.0
         elif dt_classified_pitch == "flat":
-            base_app1["bouncy"] = 12.0
-            base_app1["balanced"] = 12.0
+            base_app1["bouncy"] = 16.0
+            base_app1["balanced"] = 16.0
         else:
-            base_app1["dusty"] = 12.0
-            base_app1["green"] = 12.0
+            base_app1["dusty"] = 15.0
+            base_app1["green"] = 15.0
 
         norm_app1 = sum(base_app1.values())
         app1_probs = {k: round((v / norm_app1) * 100.0, 1) for k, v in base_app1.items()}
@@ -653,6 +655,33 @@ class LivePitchClassifier:
         total_final = sum(final_probs.values())
         final_probs = {k: round((v / total_final) * 100.0, 1) for k, v in final_probs.items()}
 
+        # Recursive Bayesian/Kalman Posterior Filtering + Hysteresis across live polls
+        prev_state_dict = None
+        if isinstance(previous_pitch_state, str) and previous_pitch_state.strip():
+            try:
+                import json as _json
+                prev_state_dict = _json.loads(previous_pitch_state)
+            except Exception:
+                prev_state_dict = None
+        elif isinstance(previous_pitch_state, dict):
+            prev_state_dict = previous_pitch_state
+
+        prev_pitch = None
+        prev_challenger = None
+        prev_streak = 0
+        if isinstance(prev_state_dict, dict) and isinstance(prev_state_dict.get("probs"), dict):
+            prev_probs_map = prev_state_dict["probs"]
+            prev_pitch = prev_state_dict.get("pitch")
+            prev_challenger = prev_state_dict.get("challenger")
+            prev_streak = int(prev_state_dict.get("streak") or 0)
+            kalman_gain = 0.40 if has_strong_nlp else 0.28
+            blended_post = {}
+            for arch in PITCH_ARCHETYPES:
+                p_prev = float(prev_probs_map.get(arch, final_probs.get(arch, 20.0)))
+                blended_post[arch] = (1.0 - kalman_gain) * p_prev + kalman_gain * final_probs[arch]
+            tot_post = sum(blended_post.values()) or 100.0
+            final_probs = {k: round((v / tot_post) * 100.0, 1) for k, v in blended_post.items()}
+
         # Add backward-compatibility aliases across all approach probability dictionaries
         for p_dict in [app1_probs, app2_probs, app3_probs, final_probs]:
             p_dict["spin heavy"] = p_dict.get("dusty", 20.0)
@@ -660,9 +689,32 @@ class LivePitchClassifier:
             p_dict["seam"] = p_dict.get("balanced", 20.0)
             p_dict["seam / green"] = round(min(100.0, p_dict.get("green", 0.0) + p_dict.get("balanced", 0.0)), 1)
 
-        # Dominant classified pitch archetype strictly chosen from the 5 canonical types
-        classified_type = max(["dusty", "green", "bouncy", "flat", "balanced"], key=lambda k: final_probs.get(k, 0.0))
+        # Dominant classified pitch archetype with hysteresis guard to prevent poll-to-poll jitter
+        challenger_type = max(["dusty", "green", "bouncy", "flat", "balanced"], key=lambda k: final_probs.get(k, 0.0))
+        next_streak = 1
+        if prev_pitch in ("dusty", "green", "bouncy", "flat", "balanced"):
+            if challenger_type == prev_pitch:
+                classified_type = prev_pitch
+                next_streak = 0
+            else:
+                margin = float(final_probs.get(challenger_type, 0.0)) - float(final_probs.get(prev_pitch, 0.0))
+                req_margin = 3.5 if has_strong_nlp else 6.0
+                next_streak = (prev_streak + 1) if (challenger_type == prev_challenger) else 1
+                if margin >= req_margin or (margin >= 2.5 and next_streak >= 2):
+                    classified_type = challenger_type
+                    next_streak = 0
+                else:
+                    classified_type = prev_pitch
+        else:
+            classified_type = challenger_type
+            next_streak = 0
         confidence = final_probs.get(classified_type, 50.0)
+        updated_pitch_state = {
+            "pitch": classified_type,
+            "probs": {arch: float(final_probs.get(arch, 20.0)) for arch in PITCH_ARCHETYPES},
+            "challenger": challenger_type,
+            "streak": next_streak,
+        }
 
         format_ground_archetype_canon = canonicalize_pitch_type(format_ground_archetype)
 
@@ -727,6 +779,7 @@ class LivePitchClassifier:
         return {
             "classified_pitch_type": classified_type,
             "classified_archetype": classified_type, # full backward compatibility
+            "pitch_state": updated_pitch_state,
             "confidence_pct": confidence,
             "drift_state": dt_drift_state,
             "decision_tree_step": dt_step,

@@ -585,7 +585,9 @@ async def get_matches(state: Optional[str] = None):
             LEFT JOIN players p_st ON md.striker_id = p_st.id
             LEFT JOIN players p_ns ON md.non_striker_id = p_ns.id
             LEFT JOIN players p_bw ON md.bowler_id = p_bw.id
-            ORDER BY md.id ASC
+            WHERE (md.striker_id IS NULL OR md.striker_id NOT LIKE '%_batter')
+              AND (md.commentary IS NULL OR md.commentary NOT LIKE '%to Batter%')
+            ORDER BY md.innings ASC, md.over ASC, md.ball ASC, md.id ASC
         """) as d_c:
             for d_r in await d_c.fetchall():
                 d_item = dict(d_r)
@@ -709,7 +711,8 @@ async def get_matches(state: Optional[str] = None):
                     deliveries=m_delivs if m_delivs else None,
                     venue_profile=v_profile,
                     commentary_strings=cmt_list,
-                    pitch_report=m.get("pitch_report")
+                    pitch_report=m.get("pitch_report"),
+                    previous_pitch_state=m.get("live_pitch_state_json"),
                 )
                 detected_pitch = live_pitch["classified_pitch_type"]
 
@@ -728,7 +731,7 @@ async def get_matches(state: Optional[str] = None):
                 if m.get("format") == "TEST" and m.get("current_innings", 1) < 4:
                     m["target_runs"] = None
                 if m.get("format") == "TEST":
-                    m["p_draw"] = m.get("p_draw") or 9.5
+                    m["p_draw"] = float(m["p_draw"]) if m.get("p_draw") is not None else 0.0
                 else:
                     m["p_draw"] = 0.0
 
@@ -793,15 +796,27 @@ async def get_matches(state: Optional[str] = None):
                     live_pitch_type=detected_pitch
                 )
                 frozen_s3 = m["scenario_score_projections"].get("stage3_frozen") if isinstance(m.get("scenario_score_projections"), dict) else None
-                if _should_persist_frozen_stage3(m, frozen_s3):
+                p0_a_frozen = frozen_s3.get("p0_team_a") if isinstance(frozen_s3, dict) else None
+                if _should_persist_frozen_stage3(m, frozen_s3) or _p0_needs_stage3_sync(m, p0_a_frozen):
                     frozen_str = json.dumps(frozen_s3)
-                    if await _persist_frozen_stage3_column(conn, m["id"], frozen_str, commit=False):
+                    if await _persist_frozen_stage3_column(conn, m["id"], frozen_str, p0_a_frozen=p0_a_frozen, existing_row=m, commit=False):
                         m["stage3_frozen_json"] = frozen_str
                         _dirty_stage3_freeze_commit = True
                 if isinstance(frozen_s3, dict):
                     m["stage3_frozen"] = frozen_s3
+                    if _p0_needs_stage3_sync(m, p0_a_frozen):
+                        m["p0_pre_match"] = float(p0_a_frozen)
+                    if m.get("state") in ("SQUAD_ANNOUNCED", "UPCOMING_NO_SQUAD", "XI_AND_TOSS_LOCKED") and frozen_s3.get("p0_team_a") is not None and abs(float(m.get("p_team_a") or 50.0) - 50.0) < 0.05:
+                        m["p_team_a"] = float(frozen_s3["p0_team_a"])
+                        m["p_team_b"] = float(frozen_s3.get("p0_team_b", round(100.0 - m["p_team_a"], 1)))
+                        m["p_draw"] = float(frozen_s3.get("p0_draw", 0.0)) if m_fmt == "TEST" else 0.0
 
-                if m_fmt == "TEST" and m.get("scenario_score_projections") and isinstance(m["scenario_score_projections"], dict):
+                has_valid_live_test_prob = (
+                    m.get("state") in ("LIVE_BALL_BY_BALL", "COMPLETED")
+                    and m.get("p_team_a") is not None
+                    and abs(float(m.get("p_team_a") or 50.0) - 50.0) > 0.05
+                )
+                if m_fmt == "TEST" and not has_valid_live_test_prob and m.get("scenario_score_projections") and isinstance(m["scenario_score_projections"], dict):
                     ltip = m["scenario_score_projections"].get("live_test_innings_progression")
                     if isinstance(ltip, dict):
                         test_win_p = ltip.get("win_probabilities")
@@ -1053,18 +1068,29 @@ async def get_matches(state: Optional[str] = None):
                 m["pitch_display_name"] = pitch_display_map.get(c_pitch, f"{c_pitch.capitalize()} Deck")
 
                 # Test Match Win Probability Synchronization & In-Play Ground-Truth Invariance
-                if m.get("format") == "TEST" and m.get("scenario_score_projections"):
+                if m.get("state") in ["LIVE_BALL_BY_BALL", "COMPLETED"] and m.get("p_team_a") is not None:
+                    # In-Play / Completed Ground-Truth: strictly preserve authoritative Stage 4 ball-by-ball values
+                    pa_f = round(float(m["p_team_a"]), 1)
+                    pb_f = round(float(m["p_team_b"]), 1)
+                    pd_f = round(float(m["p_draw"]) if m.get("p_draw") is not None else 0.0, 1) if m.get("format") == "TEST" else 0.0
+                    if m.get("format") == "TEST" and abs((pa_f + pb_f + pd_f) - 100.0) > 0.5:
+                        pd_f = round(max(0.0, min(95.0, pd_f)), 1)
+                        decisive = max(0.0, 100.0 - pd_f)
+                        denom = pa_f + pb_f
+                        pa_f = round(decisive * (pa_f / denom), 1) if denom > 0 else round(decisive * 0.5, 1)
+                        pb_f = round(max(0.0, 100.0 - pd_f - pa_f), 1)
+                    elif m.get("format") != "TEST":
+                        pb_f = round(max(0.0, 100.0 - pa_f), 1)
+                    m["p_team_a"] = pa_f
+                    m["p_team_b"] = pb_f
+                    m["p_draw"] = pd_f
+                elif m.get("format") == "TEST" and m.get("scenario_score_projections"):
                     tp = m["scenario_score_projections"].get("live_test_innings_progression")
                     if tp and isinstance(tp, dict) and tp.get("win_probabilities"):
                         wp = tp["win_probabilities"]
                         m["p_team_a"] = wp["p_team_a"]
                         m["p_team_b"] = wp["p_team_b"]
                         m["p_draw"] = wp["p_draw"]
-                elif m.get("state") in ["LIVE_BALL_BY_BALL", "COMPLETED"] and m.get("p_team_a") is not None:
-                    # In-Play / Completed Ground-Truth: strictly preserve real ball-by-ball inference values stored in DB
-                    m["p_team_a"] = float(m["p_team_a"])
-                    m["p_team_b"] = float(m["p_team_b"])
-                    m["p_draw"] = float(m.get("p_draw") or 0.0) if m.get("format") == "TEST" else 0.0
 
                 if m.get("format") != "TEST":
                     m["p_draw"] = 0.0
@@ -1260,15 +1286,47 @@ def _should_persist_frozen_stage3(match_row: Dict[str, Any], new_frozen: Any) ->
     return False
 
 
-async def _persist_frozen_stage3_column(conn: Any, match_id: str, frozen_str: str, commit: bool = False) -> bool:
-    """Writes stage3_frozen_json, auto-adding the column on legacy DBs if init_db hasn't run yet."""
+def _p0_needs_stage3_sync(existing_row: Optional[Dict[str, Any]], p0_a_frozen: Optional[float]) -> bool:
+    if p0_a_frozen is None or existing_row is None:
+        return False
+    cur = existing_row.get("p0_pre_match")
+    if cur is None:
+        return True
+    cur_f = float(cur)
+    if abs(cur_f - float(p0_a_frozen)) < 0.05:
+        return False
+    if abs(cur_f - 50.0) < 0.05:
+        return True
+    p1 = existing_row.get("p1_macro")
+    p2 = existing_row.get("p2_squad")
+    if (p1 is not None and abs(cur_f - float(p1)) < 0.05) or (p2 is not None and abs(cur_f - float(p2)) < 0.05):
+        return True
+    return False
+
+
+async def _persist_frozen_stage3_column(
+    conn: Any,
+    match_id: str,
+    frozen_str: str,
+    p0_a_frozen: Optional[float] = None,
+    existing_row: Optional[Dict[str, Any]] = None,
+    commit: bool = False,
+) -> bool:
+    """Writes stage3_frozen_json (and calibrates stale pre-Stage-3 p0_pre_match), auto-migrating legacy DBs."""
+    update_p0 = _p0_needs_stage3_sync(existing_row, p0_a_frozen)
+    sql = (
+        "UPDATE matches SET stage3_frozen_json = ?, p0_pre_match = ? WHERE id = ?"
+        if update_p0
+        else "UPDATE matches SET stage3_frozen_json = ? WHERE id = ?"
+    )
+    params = (frozen_str, float(p0_a_frozen), match_id) if update_p0 else (frozen_str, match_id)
     try:
-        await conn.execute("UPDATE matches SET stage3_frozen_json = ? WHERE id = ?", (frozen_str, match_id))
+        await conn.execute(sql, params)
     except Exception as exc:
         if "stage3_frozen_json" in str(exc):
             try:
                 await conn.execute("ALTER TABLE matches ADD COLUMN stage3_frozen_json TEXT DEFAULT NULL")
-                await conn.execute("UPDATE matches SET stage3_frozen_json = ? WHERE id = ?", (frozen_str, match_id))
+                await conn.execute(sql, params)
             except Exception:
                 return False
         else:
@@ -1552,13 +1610,27 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
             LEFT JOIN players p_ns ON md.non_striker_id = p_ns.id
             LEFT JOIN players p_bw ON md.bowler_id = p_bw.id
             WHERE md.match_id = ?
-            ORDER BY md.id ASC
+              AND (md.striker_id IS NULL OR md.striker_id NOT LIKE '%_batter')
+              AND (md.commentary IS NULL OR md.commentary NOT LIKE '%to Batter%')
+            ORDER BY md.innings ASC, md.over ASC, md.ball ASC, md.id ASC
         """
         async with conn.execute(deliv_query, (match_id,)) as cursor:
-            deliv_rows = [dict(r) for r in await cursor.fetchall()]
+            raw_deliv_rows = [dict(r) for r in await cursor.fetchall()]
 
-        # Ensure all delivery worm points are strictly standardized on 0-100 percentage scale and compute p_team_b_after and p_draw
         m_format = match_data.get("format", "T20I")
+        max_ov_limit = 20 if m_format in ("T20", "T20I") else (50 if m_format == "ODI" else 500)
+        dedup_delivs: Dict[tuple, Dict[str, Any]] = {}
+        for dr in raw_deliv_rows:
+            try:
+                ov_i = int(dr.get("over") or 0)
+                bl_i = int(dr.get("ball") or 0)
+                inn_i = int(dr.get("innings") or 1)
+            except (ValueError, TypeError):
+                continue
+            if ov_i > max_ov_limit or ov_i < 0:
+                continue
+            dedup_delivs[(inn_i, ov_i, bl_i)] = dr
+        deliv_rows = [dedup_delivs[k] for k in sorted(dedup_delivs.keys())]
         m_p_draw = float(match_data.get("p_draw") or 0.0) if m_format == "TEST" else 0.0
         for r in deliv_rows:
             if r.get("p_team_a_after") is not None and r["p_team_a_after"] <= 1.0:
@@ -1618,7 +1690,8 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
             deliveries=deliv_rows,
             venue_profile=v_profile,
             commentary_strings=commentary_strings,
-            pitch_report=match_data.get("pitch_report")
+            pitch_report=match_data.get("pitch_report"),
+            previous_pitch_state=match_data.get("live_pitch_state_json"),
         )
         detected_pitch = live_pitch_eval["classified_pitch_type"]
 
@@ -2054,9 +2127,10 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
         )
         match_data["scenario_score_projections"] = score_projections
         frozen_s3_detail = score_projections.get("stage3_frozen") if isinstance(score_projections, dict) else None
-        if _should_persist_frozen_stage3(match_data, frozen_s3_detail):
+        p0_a_detail = frozen_s3_detail.get("p0_team_a") if isinstance(frozen_s3_detail, dict) else None
+        if _should_persist_frozen_stage3(match_data, frozen_s3_detail) or _p0_needs_stage3_sync(match_data, p0_a_detail):
             frozen_str_detail = json.dumps(frozen_s3_detail)
-            if await _persist_frozen_stage3_column(conn, match_id, frozen_str_detail, commit=True):
+            if await _persist_frozen_stage3_column(conn, match_id, frozen_str_detail, p0_a_frozen=p0_a_detail, existing_row=match_data, commit=True):
                 match_data["stage3_frozen_json"] = frozen_str_detail
         if isinstance(frozen_s3_detail, dict):
             match_data["stage3_frozen"] = frozen_s3_detail
@@ -2064,8 +2138,19 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
                 match_data.get("dual_first_innings_scenarios")
                 or frozen_s3_detail.get("dual_first_innings_scenarios")
             )
+            if _p0_needs_stage3_sync(match_data, p0_a_detail):
+                match_data["p0_pre_match"] = float(p0_a_detail)
+            if match_data.get("state") in ("SQUAD_ANNOUNCED", "UPCOMING_NO_SQUAD", "XI_AND_TOSS_LOCKED") and frozen_s3_detail.get("p0_team_a") is not None and abs(float(match_data.get("p_team_a") or 50.0) - 50.0) < 0.05:
+                match_data["p_team_a"] = float(frozen_s3_detail["p0_team_a"])
+                match_data["p_team_b"] = float(frozen_s3_detail.get("p0_team_b", round(100.0 - match_data["p_team_a"], 1)))
+                match_data["p_draw"] = float(frozen_s3_detail.get("p0_draw", 0.0)) if m_format == "TEST" else 0.0
 
-        if match_data.get("format") == "TEST" and score_projections and isinstance(score_projections, dict):
+        has_valid_live_test_prob_det = (
+            match_data.get("state") in ("LIVE_BALL_BY_BALL", "COMPLETED")
+            and match_data.get("p_team_a") is not None
+            and abs(float(match_data.get("p_team_a") or 50.0) - 50.0) > 0.05
+        )
+        if match_data.get("format") == "TEST" and not has_valid_live_test_prob_det and score_projections and isinstance(score_projections, dict):
             ltip = score_projections.get("live_test_innings_progression")
             if isinstance(ltip, dict):
                 test_win_p = ltip.get("win_probabilities")
@@ -2168,8 +2253,26 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
                 s4["team_a_top_3_bowlers"] = [dict(bw) for bw in player_projections["team_a"].get("bowlers_projections", [])[:3]]
                 s4["team_b_top_3_bowlers"] = [dict(bw) for bw in player_projections["team_b"].get("bowlers_projections", [])[:3]]
 
-        # Test Match Win Probability Synchronization from Authenticated 4-Innings Progression
-        if match_data.get("format") == "TEST" and score_projections.get("live_test_innings_progression"):
+        # Synchronize Live/Completed DB Stage 4 Probabilities first; only use Test progression pre-Stage-4
+        if match_data.get("state") in ["LIVE_BALL_BY_BALL", "COMPLETED"] and match_data.get("p_team_a") is not None:
+            pa_f = round(float(match_data["p_team_a"]), 1)
+            pb_f = round(float(match_data["p_team_b"]), 1)
+            pd_f = round(float(match_data.get("p_draw") or 0.0), 1) if match_data.get("format") == "TEST" else 0.0
+            if match_data.get("format") == "TEST" and abs((pa_f + pb_f + pd_f) - 100.0) > 0.5:
+                pd_f = round(max(0.0, min(95.0, pd_f)), 1)
+                decisive = max(0.0, 100.0 - pd_f)
+                denom = pa_f + pb_f
+                if denom > 0:
+                    pa_f = round(decisive * (pa_f / denom), 1)
+                else:
+                    pa_f = round(decisive * 0.5, 1)
+                pb_f = round(max(0.0, 100.0 - pd_f - pa_f), 1)
+            elif match_data.get("format") != "TEST":
+                pb_f = round(max(0.0, 100.0 - pa_f), 1)
+            match_data["p_team_a"] = pa_f
+            match_data["p_team_b"] = pb_f
+            match_data["p_draw"] = pd_f
+        elif match_data.get("format") == "TEST" and score_projections.get("live_test_innings_progression"):
             test_prog = score_projections["live_test_innings_progression"]
             if test_prog and test_prog.get("win_probabilities"):
                 wp = test_prog["win_probabilities"]
@@ -2180,11 +2283,6 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
                     match_data["weather_report"]["test_weather_impact"]["projected_draw_pct"] = wp["p_draw"]
                 if "test_weather_impact" in weather_eval:
                     weather_eval["test_weather_impact"]["projected_draw_pct"] = wp["p_draw"]
-        elif match_data.get("state") in ["LIVE_BALL_BY_BALL", "COMPLETED"] and match_data.get("p_team_a") is not None:
-            # Authoritative in-play inference: strictly preserve stored DB probability exactly matching card
-            match_data["p_team_a"] = float(match_data["p_team_a"])
-            match_data["p_team_b"] = float(match_data["p_team_b"])
-            match_data["p_draw"] = float(match_data.get("p_draw") or 0.0) if match_data.get("format") == "TEST" else 0.0
 
         if match_data.get("format") != "TEST":
             match_data["p_draw"] = 0.0

@@ -785,7 +785,25 @@ class CricApiSquadProvider:
         series_name = m.get("series_name") or f"{c1} vs {c2} {fmt}"
         scheduled = m.get("date_time_gmt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         status_text = m.get("status_text") or f"Live {fmt} via CricAPI"
-        p_draw_init = 33.3 if fmt == "TEST" else 0.0
+        try:
+            from ...engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability, get_ground_pitch_archetype
+            init_arch = get_ground_pitch_archetype(v_id or "", fmt)
+            ad_a = get_country_pitch_adaptability(c1, fmt, init_arch)
+            ad_b = get_country_pitch_adaptability(c2, fmt, init_arch)
+            init_diff = (ad_a - ad_b) * 0.45
+            if fmt == "TEST":
+                p_draw_init = 14.0
+                dec_pool = 100.0 - p_draw_init
+                init_pa = round(max(12.0, min(dec_pool - 12.0, dec_pool * (0.5 + init_diff / 100.0))), 1)
+                init_pb = round(dec_pool - init_pa, 1)
+            else:
+                p_draw_init = 0.0
+                init_pa = round(max(15.0, min(85.0, 50.0 + init_diff)), 1)
+                init_pb = round(100.0 - init_pa, 1)
+        except Exception:
+            p_draw_init = 14.0 if fmt == "TEST" else 0.0
+            init_pa = 44.0 if fmt == "TEST" else 51.0
+            init_pb = 42.0 if fmt == "TEST" else 49.0
         par_init = 340 if fmt == "TEST" else (275 if fmt == "ODI" else 170)
 
         await conn.execute("""
@@ -797,14 +815,15 @@ class CricApiSquadProvider:
                 match_status_text, last_wpa_swing, last_event_description
             ) VALUES (
                 ?, ?, ?, ?, ?, ?,
-                ?, 1, 'LIVE_BALL_BY_BALL', 50.0, 50.0, ?,
-                50.0, 50.0, 50.0, ?,
+                ?, 1, 'LIVE_BALL_BY_BALL', ?, ?, ?,
+                ?, ?, ?, ?,
                 ?, ?, 0.0, 0.0,
                 ?, 0.0, ?
             )
         """, (
             cricapi_mid, series_name, fmt, c1, c2, v_id,
-            scheduled, p_draw_init, par_init,
+            scheduled, init_pa, init_pb, p_draw_init,
+            init_pa, init_pa, init_pa, par_init,
             par_init - 25, par_init + 25,
             status_text, status_text,
         ))
@@ -1180,6 +1199,7 @@ class CricApiSquadProvider:
                             team_a_batting = (bat_team == c1)
 
                             # Quick pitch classification (no ball-by-ball data needed)
+                            import json as _json_prov
                             pitch_classifier = LivePitchClassifier()
                             pitch_eval = pitch_classifier.classify_live_pitch(
                                 venue_id=v_id,
@@ -1190,9 +1210,11 @@ class CricApiSquadProvider:
                                 current_wickets=wkts,
                                 deliveries=[],
                                 commentary_strings=[status_text],
-                                match_day=s_day
+                                match_day=s_day,
+                                previous_pitch_state=db_m.get("live_pitch_state_json"),
                             )
                             detected_pitch = pitch_eval.get("classified_pitch_type", "balanced")
+                            prov_pitch_state_str = _json_prov.dumps(pitch_eval.get("pitch_state")) if pitch_eval.get("pitch_state") else None
 
                             t_a_adapt = get_country_pitch_adaptability(t_a, match_format, detected_pitch)
                             t_b_adapt = get_country_pitch_adaptability(t_b, match_format, detected_pitch)
@@ -1203,6 +1225,10 @@ class CricApiSquadProvider:
                             dummy_dugout = [{"t20_batting_avg": ref_avg, "batting_order": 10 - wkts_left + i + 1} for i in range(wkts_left)]
                             dummy_bowlers = [{"t20_economy": 7.5, "bowl_score": 55.0}] * 4
 
+                            prev_b_prov = int(db_m.get("current_balls") or 0)
+                            prev_inn_prov = int(db_m.get("current_innings") or 1)
+                            first_live_hydration = newly_created or (prev_runs == 0 and float(prev_ovs or 0.0) == 0.0 and runs > 0)
+                            step_prog = (score_changed or wicket_fell or innings_changed) and not is_stumps
                             stage4_res = calculate_stage4_live(
                                 innings=inn_val,
                                 score=runs,
@@ -1214,7 +1240,7 @@ class CricApiSquadProvider:
                                 non_striker={"balls_faced": 5, "batting_hand": "right"},
                                 bowler={"bowling_style": "RF"},
                                 team_a_batting=team_a_batting,
-                                p0_pre_match=float(db_m.get("p0_pre_match") or 50.0),
+                                p0_pre_match=float(db_m.get("p0_pre_match") or init_pa if newly_created else (db_m.get("p0_pre_match") or 50.0)),
                                 previous_p_team_a=float(db_m.get("p_team_a") or 50.0),
                                 dugout_players=dummy_dugout,
                                 bowlers_list=dummy_bowlers,
@@ -1226,26 +1252,49 @@ class CricApiSquadProvider:
                                 innings_1_score=i1_runs,
                                 innings_2_score=i2_runs,
                                 match_day=s_day,
-                                is_stumps=bool(is_stumps),
-                                previous_p_draw=float(db_m.get("p_draw") or 33.3) if match_format == "TEST" else None,
+                                is_stumps=bool(is_stumps) and not first_live_hydration,
+                                previous_p_draw=(float(db_m.get("p_draw")) if (db_m.get("p_draw") is not None and float(db_m.get("p_draw") or 0.0) > 0.0) else 18.2) if match_format == "TEST" else None,
+                                prev_score=prev_runs,
+                                prev_wickets=prev_wkts,
+                                prev_overs=int(prev_ovs),
+                                prev_balls=prev_b_prov,
+                                prev_innings=prev_inn_prov,
+                                is_progress_step=step_prog or first_live_hydration,
                             )
 
-                            new_p_a   = stage4_res.get("p_team_a", float(db_m.get("p_team_a") or 50.0))
-                            new_p_b   = stage4_res.get("p_team_b", float(db_m.get("p_team_b") or 50.0))
-                            new_p_draw = stage4_res.get("p_draw", 0.0) if match_format == "TEST" else 0.0
-                            new_wpa   = stage4_res.get("wpa", 0.0)
+                            if (is_stumps or not step_prog) and not first_live_hydration:
+                                from ...engine.stage4_live import resolve_break_frozen_probs
+                                new_p_a, new_p_b, new_p_draw = resolve_break_frozen_probs(db_m, stage4_res, match_format)
+                                new_wpa = 0.0
+                            else:
+                                new_p_a = stage4_res.get("p_team_a", float(db_m.get("p_team_a") or 50.0))
+                                new_p_b = stage4_res.get("p_team_b", float(db_m.get("p_team_b") or 50.0))
+                                new_p_draw = stage4_res.get("p_draw", 0.0) if match_format == "TEST" else 0.0
+                                new_wpa = 0.0 if is_stumps else stage4_res.get("wpa", 0.0)
                             new_par   = stage4_res.get("projected_score", float(db_m.get("par_score_projected") or 0))
 
                             is_wicket_flag = 1 if wicket_fell else 0
-                            await conn.execute("""
-                                UPDATE matches SET
-                                    p_team_a = ?,
-                                    p_team_b = ?,
-                                    p_draw = ?,
-                                    last_wpa_swing = ?,
-                                    par_score_projected = ?
-                                WHERE id = ?
-                            """, (new_p_a, new_p_b, new_p_draw, new_wpa, new_par, mid))
+                            try:
+                                await conn.execute("""
+                                    UPDATE matches SET
+                                        p_team_a = ?,
+                                        p_team_b = ?,
+                                        p_draw = ?,
+                                        last_wpa_swing = ?,
+                                        par_score_projected = ?,
+                                        live_pitch_state_json = COALESCE(?, live_pitch_state_json)
+                                    WHERE id = ?
+                                """, (new_p_a, new_p_b, new_p_draw, new_wpa, new_par, prov_pitch_state_str, mid))
+                            except Exception:
+                                await conn.execute("""
+                                    UPDATE matches SET
+                                        p_team_a = ?,
+                                        p_team_b = ?,
+                                        p_draw = ?,
+                                        last_wpa_swing = ?,
+                                        par_score_projected = ?
+                                    WHERE id = ?
+                                """, (new_p_a, new_p_b, new_p_draw, new_wpa, new_par, mid))
 
                             if wicket_fell:
                                 logger.info(

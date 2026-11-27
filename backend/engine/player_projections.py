@@ -16,6 +16,7 @@ Calculates:
    - Top run scorer and top wicket-taker dynamically identified across all 3 stages
 """
 
+import hashlib
 import json
 import math
 import numpy as np
@@ -1891,7 +1892,7 @@ def predict_live_innings_score_monte_carlo(
     # Guarantees identical outputs across repeated requests as long as ball state hasn't advanced,
     # completely eliminating random UI score flickering.
     seed_str = f"{match_data.get('id', '')}_{curr_score}_{curr_wkts}_{int(curr_overs * 10)}_{curr_balls}_{fmt}_{ground_arch}"
-    sim_seed = int(abs(hash(seed_str)) % (2**31 - 1))
+    sim_seed = int(hashlib.sha256(seed_str.encode("utf-8")).hexdigest()[:8], 16)
     np.random.seed(sim_seed)
 
     if wickets_left <= 0:
@@ -2650,7 +2651,7 @@ def predict_live_innings_score_monte_carlo(
             "tension_hazard": tension_hazard
         }
 
-STAGE3_FROZEN_MODEL_VERSION = "stage3_6signal_v3"
+STAGE3_FROZEN_MODEL_VERSION = "stage3_6signal_v4"
 
 
 def _clean_prematch_xi(squad: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -2788,6 +2789,9 @@ def build_frozen_stage3_snapshot(
         dual_scenarios = {
             "format": fmt,
             "toss_confirmed": bool(dual_res.get("toss_confirmed")),
+            "p0_team_a": dual_res.get("p0_team_a"),
+            "p0_team_b": dual_res.get("p0_team_b"),
+            "p0_draw": dual_res.get("p0_draw", 0.0),
             "team_a_bats_first": {
                 **{k: v for k, v in side_a.items() if k != "features"},
                 "signals": signals_a,
@@ -2803,6 +2807,9 @@ def build_frozen_stage3_snapshot(
             "format": fmt,
             "toss_confirmed": bool(dual_res.get("toss_confirmed")),
             "dominant_pitch": f_a["dominant_pitch"],
+            "p0_team_a": dual_res.get("p0_team_a"),
+            "p0_team_b": dual_res.get("p0_team_b"),
+            "p0_draw": dual_res.get("p0_draw", 0.0),
             "team_a_par": int(side_a["projected_score"]),
             "team_a_min": int(side_a["min_score"]),
             "team_a_max": int(side_a["max_score"]),
@@ -3550,9 +3557,21 @@ def compute_match_scenario_score_projections(
                 p_b_calc = round(decisive_pct - p_a_calc, 1)
 
                 if match_data.get("state") == "LIVE_BALL_BY_BALL":
-                    p_a_calc = float(match_data.get("p_team_a") if match_data.get("p_team_a") is not None else p_a_calc)
-                    p_b_calc = float(match_data.get("p_team_b") if match_data.get("p_team_b") is not None else p_b_calc)
-                    draw_pct = float(match_data.get("p_draw") if match_data.get("p_draw") is not None else draw_pct)
+                    db_pa = match_data.get("p_team_a")
+                    db_pb = match_data.get("p_team_b")
+                    db_pd = match_data.get("p_draw")
+                    if db_pa is not None and db_pb is not None:
+                        db_pa_f = round(float(db_pa), 1)
+                        db_pb_f = round(float(db_pb), 1)
+                        db_pd_f = round(float(db_pd or 0.0), 1)
+                        if abs((db_pa_f + db_pb_f + db_pd_f) - 100.0) <= 0.5:
+                            p_a_calc, p_b_calc, draw_pct = db_pa_f, db_pb_f, db_pd_f
+                        else:
+                            draw_pct = round(max(0.0, min(95.0, db_pd_f)), 1)
+                            dec_rem = max(0.0, 100.0 - draw_pct)
+                            denom = db_pa_f + db_pb_f
+                            p_a_calc = round(dec_rem * (db_pa_f / denom), 1) if denom > 0 else round(dec_rem * 0.5, 1)
+                            p_b_calc = round(max(0.0, 100.0 - draw_pct - p_a_calc), 1)
 
                 live_test_innings_progression = {
                     "current_innings_number": curr_innings,

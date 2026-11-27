@@ -750,6 +750,8 @@ def calculate_stage3_xi_locked(
 
     score_model_details = None
     dual_first_innings_scenarios = None
+    calibrated_p0_a = None
+    calibrated_p0_draw = None
     if use_ground_pitch_model and fmt in ("ODI", "T20I", "TEST"):
         try:
             from .stage3_ground_pitch_model import (
@@ -771,9 +773,14 @@ def calculate_stage3_xi_locked(
                 boundary_multiplier=boundary_multiplier,
                 match_date=match_date,
             )
+            calibrated_p0_a = dual_res.get("p0_team_a")
+            calibrated_p0_draw = dual_res.get("p0_draw")
             dual_first_innings_scenarios = {
                 "format": fmt,
                 "toss_confirmed": toss_known,
+                "p0_team_a": dual_res.get("p0_team_a"),
+                "p0_team_b": dual_res.get("p0_team_b"),
+                "p0_draw": dual_res.get("p0_draw"),
                 "team_a_bats_first": {
                     **{k: v for k, v in dual_res["if_team_a_bats_first"].items() if k != "features"},
                     "signals": {
@@ -807,16 +814,24 @@ def calculate_stage3_xi_locked(
             dual_first_innings_scenarios = None
 
     if fmt == "TEST":
-        p_draw = round(venue.get("test_draw_pct", 0.11) * 100.0, 1)
+        base_draw = round(venue.get("test_draw_pct", 0.11) * 100.0, 1)
+        p_draw = round(0.5 * base_draw + 0.5 * float(calibrated_p0_draw), 1) if calibrated_p0_draw is not None else base_draw
         decisive_pool = 100.0 - p_draw
-        p2_decisive_share = min(99.5, max(0.5, (p2_squad_prob_a / max(1.0, decisive_pool)) * 100.0))
-        p_a_decisive = 0.25 * p2_decisive_share + 0.75 * p_a_mc
+        if calibrated_p0_a is not None:
+            cal_share = min(96.0, max(4.0, (float(calibrated_p0_a) / max(1.0, decisive_pool)) * 100.0))
+            p_a_decisive = 0.65 * cal_share + 0.35 * p_a_mc
+        else:
+            p2_decisive_share = min(99.5, max(0.5, (p2_squad_prob_a / max(1.0, decisive_pool)) * 100.0))
+            p_a_decisive = 0.25 * p2_decisive_share + 0.75 * p_a_mc
         p_a_final = round((p_a_decisive / 100.0) * decisive_pool, 1)
         p_b_final = round(decisive_pool - p_a_final, 1)
     else:
         p_draw = 0.0
-        # Bayesian log-odds blending of Stage 2 Squad Prior (25%) + Confirmed XI Micro-Tensors (75%)
-        p_a_final = round(0.25 * p2_squad_prob_a + 0.75 * p_a_mc, 1)
+        # Align Stage 3 probability with 6-signal calibrated par/adaptability/duels + MC simulation
+        if calibrated_p0_a is not None:
+            p_a_final = round(0.65 * float(calibrated_p0_a) + 0.35 * p_a_mc, 1)
+        else:
+            p_a_final = round(0.25 * p2_squad_prob_a + 0.75 * p_a_mc, 1)
         p_b_final = round(100.0 - p_a_final, 1)
     delta_toss_shift = round(p_a_final - p2_squad_prob_a, 1)
 

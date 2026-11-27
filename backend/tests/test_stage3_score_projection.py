@@ -338,7 +338,7 @@ class TestStage3ScoreProjection(unittest.TestCase):
             self.assertEqual(xi_cnt, 22)
             self.assertGreater(m_row["par_score_projected"], 120)
             self.assertIsNotNone(m_row["stage3_frozen_json"])
-            self.assertIn("stage3_6signal_v3", m_row["stage3_frozen_json"])
+            self.assertIn("stage3_6signal_v4", m_row["stage3_frozen_json"])
 
     def test_test_format_6_signal_stage3_and_stage4_freeze_invariance(self):
         import json

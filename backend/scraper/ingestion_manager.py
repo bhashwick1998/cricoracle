@@ -284,13 +284,27 @@ class IngestionManager:
                 if not existing:
                     sched = fx.get("scheduled_start") or "2026-11-27T14:00:00Z"
                     ser_nm = fx.get("series_name") or f"{c1} vs {c2} {fmt}"
+                    from ..engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability, get_ground_pitch_archetype
+                    init_arch = get_ground_pitch_archetype(v_id or "", fmt)
+                    ad_a = get_country_pitch_adaptability(c1, fmt, init_arch)
+                    ad_b = get_country_pitch_adaptability(c2, fmt, init_arch)
+                    init_diff = (ad_a - ad_b) * 0.45
+                    if fmt == "TEST":
+                        init_draw = 14.0
+                        dec_pool = 100.0 - init_draw
+                        init_pa = round(max(12.0, min(dec_pool - 12.0, dec_pool * (0.5 + init_diff / 100.0))), 1)
+                        init_pb = round(dec_pool - init_pa, 1)
+                    else:
+                        init_draw = 0.0
+                        init_pa = round(max(15.0, min(85.0, 50.0 + init_diff)), 1)
+                        init_pb = round(100.0 - init_pa, 1)
                     await conn.execute("""
                         INSERT OR IGNORE INTO matches (
                             id, series_name, format, team_a_id, team_b_id, venue_id,
-                            scheduled_start, is_day_night, state, p_team_a, p_team_b,
-                            par_score_projected, last_event_description
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'SQUAD_ANNOUNCED', 50.0, 50.0, ?, ?)
-                    """, (target_mid, ser_nm, fmt, c1, c2, v_id, sched, 275 if fmt == "ODI" else 170, f"Scheduled {fmt} via CricAPI"))
+                            scheduled_start, is_day_night, state, p_team_a, p_team_b, p_draw,
+                            p1_macro, p2_squad, p0_pre_match, par_score_projected, last_event_description
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'SQUAD_ANNOUNCED', ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (target_mid, ser_nm, fmt, c1, c2, v_id, sched, init_pa, init_pb, init_draw, init_pa, init_pa, init_pa, 330 if fmt == "TEST" else (275 if fmt == "ODI" else 170), f"Scheduled {fmt} via CricAPI"))
                 elif existing["state"] not in ("LIVE_BALL_BY_BALL", "COMPLETED") and v_id:
                     await conn.execute("UPDATE matches SET venue_id = COALESCE(?, venue_id) WHERE id = ?", (v_id, target_mid))
                 await conn.commit()
@@ -1209,6 +1223,7 @@ class IngestionManager:
             bw_dossier = get_player_dossier(bw_id, "bowler") if bw_id else {}
             bw_dossier.update({"id": bw_id, "bowling_style": "RF", "name": bw_dossier.get("name", "Bowler")})
 
+            import json as _json
             from ..engine.live_pitch_classifier import LivePitchClassifier
             pitch_classifier = LivePitchClassifier()
             pitch_eval = pitch_classifier.classify_live_pitch(
@@ -1220,9 +1235,11 @@ class IngestionManager:
                 current_wickets=live_data["current_wickets"],
                 deliveries=[],
                 commentary_strings=[live_data.get("last_event_description", ""), match.get("pitch_report", "")],
-                pitch_report=match.get("pitch_report")
+                pitch_report=match.get("pitch_report"),
+                previous_pitch_state=match.get("live_pitch_state_json"),
             )
             live_pitch_archetype = pitch_eval["classified_pitch_type"]
+            live_pitch_state_str = _json.dumps(pitch_eval.get("pitch_state")) if pitch_eval.get("pitch_state") else None
 
             from ..engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability, resolve_venue_dossier_context
             t_a = match.get("team_a_id", "IND")
@@ -1245,6 +1262,21 @@ class IngestionManager:
             )
             calibrated_dew_factor = dew_eval.get("dew_factor_calibrated", float(match.get("dew_factor") or 0.30))
 
+            prev_tuple_ca = (
+                int(match.get("current_innings") or 1),
+                int(match.get("current_score") or 0),
+                int(match.get("current_wickets") or 0),
+                int(match.get("current_overs") or 0),
+                int(match.get("current_balls") or 0),
+            )
+            curr_tuple_ca = (
+                int(live_data["current_innings"] or 1),
+                int(live_data["current_score"] or 0),
+                int(live_data["current_wickets"] or 0),
+                int(live_data["current_overs"] or 0),
+                int(live_data["current_balls"] or 0),
+            )
+            ca_progressed = (curr_tuple_ca != prev_tuple_ca)
             from ..engine.stage4_live import calculate_stage4_live
             res = calculate_stage4_live(
                 innings=live_data["current_innings"],
@@ -1270,20 +1302,31 @@ class IngestionManager:
                 innings_2_score=match.get("innings_2_score"),
                 match_day=match.get("stumps_day"),
                 is_stumps=bool(match.get("is_stumps")),
-                previous_p_draw=float(match.get("p_draw") or 0.0) if m_fmt == "TEST" else None,
+                previous_p_draw=(float(match.get("p_draw")) if match.get("p_draw") is not None else 18.2) if m_fmt == "TEST" else None,
                 pitch_detection_source=pitch_eval.get("detection_source", "LIVE_TELEMETRY"),
                 pitch_override_reason=pitch_eval.get("override_reason"),
                 is_day_night=bool(match.get("is_day_night", 0)),
                 dew_factor=calibrated_dew_factor,
                 dew_intelligence=dew_eval,
                 venue_name=v_name_hint,
-                historical_venue_par=hist_venue_par
+                historical_venue_par=hist_venue_par,
+                prev_score=match.get("current_score"),
+                prev_wickets=match.get("current_wickets"),
+                prev_overs=match.get("current_overs"),
+                prev_balls=match.get("current_balls"),
+                prev_innings=match.get("current_innings"),
+                is_progress_step=ca_progressed,
             )
 
-            p_a = res["p_team_a"]
-            p_b = res["p_team_b"]
-            p_draw = res.get("p_draw", 0.0) if match.get("format") == "TEST" else 0.0
-            wpa = res["wpa"]
+            if not ca_progressed or bool(match.get("is_stumps")):
+                from ..engine.stage4_live import resolve_break_frozen_probs
+                p_a, p_b, p_draw = resolve_break_frozen_probs(match, res, m_fmt)
+                wpa = 0.0
+            else:
+                p_a = res["p_team_a"]
+                p_b = res["p_team_b"]
+                p_draw = res.get("p_draw", 0.0) if match.get("format") == "TEST" else 0.0
+                wpa = res["wpa"]
 
             from ..engine.cricket_rules import evaluate_match_completion
             match_for_eval = dict(match)
@@ -1332,7 +1375,8 @@ class IngestionManager:
                     par_score_min = ?,
                     par_score_max = ?,
                     batting_tank_pct = ?,
-                    bowling_tank_pct = ?
+                    bowling_tank_pct = ?,
+                    live_pitch_state_json = COALESCE(?, live_pitch_state_json)
                 WHERE id = ?
             """, (
                 new_state,
@@ -1355,6 +1399,7 @@ class IngestionManager:
                 res.get("par_score_max"),
                 res.get("batting_tank_pct"),
                 res.get("bowling_tank_pct"),
+                live_pitch_state_str,
                 match_id
             ))
             await conn.commit()
@@ -1758,6 +1803,13 @@ class IngestionManager:
                     overs = cur_o
                     balls = cur_b
 
+            # Format Over-Bounds Guard (prevents 115.2..120.1 artifacts if a scraper misreads balls/other innings as overs)
+            max_ov_allowed = 20 if match_format in ("T20", "T20I") else (50 if match_format == "ODI" else 450)
+            if overs > max_ov_allowed:
+                logger.warning(f"Rejecting out-of-bounds over value {overs}.{balls} for {match_format} match {match_id}; restoring DB overs.")
+                overs = int(match.get("current_overs") or 0)
+                balls = int(match.get("current_balls") or 0)
+
 
             team_a_batting = (batting_team_id == match["team_a_id"])
 
@@ -2074,13 +2126,23 @@ class IngestionManager:
                 bowlers_real = [dict(r) for r in await c_bw.fetchall()]
 
             # 4. Multi-Approach Live Pitch Classification & Surface Adaptability
-            # Query ball-by-ball deliveries; if missing (e.g. offline fallback), reconstruct from scorecard
-            async with conn.execute("SELECT * FROM match_deliveries WHERE match_id = ? ORDER BY id ASC", (match_id,)) as d_c:
+            # Purge any legacy synthetic *_batter / out-of-range filler deliveries, then load real ball-by-ball history
+            await conn.execute("""
+                DELETE FROM match_deliveries
+                WHERE match_id = ?
+                  AND (striker_id LIKE '%_batter' OR commentary LIKE '%to Batter%' OR over > ?)
+            """, (match_id, max_ov_allowed))
+            async with conn.execute(
+                "SELECT * FROM match_deliveries WHERE match_id = ? ORDER BY innings ASC, over ASC, ball ASC, id ASC",
+                (match_id,),
+            ) as d_c:
                 deliv_rows = [dict(r) for r in await d_c.fetchall()]
 
+            pitch_deliv_context = deliv_rows
             if len(deliv_rows) < 12 and (len(batsmen) > 0 or len(scraped_bowlers) > 0):
                 try:
-                    from ..engine.scorecard_delivery_reconstructor import build_deliveries_from_scorecard, persist_deliveries_to_db
+                    from ..engine.scorecard_delivery_reconstructor import build_deliveries_from_scorecard
+                    # Keep reconstructed deliveries strictly in memory for pitch classification; never pollute live feed DB!
                     reconstructed = build_deliveries_from_scorecard(
                         match_id=match_id,
                         innings_num=inn_val,
@@ -2090,14 +2152,15 @@ class IngestionManager:
                         total_runs=runs,
                         total_wickets=wickets,
                         team_bat=batting_team_id,
-                        team_bowl=bowling_team_id
+                        team_bowl=bowling_team_id,
+                        match_format=match_format,
                     )
                     if reconstructed:
-                        await persist_deliveries_to_db(conn, reconstructed)
-                        deliv_rows = reconstructed
+                        pitch_deliv_context = reconstructed
                 except Exception as recon_err:
                     logger.debug(f"Delivery reconstruction notice for {match_id}: {recon_err}")
 
+            import json as _json_cb
             from ..engine.live_pitch_classifier import LivePitchClassifier
             pitch_classifier = LivePitchClassifier()
             v_id = match.get("venue_id", "rawalpindi")
@@ -2109,13 +2172,15 @@ class IngestionManager:
                 current_balls=balls,
                 current_score=runs,
                 current_wickets=wickets,
-                deliveries=deliv_rows,
+                deliveries=pitch_deliv_context,
                 commentary_strings=commentary_list,
                 pitch_report=scraped.get("pitch_report") or match.get("pitch_report"),
                 ball_age=overs + balls / 6.0,
-                match_day=stumps_day_val
+                match_day=stumps_day_val,
+                previous_pitch_state=match.get("live_pitch_state_json"),
             )
             detected_pitch = pitch_eval["classified_pitch_type"]
+            cb_pitch_state_str = _json_cb.dumps(pitch_eval.get("pitch_state")) if pitch_eval.get("pitch_state") else None
 
             from ..engine.cricsheet_pitch_intelligence import get_country_pitch_adaptability, resolve_venue_dossier_context
             t_a = match.get("team_a_id", "PAK")
@@ -2138,6 +2203,21 @@ class IngestionManager:
             )
             calibrated_dew_factor = dew_eval.get("dew_factor_calibrated", float(match.get("dew_factor") or 0.30))
 
+            prev_tuple_cb = (
+                int(match.get("current_innings") or 1),
+                int(match.get("current_score") or 0),
+                int(match.get("current_wickets") or 0),
+                int(match.get("current_overs") or 0),
+                int(match.get("current_balls") or 0),
+            )
+            curr_tuple_cb = (
+                int(inn_val or 1),
+                int(runs or 0),
+                int(wickets or 0),
+                int(overs or 0),
+                int(balls or 0),
+            )
+            cb_progressed = (curr_tuple_cb != prev_tuple_cb)
             from ..engine.stage4_live import calculate_stage4_live
             res = calculate_stage4_live(
                 innings=inn_val,
@@ -2163,27 +2243,32 @@ class IngestionManager:
                 innings_2_score=inn_2_score,
                 match_day=stumps_day_val,
                 is_stumps=bool(is_stumps_val),
-                previous_p_draw=float(match.get("p_draw") or 39.4) if match_format == "TEST" else None,
+                previous_p_draw=(float(match.get("p_draw")) if match.get("p_draw") is not None else 18.2) if match_format == "TEST" else None,
                 pitch_detection_source=pitch_eval.get("detection_source", "LIVE_SCORECARD_AND_COMMENTARY"),
                 pitch_override_reason=pitch_eval.get("override_reason"),
                 is_day_night=bool(match.get("is_day_night", 0)),
                 dew_factor=calibrated_dew_factor,
                 dew_intelligence=dew_eval,
                 venue_name=v_name_hint_cb,
-                historical_venue_par=hist_venue_par_cb
+                historical_venue_par=hist_venue_par_cb,
+                prev_score=match.get("current_score"),
+                prev_wickets=match.get("current_wickets"),
+                prev_overs=match.get("current_overs"),
+                prev_balls=match.get("current_balls"),
+                prev_innings=match.get("current_innings"),
+                is_progress_step=cb_progressed,
             )
 
-            if match_format == "TEST" and (is_stumps_val or match.get("is_stumps")):
-                p_a = float(match.get("p_team_a") or 18.7)
-                p_b = float(match.get("p_team_b") or 41.9)
-                p_draw = float(match.get("p_draw") or 39.4)
+            is_break_frozen = (not cb_progressed) or bool(is_stumps_val or (match_format == "TEST" and match.get("is_stumps")))
+            if is_break_frozen:
+                from ..engine.stage4_live import resolve_break_frozen_probs
+                p_a, p_b, p_draw = resolve_break_frozen_probs(match, res, match_format)
+                wpa = 0.0
             else:
                 p_a = res["p_team_a"]
                 p_b = res["p_team_b"]
                 p_draw = res.get("p_draw", 0.0) if match_format == "TEST" else 0.0
-
-            # Raw WPA directly from live engine
-            wpa = res["wpa"]
+                wpa = res["wpa"]
 
             event_desc = scraped.get("commentary") or f"Live: {scraped.get('score', '')} • {striker_name or 'Batter'} vs {bowler_name or 'Bowler'}"
 
@@ -2324,7 +2409,8 @@ class IngestionManager:
                     par_score_min = ?,
                     par_score_max = ?,
                     batting_tank_pct = ?,
-                    bowling_tank_pct = ?
+                    bowling_tank_pct = ?,
+                    live_pitch_state_json = COALESCE(?, live_pitch_state_json)
                 WHERE id = ?
             """, (
                 new_state,
@@ -2352,6 +2438,7 @@ class IngestionManager:
                 res.get("par_score_max"),
                 res.get("batting_tank_pct"),
                 res.get("bowling_tank_pct"),
+                cb_pitch_state_str,
                 match_id
             ))
             await conn.commit()

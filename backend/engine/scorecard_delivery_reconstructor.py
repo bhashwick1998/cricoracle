@@ -22,7 +22,8 @@ def build_deliveries_from_scorecard(
     total_runs: int,
     total_wickets: int,
     team_bat: str,
-    team_bowl: str
+    team_bowl: str,
+    match_format: str = "ODI",
 ) -> List[Dict[str, Any]]:
     """
     Reconstructs an authentic, sequenced ball-by-ball delivery telemetry array:
@@ -82,17 +83,23 @@ def build_deliveries_from_scorecard(
                 "bowler": d_text.split(" b ")[-1].strip() if " b " in d_text else ""
             })
 
-    # Total legal deliveries
-    tot_legal_balls = int(total_overs) * 6 + int(round((total_overs - int(total_overs)) * 10))
+    # Total legal deliveries strictly bounded by match format (prevents 115.2..120.1 artifacts in T20I/ODI)
+    fmt_u = str(match_format or "ODI").upper()
+    max_overs_fmt = 20 if "T20" in fmt_u else (50 if fmt_u == "ODI" else 450)
+    if total_overs > max_overs_fmt and fmt_u != "TEST":
+        tot_legal_balls = min(max_overs_fmt * 6, max(0, int(round(total_overs))))
+    else:
+        tot_legal_balls = int(total_overs) * 6 + int(round((total_overs - int(total_overs)) * 10))
     if tot_legal_balls <= 0:
         tot_legal_balls = sum(bp["total_balls"] for bp in bowler_profiles)
-        
+    tot_legal_balls = min(max_overs_fmt * 6, max(0, tot_legal_balls))
+
     cum_score = 0
     cum_wkts = 0
     wkt_idx = 0
 
     cur_ball = 0
-    cur_over = 1
+    cur_over = 0
     over_ball = 1
     bw_idx = 0
     
@@ -154,7 +161,7 @@ def build_deliveries_from_scorecard(
         if is_wkt:
             comm_text = f"{cur_over}.{over_ball} {b_name} to Batter, {w_comm}"
         elif runs_bat == 0:
-            comm_text = f"{cur_over}.{over_ball} {b_name} to Batter, no run, good length, beaten outside off, defended solidly"
+            comm_text = f"{cur_over}.{over_ball} {b_name} to Batter, no run, good length on off stump, defended solidly"
         elif runs_bat == 4:
             comm_text = f"{cur_over}.{over_ball} {b_name} to Batter, FOUR, cut past backward point to the fence"
         elif runs_bat == 1:

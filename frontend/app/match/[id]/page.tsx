@@ -4343,7 +4343,20 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     No deliveries logged yet. Real-time ball-by-ball telemetry updates automatically during active play.
                   </div>
                 ) : (
-                  [...deliveries].reverse().map((d: any) => (
+                  [...deliveries]
+                    .filter((d: any) => {
+                      const st = String(d?.striker_id || "");
+                      const cmt = String(d?.commentary || "");
+                      const maxOv = match.format === "TEST" ? 500 : (match.format === "ODI" ? 50 : 20);
+                      return !st.endsWith("_batter") && !cmt.includes("to Batter") && Number(d?.over || 0) <= maxOv;
+                    })
+                    .sort((a: any, b: any) => {
+                      const keyA = Number(a?.innings || 1) * 10000 + Number(a?.over || 0) * 6 + Number(a?.ball || 0);
+                      const keyB = Number(b?.innings || 1) * 10000 + Number(b?.over || 0) * 6 + Number(b?.ball || 0);
+                      if (keyA !== keyB) return keyB - keyA;
+                      return Number(b?.id || 0) - Number(a?.id || 0);
+                    })
+                    .map((d: any) => (
                     <div
                       key={d.id}
                       className={`p-3 rounded-xl border flex items-center justify-between text-xs ${
