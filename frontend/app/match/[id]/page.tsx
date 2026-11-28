@@ -2,7 +2,17 @@
 
 import React, { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
+import TeamFlag from "@/components/TeamFlag";
 import { getTeamMeta, formatDateTime, formatKickoffCountdown } from "@/lib/teamUtils";
+
+const formatCommentaryLine = (text: string) =>
+  String(text || "").replace(/^(\d+\.\d+)([WNB])(?=[A-Za-z])/, "$1 $2 • ");
+
+const getReadableSeriesColor = (primaryColor: string | undefined, fallback: string) => {
+  const c = String(primaryColor || "").toLowerCase();
+  if (!c || c === "#27272a" || c === "#18181b" || c === "#000000") return fallback;
+  return primaryColor || fallback;
+};
 import { apiUrl, getWsUrl, getPollIntervalMs, mergeMatchLiveDelta } from "@/lib/apiConfig";
 import {
   ArrowLeft,
@@ -930,12 +940,12 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
               <span>Hub</span>
             </Link>
             <div className="overflow-hidden">
-              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <span className="text-sm sm:text-base">{metaA.flag}</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <TeamFlag code={metaA.short} size="sm" />
                 <span className="font-black text-xs sm:text-base text-white tracking-tight truncate">
                   {metaA.name} vs {metaB.name}
                 </span>
-                <span className="text-sm sm:text-base">{metaB.flag}</span>
+                <TeamFlag code={metaB.short} size="sm" />
                 <span className="px-1.5 sm:px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-950 text-cyan-400 border border-cyan-800">
                   {match.format}
                 </span>
@@ -1133,9 +1143,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                 {/* Team A Profile */}
                 <div className="flex items-center gap-4">
                   <div
-                    className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-lg border ${metaA.borderGlow} bg-gradient-to-br ${metaA.gradient}`}
+                    className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg border ${metaA.borderGlow} bg-gradient-to-br ${metaA.gradient} shrink-0`}
                   >
-                    {metaA.flag}
+                    <TeamFlag code={metaA.short} size="lg" />
                   </div>
                   <div>
                     <div className="text-lg font-black text-white">{metaA.name}</div>
@@ -1213,7 +1223,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                         : isRainInterrupted
                         ? `🌧️ RAIN STOPPAGE • DLS PAR ${(match as any).dls_par_score || 109}`
                         : isStumps
-                        ? (match.stumps_label || "🌙 STUMPS • DAY 1 CLOSE OF PLAY")
+                        ? String(match.stumps_label || "STUMPS • CLOSE OF PLAY").replace(/^🌙\s*/, "")
                         : isStopped
                         ? ((match as any).stoppage_label || "PLAY STOPPED")
                         : ((match as any).match_status_text || "LIVE BALL BY BALL")}
@@ -1225,7 +1235,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                       return (
                         <div className="space-y-1 mb-1.5">
                           <div className="text-xs font-semibold text-slate-300 font-mono-numbers flex items-center justify-center gap-1.5 flex-wrap">
-                            <span>{inn1Team.flag}</span>
+                            <TeamFlag code={inn1Team.short} size="xs" />
                             <span className="text-slate-400 font-bold">{inn1Team.name}{match.format === "TEST" ? " (1st Inn):" : ":"}</span>
                             <span className="text-white font-bold">
                               {(match as any).innings_1_score}{(match as any).innings_1_wickets != null ? `/${(match as any).innings_1_wickets}` : ""}
@@ -1237,7 +1247,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                           </div>
                           {hasInn2 && (
                             <div className="text-xs font-semibold text-slate-300 font-mono-numbers flex items-center justify-center gap-1.5 flex-wrap">
-                              <span>{inn2Team.flag}</span>
+                              <TeamFlag code={inn2Team.short} size="xs" />
                               <span className="text-slate-400 font-bold">{inn2Team.name}{match.format === "TEST" ? " (1st Inn):" : ":"}</span>
                               <span className="text-white font-bold">
                                 {(match as any).innings_2_score}{(match as any).innings_2_wickets != null ? `/${(match as any).innings_2_wickets}` : ""}
@@ -1252,7 +1262,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                       );
                     })()}
                     <div className="flex items-center justify-center gap-2 mb-1">
-                      <span className="text-xl">{battingTeam.flag}</span>
+                      <TeamFlag code={battingTeam.short} size="sm" />
                       <span className="text-sm font-black text-cyan-300 uppercase tracking-wider">
                         {battingTeam.name} {match.format === "TEST" && match.current_innings >= 3 ? "2nd Innings Batting" : "Batting"}
                       </span>
@@ -1266,12 +1276,16 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     <div className="text-xs text-slate-400 mt-0.5">
                       Overs: <span className="font-bold text-slate-200 font-mono-numbers">{match.current_overs}.{match.current_balls}</span> / {match.format === "ODI" ? "50" : match.format === "TEST" ? "Day (90)" : "20"} ov
                     </div>
-                    <div className="text-[11px] text-slate-400 font-mono mt-1">
-                      vs {bowlingTeam.flag} <span className="text-slate-300 font-bold">{bowlingTeam.name}</span> Bowling
+                    <div className="text-[11px] text-slate-400 font-mono mt-1 flex items-center justify-center gap-1.5">
+                      <span>vs</span>
+                      <TeamFlag code={bowlingTeam.short} size="xs" />
+                      <span className="text-slate-300 font-bold">{bowlingTeam.name}</span>
+                      <span>Bowling</span>
                     </div>
                     {match.format === "TEST" && match.current_innings === 3 && (
-                      <div className="text-[11px] text-purple-300/90 font-mono mt-0.5">
-                        {bowlingTeam.flag} <span className="font-bold">{bowlingTeam.name} 2nd Innings:</span> Yet to Play
+                      <div className="text-[11px] text-purple-300/90 font-mono mt-0.5 flex items-center justify-center gap-1.5">
+                        <TeamFlag code={bowlingTeam.short} size="xs" />
+                        <span><span className="font-bold">{bowlingTeam.name} 2nd Innings:</span> Yet to Play</span>
                       </div>
                     )}
                     {match.format === "TEST" ? (
@@ -1336,9 +1350,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                 {renderTeamStatusSubtext(match.team_b_id, false)}
               </div>
               <div
-                className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-lg border ${metaB.borderGlow} bg-gradient-to-br ${metaB.gradient}`}
+                className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg border ${metaB.borderGlow} bg-gradient-to-br ${metaB.gradient} shrink-0`}
               >
-                {metaB.flag}
+                <TeamFlag code={metaB.short} size="lg" />
               </div>
             </div>
           </div>
@@ -1623,8 +1637,8 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className={`px-2.5 py-0.5 rounded text-[11px] font-mono font-black uppercase flex items-center gap-1 border shadow-sm ${
+              <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                <span className={`px-2.5 py-0.5 rounded text-[11px] font-mono font-black uppercase inline-flex items-center gap-1 border shadow-sm whitespace-nowrap ${
                   (match as any).is_pitch_override
                     ? "bg-emerald-950 text-emerald-300 border-emerald-600 font-black"
                     : "bg-cyan-950 text-cyan-300 border-cyan-800"
@@ -1634,7 +1648,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     {match.active_pitch_type || match.ground_pitch_archetype || "Flat"}
                   </span>
                 </span>
-                <span className="text-[11px] text-slate-300 capitalize font-medium">
+                <span className="text-[11px] text-slate-300 capitalize font-medium whitespace-nowrap">
                   {match.pitch_display_name ||
                    (match.ground_pitch_archetype === "dusty" || match.ground_pitch_archetype === "spin heavy" ? "Turning Deck (Dusty)" :
                     match.ground_pitch_archetype === "green" ? "Lush Seamer (Green)" :
@@ -1739,7 +1753,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                   <span className="text-xs font-bold text-white uppercase tracking-wider">
                     Format Deep Predictive Variables ({match.format})
                   </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-indigo-950 text-indigo-300 border border-indigo-800">
+                  <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-indigo-950 text-indigo-300 border border-indigo-800 whitespace-nowrap">
                     Calibrated Pre-Match Prior P₀
                   </span>
                 </div>
@@ -1764,7 +1778,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                     </div>
                     <div className="p-2 rounded-xl bg-slate-900/80 border border-slate-800">
                       <span className="text-[10px] text-slate-400 font-sans block">Tail-End Batting Depth (Wkts 8-11)</span>
-                      <span className="font-bold text-cyan-300 text-xs">
+                      <span className="font-bold text-cyan-300 text-xs whitespace-nowrap">
                         {metaA.short} {match.format_specific_variables.test_specific.tail_end_runs_team_a} vs {metaB.short} {match.format_specific_variables.test_specific.tail_end_runs_team_b} runs
                       </span>
                       <span className="text-[10px] text-emerald-400 font-sans block mt-0.5">
@@ -1950,14 +1964,14 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                         ? "Live Chase Win Probability"
                         : "Live Projected Score"}
                     </span>
-                    <div className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono">
+                    <div className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono whitespace-nowrap">
                       {match.format !== "TEST" && match.current_innings === 2 ? (
                         <span>{(match as any).batting_team_id === match.team_b_id ? metaB.short : metaA.short}: {(match as any).batting_team_id === match.team_b_id ? match.p_team_b : match.p_team_a}%</span>
                       ) : (
                         <span>~{score_projections.current_playing_team_projection.projected_final_score} runs</span>
                       )}
                     </div>
-                    <span className="text-xs font-mono text-slate-400">
+                    <span className="text-xs font-mono text-slate-400 whitespace-nowrap">
                       {match.format !== "TEST" && match.current_innings === 2 ? (
                         <span>Target: {match.target_runs || 0} • Need {Math.max(0, (match.target_runs || 0) - match.current_score)} off {Math.max(0, (match.format === "T20I" ? 120 : 300) - (Number(match.current_overs) * 6 + Number(match.current_balls)))} balls • CRR: {(Number(match.current_score) / Math.max(1, Number(match.current_overs) + Number(match.current_balls) / 6)).toFixed(2)}</span>
                       ) : (
@@ -2032,7 +2046,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
                   {[
                     {
                       id: "stage_3_xi_toss",
@@ -2102,10 +2116,10 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                                 <span className="text-[9px] text-rose-300 block font-sans font-semibold">
                                   {d.active_team_id || "Active"} Live Projected Total
                                 </span>
-                                <span className="text-lg font-black text-emerald-400">
+                                <span className="text-lg font-black text-emerald-400 whitespace-nowrap">
                                   ~{d.active_team_projected_final} runs
                                 </span>
-                                <span className="text-[10px] text-slate-400 block">
+                                <span className="text-[10px] text-slate-400 block whitespace-nowrap">
                                   Range: {d.active_team_score_range}
                                 </span>
                                 <span className="text-[9px] text-emerald-300/90 block mt-1 font-sans italic border-t border-slate-800/80 pt-1">
@@ -2161,7 +2175,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
               <div className="space-y-3">
                 {score_projections.live_test_innings_progression ? (
                 /* Test Match 2-Innings (4 Innings Total) Live Progression */
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-stretch">
                   {/* Innings 1 */}
                   {(() => {
                     const inn1 = score_projections.live_test_innings_progression.innings_1;
@@ -2175,8 +2189,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                               {!isClosed && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>}
                               {inn1.team_id} 1ST INNINGS • {isClosed ? "CLOSED" : "ACTIVE"}
                             </span>
-                            <span className="font-bold text-white text-xs">
-                              {inn1.team_id === metaA.short ? metaA.flag : metaB.flag} {inn1.team_id}
+                            <span className="font-bold text-white text-xs inline-flex items-center gap-1.5 shrink-0">
+                              <TeamFlag code={inn1.team_id} size="xs" />
+                              {inn1.team_id}
                             </span>
                           </div>
                           <div className="text-2xl font-black text-white font-mono mt-1">
@@ -2212,8 +2227,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                               {isActive && <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse"></span>}
                               {inn2.team_id} 1ST INNINGS • {isClosed2 ? "CLOSED" : isActive ? "ACTIVE" : "UPCOMING"}
                             </span>
-                            <span className="font-bold text-white text-xs">
-                              {inn2.team_id === metaA.short ? metaA.flag : metaB.flag} {inn2.team_id}
+                            <span className="font-bold text-white text-xs inline-flex items-center gap-1.5 shrink-0">
+                              <TeamFlag code={inn2.team_id} size="xs" />
+                              {inn2.team_id}
                             </span>
                           </div>
                           {isClosed2 ? (
@@ -2285,8 +2301,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                               {isActive3 && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse"></span>}
                               {inn3.team_id} 2ND INNINGS • {isActive3 ? "ACTIVE" : isClosed3 ? "CLOSED" : isFollowOn ? "FOLLOW-ON" : "PROJECTED"}
                             </span>
-                            <span className="font-bold text-white text-xs">
-                              {inn3.team_id === metaA.short ? metaA.flag : metaB.flag} {inn3.team_id}
+                            <span className="font-bold text-white text-xs inline-flex items-center gap-1.5 shrink-0">
+                              <TeamFlag code={inn3.team_id} size="xs" />
+                              {inn3.team_id}
                             </span>
                           </div>
                           {isActive3 ? (
@@ -2336,8 +2353,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                             <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
                               {inn4.team_id} 2ND INNINGS • {isContingent ? "YET TO PLAY" : "TARGET"}
                             </span>
-                            <span className="font-bold text-white text-xs">
-                              {inn4.team_id === metaA.short ? metaA.flag : metaB.flag} {inn4.team_id}
+                            <span className="font-bold text-white text-xs inline-flex items-center gap-1.5 shrink-0">
+                              <TeamFlag code={inn4.team_id} size="xs" />
+                              {inn4.team_id}
                             </span>
                           </div>
                           {isContingent ? (
@@ -3561,16 +3579,16 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
         )}
 
         {/* Tactical Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 scrollbar-none min-w-0">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3 min-w-0">
           <button
             onClick={() => setActiveTab("telemetry")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === "telemetry"
                 ? "bg-cyan-500 text-black shadow-lg shadow-cyan-500/20"
                 : "bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800"
             }`}
           >
-            <Activity className="w-4 h-4" />
+            <Activity className="w-3.5 h-3.5" />
             <span>Live Telemetry &amp; Worm</span>
           </button>
 
@@ -3578,25 +3596,25 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
 
           <button
             onClick={() => setActiveTab("live_pitch")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === "live_pitch"
                 ? "bg-amber-500 text-black shadow-lg shadow-amber-500/20"
                 : "bg-slate-900 text-amber-400 hover:text-white hover:bg-slate-800 border border-amber-900/40"
             }`}
           >
-            <Zap className="w-4 h-4 animate-pulse" />
+            <Zap className="w-3.5 h-3.5 animate-pulse" />
             <span>Live Pitch &amp; Drift</span>
           </button>
 
           <button
             onClick={() => setActiveTab("weather_dls")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === "weather_dls"
                 ? "bg-sky-500 text-black shadow-lg shadow-sky-500/20"
                 : "bg-slate-900 text-sky-400 hover:text-white hover:bg-slate-800 border border-sky-900/40"
             }`}
           >
-            <CloudRain className="w-4 h-4" />
+            <CloudRain className="w-3.5 h-3.5" />
             <span>{match.format === "TEST" ? "Weather & Draw Radar" : "Weather & DLS Radar"}</span>
             {(weather_report?.overs_lost > 0 || weather_report?.hazard_level === "HIGH" || weather_report?.hazard_level === "ELEVATED") && (
               <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-rose-500 text-white font-mono font-bold animate-pulse">
@@ -3607,38 +3625,38 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
 
           <button
             onClick={() => setActiveTab("matchups")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === "matchups"
                 ? "bg-cyan-500 text-black shadow-lg shadow-cyan-500/20"
                 : "bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800"
             }`}
           >
-            <Target className="w-4 h-4" />
-            <span>Crease Matchups &amp; 11×6 Matrix</span>
+            <Target className="w-3.5 h-3.5" />
+            <span>Crease Matchups (11×6)</span>
           </button>
 
           <button
             onClick={() => setActiveTab("squads")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === "squads"
                 ? "bg-cyan-500 text-black shadow-lg shadow-cyan-500/20"
                 : "bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800"
             }`}
           >
-            <Users className="w-4 h-4" />
-            <span>Squads &amp; Pitch Adaptability</span>
+            <Users className="w-3.5 h-3.5" />
+            <span>Squads &amp; Adaptability</span>
           </button>
 
           <button
             onClick={() => setActiveTab("accuracy")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === "accuracy"
                 ? "bg-emerald-500 text-black shadow-lg shadow-emerald-500/20"
                 : "bg-slate-900 text-emerald-400 hover:text-white hover:bg-slate-800 border border-emerald-900/40"
             }`}
           >
-            <Award className="w-4 h-4" />
-            <span>Model Historical Accuracy (520 Matches)</span>
+            <Award className="w-3.5 h-3.5" />
+            <span>Model Accuracy (520)</span>
           </button>
 
           <button
@@ -3646,25 +3664,25 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
               setActiveTab("self_learning");
               fetchLearningLedger();
             }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === "self_learning"
                 ? "bg-amber-400 text-black shadow-lg shadow-amber-400/25 font-black"
                 : "bg-slate-900 text-amber-400 hover:text-white hover:bg-slate-800 border border-amber-900/40"
             }`}
           >
-            <Brain className="w-4 h-4 text-amber-400" />
-            <span>Autonomous Self-Learning Ledger</span>
+            <Brain className="w-3.5 h-3.5 text-amber-400" />
+            <span>Self-Learning Ledger</span>
           </button>
 
           <button
             onClick={() => setActiveTab("pitch")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === "pitch"
                 ? "bg-cyan-500 text-black shadow-lg shadow-cyan-500/20"
                 : "bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800"
             }`}
           >
-            <Compass className="w-4 h-4" />
+            <Compass className="w-3.5 h-3.5" />
             <span>Venue Dossier</span>
           </button>
 
@@ -3673,14 +3691,14 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
               setActiveTab("cricbuzz");
               if (!cricbuzzData) handleFetchCricbuzz("173060");
             }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === "cricbuzz"
                 ? "bg-rose-600 text-white shadow-lg shadow-rose-600/30"
                 : "bg-slate-900 text-rose-400 hover:text-white hover:bg-slate-800 border border-rose-900/50"
             }`}
           >
-            <Radio className="w-4 h-4 animate-pulse" />
-            <span>Cricbuzz Live Scraper (API)</span>
+            <Radio className="w-3.5 h-3.5 animate-pulse" />
+            <span>Cricbuzz Live Feed</span>
           </button>
 
           <button
@@ -3690,14 +3708,14 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                 handleRunNlpParse();
               }
             }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === "nlp"
                 ? "bg-violet-600 text-white shadow-lg shadow-violet-600/30"
                 : "bg-slate-900 text-violet-400 hover:text-white hover:bg-slate-800 border border-violet-900/50"
             }`}
           >
-            <Brain className="w-4 h-4 text-violet-400" />
-            <span>NLP Intelligence Engine</span>
+            <Brain className="w-3.5 h-3.5 text-violet-400" />
+            <span>NLP Engine</span>
           </button>
         </div>
 
@@ -3740,13 +3758,14 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
 
                 <div className="h-72 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={fullChartData} margin={{ top: 12, right: 15, left: -15, bottom: 5 }}>
+                    <LineChart data={fullChartData} margin={{ top: 12, right: 28, left: -10, bottom: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                       <XAxis
                         dataKey="overBall"
                         stroke="#64748b"
                         tick={{ fontSize: 10 }}
-                        interval={Math.max(0, Math.floor(fullChartData.length / 8))}
+                        padding={{ left: 10, right: 16 }}
+                        interval={Math.max(0, Math.floor(fullChartData.length / 7))}
                       />
                       <YAxis
                         domain={[0, 100]}
@@ -3794,19 +3813,19 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                         type="monotone"
                         dataKey="p_team_a"
                         name={metaA.short}
-                        stroke={metaA.primaryColor || "#06b6d4"}
+                        stroke={getReadableSeriesColor(metaA.primaryColor, "#38bdf8")}
                         strokeWidth={2.5}
                         dot={false}
-                        activeDot={{ r: 5, fill: metaA.primaryColor || "#06b6d4" }}
+                        activeDot={{ r: 5, fill: getReadableSeriesColor(metaA.primaryColor, "#38bdf8") }}
                       />
                       <Line
                         type="monotone"
                         dataKey="p_team_b"
                         name={metaB.short}
-                        stroke={metaB.primaryColor || "#10b981"}
+                        stroke={getReadableSeriesColor(metaB.primaryColor, "#10b981")}
                         strokeWidth={2.5}
                         dot={false}
-                        activeDot={{ r: 5, fill: metaB.primaryColor || "#10b981" }}
+                        activeDot={{ r: 5, fill: getReadableSeriesColor(metaB.primaryColor, "#10b981") }}
                       />
                       {match.format === "TEST" && (
                         <Line
@@ -3825,9 +3844,9 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                 </div>
 
                 {/* Last Event Description */}
-                <div className="mt-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 flex items-center justify-between">
-                  <span className="font-semibold text-cyan-300">Last Delivery Event:</span>
-                  <span className="italic">{match.last_event_description || "Match initialized at pre-match state."}</span>
+                <div className="mt-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 flex items-center justify-between gap-3 flex-wrap">
+                  <span className="font-semibold text-cyan-300 shrink-0">Last Delivery Event:</span>
+                  <span className="italic">{formatCommentaryLine(match.last_event_description || "Match initialized at pre-match state.")}</span>
                 </div>
               </div>
 
@@ -3884,7 +3903,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
             </div>
 
             {/* Mid Row: Active Striker vs Bowler HUD & Tanks */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
               {/* Active Striker & Bowler HUD */}
               <div className="md:col-span-2 p-6 rounded-3xl glass-card border border-slate-800 bg-[#0a0f1e]/90">
                 <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
@@ -3924,7 +3943,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                   <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
                     <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
                       <span className="font-bold uppercase text-amber-400 tracking-wider">Current Bowler</span>
-                      <span>{active_bowler?.bowling_style || "RF"}</span>
+                      <span>{active_bowler?.bowling_style && active_bowler.bowling_style !== "NONE" ? active_bowler.bowling_style : "Frontline"}</span>
                     </div>
                     <div className="text-base font-bold text-white">
                       {active_bowler ? active_bowler.name : "Frontline Bowler"}
@@ -4064,11 +4083,14 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
 
                     return (
                       <div>
-                        <div className="flex justify-between text-xs mb-1.5">
-                          <span className="text-slate-300 font-semibold">
-                            Batting Dugout Quality Tank <span className="text-[11px] text-slate-400 font-normal font-sans">({battingLabel})</span>
-                          </span>
-                          <span className="text-cyan-400 font-bold font-mono-numbers">
+                        <div className="flex items-center justify-between gap-2 text-xs mb-1.5 flex-wrap">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-200 font-bold">Batting Resource Tank</span>
+                            <span className="text-[10px] text-cyan-300 font-semibold px-1.5 py-0.5 rounded bg-cyan-950/70 border border-cyan-800/70 whitespace-nowrap">
+                              {battingLabel.replace(/ \((1st|2nd) Innings\)/, " • $1 Inn")}
+                            </span>
+                          </div>
+                          <span className="text-cyan-400 font-bold font-mono-numbers whitespace-nowrap">
                             {isLive ? `${qualityTankPct}% Quality (${activeWktsInHand} wkts)` : `100% Quality (Full Dugout Reserves)`}
                           </span>
                         </div>
@@ -4333,15 +4355,34 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                   Live Ball-by-Ball Feed & WPA Swings
                 </h3>
                 <span className="text-xs text-slate-400">
-                  {deliveries.length} Deliveries Streamed
+                  {deliveries.length === 1 ? "1 Delivery Logged" : `${deliveries.length} Deliveries Logged`}
                 </span>
               </div>
 
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                 {deliveries.length === 0 ? (
-                  <div className="text-center py-8 text-xs text-slate-400">
-                    No deliveries logged yet. Real-time ball-by-ball telemetry updates automatically during active play.
-                  </div>
+                  match.last_event_description ? (
+                    <div className="p-3 rounded-xl border bg-slate-900/70 border-slate-800 flex items-center justify-between text-xs gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="px-2 py-0.5 text-center font-bold text-cyan-400 font-mono-numbers bg-cyan-950/60 border border-cyan-800/70 rounded shrink-0">
+                          {match.current_overs}.{match.current_balls}
+                        </div>
+                        <div className="text-slate-200 font-medium truncate">
+                          {formatCommentaryLine(match.last_event_description)}
+                        </div>
+                      </div>
+                      <div className="text-right font-mono-numbers shrink-0">
+                        <div className="text-sm font-bold text-white">
+                          {match.current_score}/{match.current_wickets}
+                        </div>
+                        <div className="text-[10px] text-slate-400">Latest Snapshot</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-xs text-slate-400">
+                      No deliveries logged yet. Real-time ball-by-ball telemetry updates automatically during active play.
+                    </div>
+                  )
                 ) : (
                   [...deliveries]
                     .filter((d: any) => {
@@ -4373,7 +4414,7 @@ export default function MatchDetailPage({ params }: MatchDetailProps) {
                         </div>
                         <div>
                           <div className="text-white font-semibold">
-                            {d.commentary}
+                            {formatCommentaryLine(d.commentary)}
                           </div>
                           <div className="text-[10px] text-slate-400">
                             Striker: {d.striker_name || d.striker_id} • Bowler: {d.bowler_name || d.bowler_id}
