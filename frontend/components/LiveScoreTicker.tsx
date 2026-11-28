@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { MatchData } from "./MatchCard";
+import TeamFlag from "./TeamFlag";
 import { getTeamMeta, formatKickoffCountdown } from "@/lib/teamUtils";
 import { Flame, Radio, Sparkles, ChevronRight } from "lucide-react";
 
@@ -56,23 +57,21 @@ export default function LiveScoreTicker({
   const displayMatches = matches;
 
   return (
-    <div className="w-full bg-[#0a0f1d] border-b border-slate-800/80 overflow-hidden relative py-2 select-none">
+    <div className="w-full bg-[#0a0f1d] border-b border-slate-800/80 overflow-hidden flex items-center py-2 select-none">
       {/* Ticker Header Tag */}
-      <div className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-[#0a0f1d] via-[#0a0f1d] to-transparent z-10 pl-4 pr-6 flex items-center gap-2">
+      <div className="shrink-0 bg-[#0a0f1d] z-10 pl-4 pr-4 py-1 flex items-center gap-2 border-r border-slate-800/90">
         <span className="flex h-2 w-2 relative">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
           <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
         </span>
-        <span className="text-[10px] font-black tracking-wider uppercase bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent hidden sm:inline">
+        <span className="text-[10px] font-black tracking-wider uppercase bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent whitespace-nowrap">
           LIVE MATCH ODDS
         </span>
       </div>
 
-      {/* Right Fade */}
-      <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-[#0a0f1d] to-transparent z-10 pointer-events-none" />
-
-      {/* Scrolling Strip */}
-      <div className="flex animate-ticker pl-12 sm:pl-36 gap-3">
+      {/* Scrolling / Aligned Strip */}
+      <div className="flex-1 overflow-hidden relative">
+        <div className="flex animate-ticker pl-4 gap-3">
         {displayMatches.map((m, idx) => {
           const metaA = getTeamMeta(m.team_a_short || m.team_a_id, m.team_a_name);
           const metaB = getTeamMeta(m.team_b_short || m.team_b_id, m.team_b_name);
@@ -149,10 +148,10 @@ export default function LiveScoreTicker({
               )}
 
               {/* Team Matchup & Win % */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 {/* Team A */}
-                <div className="flex items-center gap-1">
-                  <span className="text-sm">{metaA.flag}</span>
+                <div className="flex items-center gap-1.5">
+                  <TeamFlag code={metaA.short} size="xs" />
                   <span className="font-extrabold text-slate-200 text-xs group-hover:text-cyan-300 transition">
                     {metaA.short}
                   </span>
@@ -164,8 +163,8 @@ export default function LiveScoreTicker({
                 <span className="text-slate-600 text-[10px] font-bold">vs</span>
 
                 {/* Team B */}
-                <div className="flex items-center gap-1">
-                  <span className="text-sm">{metaB.flag}</span>
+                <div className="flex items-center gap-1.5">
+                  <TeamFlag code={metaB.short} size="xs" />
                   <span className="font-extrabold text-slate-200 text-xs group-hover:text-amber-300 transition">
                     {metaB.short}
                   </span>
@@ -179,6 +178,7 @@ export default function LiveScoreTicker({
             </Link>
           );
         })}
+        </div>
       </div>
     </div>
   );

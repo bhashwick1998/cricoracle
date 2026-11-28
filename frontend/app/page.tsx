@@ -335,93 +335,24 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* Live In-Play Section (Always prominently highlighted when live matches exist) */}
-        {liveMatches.length > 0 && activeTab !== "COMPLETED" && (
-          <div className="mb-8 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-gradient-to-r from-rose-950/40 via-slate-900/90 to-purple-950/30 border border-rose-500/30 shadow-2xl">
-            <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
-              <div className="flex items-center gap-2.5">
-                <span className="relative flex h-3.5 w-3.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500"></span>
-                </span>
-                <div>
-                  <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
-                    <span>🔴 Live Now • Senior International Matches</span>
-                    <span className="text-xs font-bold text-rose-300 bg-rose-950/90 px-2.5 py-0.5 rounded-full border border-rose-700">
-                      {liveMatches.length} Matches In-Play
-                    </span>
-                  </h2>
-                  <p className="text-xs text-slate-300 mt-0.5">
-                    Real-time ball-by-ball telemetry, DLS pre-rain par targets, session breakdown, and live WinViz probability.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 text-xs font-semibold text-rose-300">
-                <span className="inline-block w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
-                <span>Live Feed Active</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {liveMatches.map((match) => (
-                <MatchCard
-                  key={match.id}
-                  match={match}
-                  onStateChange={handleStateChange}
-                  onStepDelivery={handleStepDelivery}
-                  sandboxMode={sandboxMode}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Stage 3 Pre-Match Confirmed Playing 11 & Venue (CricAPI Schedule + 11v11 + Venue) */}
-        {stage3Matches.length > 0 && activeTab !== "COMPLETED" && (
-          <div className="mb-8 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-gradient-to-r from-emerald-950/35 via-slate-900/90 to-cyan-950/30 border border-emerald-500/30 shadow-2xl">
-            <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
-              <div>
-                <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
-                  <span>🏏 Stage 3 • Confirmed Playing 11 &amp; Venue Locked</span>
-                  <span className="text-xs font-bold text-emerald-300 bg-emerald-950/90 px-2.5 py-0.5 rounded-full border border-emerald-700">
-                    {stage3Matches.length} Match{stage3Matches.length > 1 ? "es" : ""} Ready
-                  </span>
-                </h2>
-                <p className="text-xs text-slate-300 mt-0.5">
-                  Calibrated 6-signal Stage 3 1st-innings projections shown for both batting-first scenarios (Country A vs Country B) upon CricAPI schedule, Playing 11 &amp; venue lock.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {stage3Matches.map((match) => (
-                <MatchCard
-                  key={match.id}
-                  match={match}
-                  onStateChange={handleStateChange}
-                  onStepDelivery={handleStepDelivery}
-                  sandboxMode={sandboxMode}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Upcoming Fixtures Header & Public Toolbar */}
+        {/* Unified Filter & View Bar + Live Matches Hub */}
         <div className="mb-6 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="relative flex h-3 w-3 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                </span>
                 <h2 className="text-2xl font-black text-white tracking-tight">
-                  Live International Matches (CricAPI)
+                  Live International Matches
                 </h2>
-                <span className="text-xs font-bold text-cyan-400 bg-cyan-950/80 px-2.5 py-0.5 rounded-full border border-cyan-800">
-                  {filteredMatches.length} Matches
+                <span className="text-xs font-bold text-cyan-300 bg-cyan-950/80 px-2.5 py-0.5 rounded-full border border-cyan-800">
+                  {filteredMatches.length} {filteredMatches.length === 1 ? "Match" : "Matches"} In-Play
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                Condition-adjusted Elo, 15-man squad depth, pitch friction index, and 5,000-run Monte Carlo simulations.
+                Real-time CricAPI ball-by-ball telemetry, calibrated WinViz probability, DLS par targets &amp; dugout resource analysis.
               </p>
             </div>
 
@@ -526,7 +457,7 @@ export default function HomePage() {
             <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search matches by country or venue (e.g. India, Australia, Pakistan, Dubai, Lord's, Wankhede)..."
+              placeholder="Search matches by country or venue (e.g. India, New Zealand, Christchurch)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-11 pr-16 py-2.5 bg-slate-900/80 border border-slate-800 rounded-2xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition shadow-inner"
@@ -542,7 +473,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Matches Display (Grid vs Table) */}
+        {/* Matches Display (Adaptive Grid vs Table — zero duplicate cards) */}
         {wakingBackend && matches.length === 0 ? (
           <div className="text-center py-16 bg-slate-900/40 rounded-3xl border border-cyan-500/30">
             <Radio className="w-12 h-12 text-cyan-400 mx-auto mb-3 animate-pulse" />
@@ -555,7 +486,7 @@ export default function HomePage() {
           </div>
         ) : loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
+            {[1, 2, 3].map((i) => (
               <div
                 key={i}
                 className="h-96 rounded-3xl bg-slate-900/50 animate-pulse border border-slate-800"
@@ -566,7 +497,7 @@ export default function HomePage() {
           <div className="text-center py-16 bg-slate-900/40 rounded-3xl border border-slate-800">
             <Radio className="w-12 h-12 text-slate-600 mx-auto mb-3" />
             <h3 className="text-base font-bold text-slate-300">
-              No live international matches in play right now
+              No live international matches match your filter right now
             </h3>
             <p className="text-xs text-slate-500 mt-1">
               Monitoring CricAPI for live senior international matches (TEST, ODI, T20I).
@@ -575,7 +506,13 @@ export default function HomePage() {
         ) : viewMode === "table" ? (
           <MatchScheduleTable matches={filteredMatches} />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className={`grid gap-6 ${
+            filteredMatches.length === 1
+              ? "grid-cols-1 max-w-3xl mx-auto"
+              : filteredMatches.length === 2
+              ? "grid-cols-1 md:grid-cols-2"
+              : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+          }`}>
             {filteredMatches.map((match) => (
               <MatchCard
                 key={match.id}
@@ -585,6 +522,43 @@ export default function HomePage() {
                 sandboxMode={sandboxMode}
               />
             ))}
+          </div>
+        )}
+
+        {/* Stage 3 Pre-Match Confirmed Playing 11 & Venue (CricAPI Schedule + 11v11 + Venue) */}
+        {stage3Matches.length > 0 && activeTab !== "COMPLETED" && (
+          <div className="mt-10 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-gradient-to-r from-emerald-950/35 via-slate-900/90 to-cyan-950/30 border border-emerald-500/30 shadow-2xl">
+            <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
+              <div>
+                <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
+                  <span>Stage 3 • Confirmed Playing 11 &amp; Venue Locked</span>
+                  <span className="text-xs font-bold text-emerald-300 bg-emerald-950/90 px-2.5 py-0.5 rounded-full border border-emerald-700">
+                    {stage3Matches.length} Match{stage3Matches.length > 1 ? "es" : ""} Ready
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Calibrated 6-signal Stage 3 1st-innings projections shown for both batting-first scenarios upon Playing 11 &amp; venue lock.
+                </p>
+              </div>
+            </div>
+
+            <div className={`grid gap-6 ${
+              stage3Matches.length === 1
+                ? "grid-cols-1 max-w-3xl mx-auto"
+                : stage3Matches.length === 2
+                ? "grid-cols-1 md:grid-cols-2"
+                : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+            }`}>
+              {stage3Matches.map((match) => (
+                <MatchCard
+                  key={match.id}
+                  match={match}
+                  onStateChange={handleStateChange}
+                  onStepDelivery={handleStepDelivery}
+                  sandboxMode={sandboxMode}
+                />
+              ))}
+            </div>
           </div>
         )}
 

@@ -298,6 +298,206 @@ class TestCricApiPaidLiveSync(unittest.TestCase):
         self.assertEqual(row["toss_decision"], "bowl")
         self.assertEqual(row["venue_id"], "christchurch")
 
+    def test_cricapi_preserves_db_team_order_and_uses_is_confirmed_xi(self):
+        paid_key = "0cee2b6c-revorder-test-999999"
+        provider = CricApiSquadProvider(api_key=paid_key, fallback_key="free-should-not-be-used")
+        uid = "dddddddd-eeee-4fff-8888-123456789012"
+        provider._cached_match_info = {
+            uid: {
+                "status": "success",
+                "cricapi_match_id": uid,
+                "match_name": "New Zealand vs India, 2nd Test, India tour of New Zealand 2026",
+                "match_type": "test",
+                "toss_winner": "india",
+                "toss_choice": "bowl",
+                "venue_name": "Hagley Oval, Christchurch",
+                "venue_id": "christchurch",
+                "match_status": "Day 2: 3rd Session - India trail by 249 runs",
+                "teams": ["New Zealand", "India"],
+                "_ts": 9e12,
+            }
+        }
+
+        async def _scenario():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "test_rev_order.db"
+                with patch("backend.database.db.DB_PATH", db_path):
+                    await init_db()
+                conn = await aiosqlite.connect(str(db_path))
+                conn.row_factory = aiosqlite.Row
+                try:
+                    await conn.execute("""
+                        INSERT INTO teams (id, name, short_name, color) VALUES
+                        ('NZ', 'New Zealand', 'NZ', '#27272A'),
+                        ('IND', 'India', 'IND', '#0284C7')
+                    """)
+                    await conn.execute("""
+                        INSERT INTO venues (id, name, city, country, region_cluster, pitch_type)
+                        VALUES ('christchurch', 'Hagley Oval', 'Christchurch', 'New Zealand', 'sena', 'balanced')
+                    """)
+                    await conn.execute("""
+                        INSERT INTO matches (
+                            id, series_name, format, team_a_id, team_b_id, venue_id,
+                            scheduled_start, state, current_innings, current_score, current_wickets,
+                            current_overs, current_balls, innings_1_team_id, innings_1_score, innings_1_wickets,
+                            innings_1_overs, innings_2_team_id, innings_2_score, innings_2_wickets,
+                            p0_pre_match, p_team_a, p_team_b, p_draw
+                        ) VALUES (
+                            'm_nz_ind_rev', 'India Tour of New Zealand 2026 - 2nd Test', 'TEST',
+                            'NZ', 'IND', 'christchurch', '2026-11-27T22:00:00Z',
+                            'LIVE_BALL_BY_BALL', 2, 100, 5, 33, 0,
+                            'NZ', 356, 10, 100.0, 'IND', 100, 5,
+                            48.0, 72.0, 25.0, 3.0
+                        )
+                    """)
+                    for idx in range(1, 12):
+                        pid = f"ind_p{idx}"
+                        role = "top_order_batter" if idx <= 7 else "frontline_pacer"
+                        is_out = 1 if idx <= 5 else 0
+                        dism = "c Conway b Henry" if is_out else ("batting" if idx <= 7 else "Yet to Bat")
+                        await conn.execute(
+                            "INSERT INTO players (id, name, team_id, role, t20_batting_avg) VALUES (?, ?, 'IND', ?, ?)",
+                            (pid, f"IND Batter {idx}", role, 42.0 if idx <= 7 else 28.0),
+                        )
+                        await conn.execute(
+                            "INSERT INTO match_squads (match_id, player_id, team_id, is_confirmed_xi, batting_order, is_out, dismissal) "
+                            "VALUES ('m_nz_ind_rev', ?, 'IND', 1, ?, ?, ?)",
+                            (pid, idx + 11 if idx <= 7 else idx, is_out, dism),
+                        )
+                    await conn.commit()
+
+                    calls = []
+                    live_payload = _MockResponse(200, {
+                        "status": "success",
+                        "info": {"hitsToday": 2, "hitsLimit": 2000},
+                        "data": [
+                            {
+                                "id": uid,
+                                "series": "India tour of New Zealand 2026",
+                                "matchType": "test",
+                                "ms": "live",
+                                "status": "Day 2: 3rd Session - India trail by 249 runs",
+                                "dateTimeGMT": "2026-11-27T22:00:00",
+                                "t1": "India [IND]",
+                                "t2": "New Zealand [NZ]",
+                                "t1s": "107/5 (34.3)",
+                                "t2s": "356 (100)",
+                            }
+                        ],
+                    })
+                    with patch(
+                        "backend.scraper.providers.cricapi_provider.httpx.Client",
+                        side_effect=lambda *a, **kw: _RecordingClient(calls, [live_payload]),
+                    ):
+                        updated = await provider.sync_live_senior_mens_matches(conn)
+
+                    async with conn.execute("SELECT * FROM matches WHERE id = 'm_nz_ind_rev'") as cur:
+                        row = dict(await cur.fetchone())
+                    return updated, row
+                finally:
+                    await conn.close()
+
+        updated, row = asyncio.run(_scenario())
+        self.assertIn("m_nz_ind_rev", updated)
+        # DB team_a is NZ (356 vs IND 107/5), so NZ (p_team_a) must lead overwhelmingly over IND (p_team_b)
+        self.assertGreater(row["p_team_a"], 70.0)
+        self.assertLess(row["p_team_b"], 25.0)
+        self.assertIsNotNone(row["batting_tank_pct"])
+        self.assertLess(row["batting_tank_pct"], 35.0)
+
+    def test_cricapi_heals_mirror_swapped_probs_during_stumps(self):
+        paid_key = "0cee2b6c-stumpsheal-test-999999"
+        provider = CricApiSquadProvider(api_key=paid_key, fallback_key="free-should-not-be-used")
+        uid = "eeeeeeee-ffff-4111-9999-123456789012"
+        stumps_status = "Day 2: Stumps - India trail by 240 runs"
+        provider._cached_match_info = {
+            uid: {
+                "status": "success",
+                "cricapi_match_id": uid,
+                "match_name": "New Zealand vs India, 2nd Test, India tour of New Zealand 2026",
+                "match_type": "test",
+                "toss_winner": "india",
+                "toss_choice": "bowl",
+                "venue_name": "Hagley Oval, Christchurch",
+                "venue_id": "christchurch",
+                "match_status": stumps_status,
+                "teams": ["New Zealand", "India"],
+                "_ts": 9e12,
+            }
+        }
+
+        async def _scenario():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                db_path = Path(tmpdir) / "test_stumps_heal.db"
+                with patch("backend.database.db.DB_PATH", db_path):
+                    await init_db()
+                conn = await aiosqlite.connect(str(db_path))
+                conn.row_factory = aiosqlite.Row
+                try:
+                    await conn.execute("""
+                        INSERT INTO teams (id, name, short_name, color) VALUES
+                        ('NZ', 'New Zealand', 'NZ', '#27272A'),
+                        ('IND', 'India', 'IND', '#0284C7')
+                    """)
+                    await conn.execute("""
+                        INSERT INTO venues (id, name, city, country, region_cluster, pitch_type)
+                        VALUES ('christchurch', 'Hagley Oval', 'Christchurch', 'New Zealand', 'sena', 'balanced')
+                    """)
+                    await conn.execute("""
+                        INSERT INTO matches (
+                            id, series_name, format, team_a_id, team_b_id, venue_id,
+                            scheduled_start, state, current_innings, current_score, current_wickets,
+                            current_overs, current_balls, innings_1_team_id, innings_1_score, innings_1_wickets,
+                            innings_1_overs, innings_2_team_id, innings_2_score, innings_2_wickets,
+                            match_status_text, is_stumps, stumps_day, p0_pre_match,
+                            p_team_a, p_team_b, p_draw, batting_tank_pct
+                        ) VALUES (
+                            'm_nz_ind_stumps_heal', 'India Tour of New Zealand 2026 - 2nd Test', 'TEST',
+                            'NZ', 'IND', 'christchurch', '2026-11-27T22:00:00Z',
+                            'LIVE_BALL_BY_BALL', 2, 116, 6, 46, 0,
+                            'NZ', 356, 10, 116.0, 'IND', 116, 6,
+                            ?, 1, 2, 48.0, 11.4, 86.6, 2.0, 35.8
+                        )
+                    """, (stumps_status,))
+                    await conn.commit()
+
+                    calls = []
+                    live_payload = _MockResponse(200, {
+                        "status": "success",
+                        "info": {"hitsToday": 3, "hitsLimit": 2000},
+                        "data": [
+                            {
+                                "id": uid,
+                                "series": "India tour of New Zealand 2026",
+                                "matchType": "test",
+                                "ms": "live",
+                                "status": stumps_status,
+                                "dateTimeGMT": "2026-11-27T22:00:00",
+                                "t1": "India [IND]",
+                                "t2": "New Zealand [NZ]",
+                                "t1s": "116/6 (46)",
+                                "t2s": "356 (116)",
+                            }
+                        ],
+                    })
+                    with patch(
+                        "backend.scraper.providers.cricapi_provider.httpx.Client",
+                        side_effect=lambda *a, **kw: _RecordingClient(calls, [live_payload]),
+                    ):
+                        updated = await provider.sync_live_senior_mens_matches(conn)
+
+                    async with conn.execute("SELECT * FROM matches WHERE id = 'm_nz_ind_stumps_heal'") as cur:
+                        row = dict(await cur.fetchone())
+                    return updated, row
+                finally:
+                    await conn.close()
+
+        updated, row = asyncio.run(_scenario())
+        self.assertIn("m_nz_ind_stumps_heal", updated)
+        # Even at Stumps with unchanged score/status, mirror-swapped 11.4/86.6 must heal back to NZ > IND
+        self.assertGreater(row["p_team_a"], 75.0)
+        self.assertLess(row["p_team_b"], 22.0)
+
 
 if __name__ == "__main__":
     unittest.main()

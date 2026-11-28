@@ -1093,8 +1093,10 @@ async def get_matches(state: Optional[str] = None):
                         scheduled_overs=m_sched_ov,
                         overs_lost=m_ov_lost
                     )
-                    # Preserve authoritative ground-truth tanks stored in DB to guarantee card & detail page alignment
-                    if m.get("batting_tank_pct") is not None and float(m["batting_tank_pct"]) > 0:
+                    if m_batters:
+                        m["batting_tank_pct"] = tanks_m["batting_tank_pct"]
+                        m["bowling_tank_pct"] = tanks_m["bowling_tank_pct"]
+                    elif m.get("batting_tank_pct") is not None and float(m["batting_tank_pct"]) > 0:
                         m["batting_tank_pct"] = float(m["batting_tank_pct"])
                         m["bowling_tank_pct"] = float(m.get("bowling_tank_pct") or tanks_m["bowling_tank_pct"])
                     else:
@@ -2707,7 +2709,11 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
         cur_ov_num = float(match_data.get("current_overs") or 0.0)
         cur_wkts_num = int(match_data.get("current_wickets") or 0)
         if match_data.get("state") == "LIVE_BALL_BY_BALL" or cur_ov_num > 0 or cur_wkts_num > 0:
-            batting_is_b = (int(match_data.get("current_innings") or 1) % 2 == 0) or (match_data.get("batting_team_id") == match_data.get("team_b_id"))
+            bat_id_d = match_data.get("batting_team_id")
+            if bat_id_d in (match_data.get("team_a_id"), match_data.get("team_b_id")):
+                batting_is_b = (bat_id_d == match_data.get("team_b_id"))
+            else:
+                batting_is_b = (int(match_data.get("current_innings") or 1) % 2 == 0)
             cur_batters = team_b_players if batting_is_b else team_a_players
             cur_bowlers = team_a_players if batting_is_b else team_b_players
             tanks_eval = evaluate_quality_resource_tanks(
@@ -2722,8 +2728,10 @@ async def get_match_detail(match_id: str, view: str = Query(default="full", patt
                 scheduled_overs=match_sched_ov,
                 overs_lost=match_ov_lost
             )
-            # Preserve authoritative ground-truth tanks stored in DB to guarantee card & detail page alignment
-            if match_data.get("batting_tank_pct") is not None and float(match_data["batting_tank_pct"]) > 0:
+            if cur_batters:
+                match_data["batting_tank_pct"] = tanks_eval["batting_tank_pct"]
+                match_data["bowling_tank_pct"] = tanks_eval["bowling_tank_pct"]
+            elif match_data.get("batting_tank_pct") is not None and float(match_data["batting_tank_pct"]) > 0:
                 match_data["batting_tank_pct"] = float(match_data["batting_tank_pct"])
                 match_data["bowling_tank_pct"] = float(match_data["bowling_tank_pct"]) if match_data.get("bowling_tank_pct") is not None else tanks_eval["bowling_tank_pct"]
             else:

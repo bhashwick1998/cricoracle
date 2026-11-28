@@ -386,7 +386,24 @@ async def ensure_full_playing_xi_for_match(conn: aiosqlite.Connection, match_id:
                     """, (match_id, p["player_id"], tid, p["batting_order"]))
 
         # 2. Update all confirmed XI players with is_confirmed_xi = 1, sub_status = 'CONFIRMED_XI'
-        confirmed_top_11 = sorted(confirmed_players[:11], key=lambda x: x.get("batting_order") or 99)
+        def _matcher_role_rank(p_row: Dict[str, Any]) -> int:
+            rl = str(p_row.get("role") or "").lower()
+            if "bat" in rl or "keep" in rl or "wk" in rl or "finish" in rl:
+                return 0
+            if "all" in rl:
+                return 1
+            if "bowl" in rl:
+                return 3
+            return 2
+
+        confirmed_top_11 = sorted(
+            confirmed_players[:11],
+            key=lambda x: (
+                0 if ((x.get("balls_faced") or 0) > 0 or (x.get("current_match_runs") or 0) > 0 or bool(x.get("is_out"))) else 1,
+                x.get("batting_order") if (x.get("batting_order") or 99) < 90 else (10 + _matcher_role_rank(x)),
+                _matcher_role_rank(x),
+            ),
+        )
         for idx, p in enumerate(confirmed_top_11, start=1):
             b_ord = p.get("batting_order")
             if not b_ord or b_ord >= 90:

@@ -1908,7 +1908,8 @@ class IngestionManager:
             bowler_name = scraped.get("current_bowler", {}).get("name")
 
             # Extract accurate active duel from ball commentary header if available (e.g. "6.5 Mahli Beardman to Tom Banton, no run")
-            comm_text = scraped.get("commentary") or ""
+            raw_comm_text = scraped.get("commentary") or ""
+            comm_text = re.sub(r"^(\d+\.\d+)\s*(?:W|NB|WD|B|LB)(?=[A-Z])", r"\1 ", raw_comm_text.strip())
             m_comm_duel = re.search(r"(\d+\.\d+)\s*([A-Za-z\s\.\'\-]+?)\s+to\s+([A-Za-z\s\.\'\-]+?)(?:,|\s+-)", comm_text)
             if m_comm_duel:
                 parsed_bw = m_comm_duel.group(2).strip()
@@ -2029,14 +2030,35 @@ class IngestionManager:
                 scraped_batters = scorecard.get("batters", [])
                 scraped_bowlers = scorecard.get("bowlers", [])
 
-                for idx, b_item in enumerate(scraped_batters):
+                team_bat_orders: Dict[str, int] = {}
+                bat_team_l = str(match.get("team_a_name") or batting_team_id).lower() if batting_team_id == match.get("team_a_id") else str(match.get("team_b_name") or batting_team_id).lower()
+                bowl_team_l = str(match.get("team_b_name") or bowling_team_id).lower() if bowling_team_id == match.get("team_b_id") else str(match.get("team_a_name") or bowling_team_id).lower()
+                bat_side_bowler_names = {
+                    str(p.get("name") or "").lower()
+                    for p in all_players
+                    if p.get("team_id") == batting_team_id and len(str(p.get("name") or "")) > 3
+                }
+                for b_item in scraped_batters:
                     b_name = b_item.get("name")
                     if b_name:
-                        resolved_b = await self.entity_resolver.resolve_player(b_name, batting_team_id, all_players=all_players)
-                        pid = resolved_b["id"]
-                        p_t = resolved_b.get("team_id") or batting_team_id
+                        # Infer accurate team for cross-innings Test scorecards so opposing batters
+                        # (e.g. Nathan Smith 'c and b Akash Deep') never pollute active batting XI.
+                        hint_team = batting_team_id
+                        hdr_l = str(b_item.get("innings_header") or "").lower()
+                        dism_str = str(b_item.get("dismissal") or "")
+                        if bowl_team_l and bowl_team_l in hdr_l and bat_team_l not in hdr_l:
+                            hint_team = bowling_team_id
+                        elif " b " in dism_str:
+                            bowled_by = dism_str.rsplit(" b ", 1)[-1].strip().lower()
+                            if bowled_by and any(bowled_by in bn or bn in bowled_by for bn in bat_side_bowler_names):
+                                hint_team = bowling_team_id
 
-                        b_ord = idx + 1
+                        resolved_b = await self.entity_resolver.resolve_player(b_name, hint_team, all_players=all_players)
+                        pid = resolved_b["id"]
+                        p_t = resolved_b.get("team_id") or hint_team
+
+                        team_bat_orders[p_t] = team_bat_orders.get(p_t, 0) + 1
+                        b_ord = ((team_bat_orders[p_t] - 1) % 11) + 1
                         await conn.execute("""
                             INSERT OR IGNORE INTO players (id, name, team_id, role, batting_hand, bowling_style, league_experience_tier)
                             VALUES (?, ?, ?, ?, ?, ?, ?)

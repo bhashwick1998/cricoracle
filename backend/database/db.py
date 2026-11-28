@@ -234,6 +234,48 @@ async def init_db():
             UPDATE matches SET venue_id = 'christchurch'
             WHERE id = 'm_nz_ind_2026_test_2' AND venue_id = 'eden_park'
         """)
+        # Self-heal any TEST 2nd-innings match whose p_team_a / p_team_b were mirror-swapped by reversed API team order
+        await conn.execute("""
+            UPDATE matches SET
+                p_team_a = p_team_b,
+                p_team_b = p_team_a,
+                batting_tank_pct = NULL
+            WHERE format = 'TEST'
+              AND state = 'LIVE_BALL_BY_BALL'
+              AND current_innings = 2
+              AND COALESCE(innings_1_score, 0) - COALESCE(current_score, 0) >= 120
+              AND COALESCE(current_wickets, 0) >= 4
+              AND (
+                  (innings_2_team_id = team_b_id AND COALESCE(p_team_a, 50.0) < 35.0 AND COALESCE(p_team_b, 50.0) > 65.0)
+                  OR (innings_2_team_id = team_a_id AND COALESCE(p_team_b, 50.0) < 35.0 AND COALESCE(p_team_a, 50.0) > 65.0)
+              )
+        """)
+        # Repair cross-innings misattributed NZ batters/bowlers in m_nz_ind_2026_test_2 (e.g. Nathan Smith)
+        await conn.execute("""
+            UPDATE players SET team_id = 'NZ'
+            WHERE team_id = 'IND' AND LOWER(name) LIKE '%nathan smith%'
+        """)
+        await conn.execute("""
+            UPDATE match_squads SET team_id = 'NZ'
+            WHERE match_id = 'm_nz_ind_2026_test_2'
+              AND team_id = 'IND'
+              AND player_id IN (SELECT id FROM players WHERE team_id = 'NZ')
+        """)
+        # Repair Cricbuzz shifted IND batting_order if an opposing batter shifted Jaiswal..Jurel to 2..8
+        await conn.execute("""
+            UPDATE match_squads SET batting_order = batting_order - 1
+            WHERE match_id = 'm_nz_ind_2026_test_2'
+              AND team_id = 'IND'
+              AND batting_order BETWEEN 2 AND 8
+              AND (is_out = 1 OR balls_faced > 0 OR current_match_runs > 0)
+              AND (SELECT COUNT(*) FROM match_squads WHERE match_id = 'm_nz_ind_2026_test_2' AND team_id = 'IND' AND batting_order = 1 AND is_out = 1) = 0
+              AND EXISTS (SELECT 1 FROM match_squads WHERE match_id = 'm_nz_ind_2026_test_2' AND team_id = 'IND' AND batting_order = 2 AND is_out = 1)
+        """)
+        # Clean up '45.6WNathan Smith' concatenated commentary bowler typo if cached in players / matches
+        await conn.execute("""
+            UPDATE players SET name = 'Nathan Smith', team_id = 'NZ'
+            WHERE LOWER(name) LIKE 'wnathan smith%'
+        """)
 
         # Ensure deliveries for m_nz_ind_2026_test_1 are complete up to over 44.6
         async with conn.execute(

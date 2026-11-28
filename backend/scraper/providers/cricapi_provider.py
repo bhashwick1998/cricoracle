@@ -968,7 +968,18 @@ class CricApiSquadProvider:
                 and (
                     db_m.get("par_score_projected") is None
                     or db_m.get("p_team_a") is None
+                    or db_m.get("batting_tank_pct") is None
                     or (fmt == "TEST" and abs(float(db_m.get("p_team_a") or 50.0) - 50.0) < 0.05 and float(db_m.get("p_draw") or 0.0) == 0.0)
+                    or (
+                        fmt == "TEST"
+                        and int(db_m.get("current_innings") or 1) == 2
+                        and (int(db_m.get("innings_1_score") or 0) - int(db_m.get("current_score") or 0)) >= 120
+                        and int(db_m.get("current_wickets") or 0) >= 4
+                        and (
+                            (db_m.get("innings_2_team_id") == db_m.get("team_b_id") and float(db_m.get("p_team_a") or 50.0) < 35.0)
+                            or (db_m.get("innings_2_team_id") == db_m.get("team_a_id") and float(db_m.get("p_team_b") or 50.0) < 35.0)
+                        )
+                    )
                 )
             )
             if (
@@ -1223,9 +1234,22 @@ class CricApiSquadProvider:
                     innings_changed = (inn_val != int(db_m.get("current_innings") or 1))
                     status_changed = (str(db_m.get("match_status_text") or "").strip() != str(status_text or "").strip())
                     stumps_changed = (int(is_stumps) != int(db_m.get("is_stumps") or 0))
+                    inverted_test_deficit = (
+                        str(db_m.get("format") or fmt).upper() == "TEST"
+                        and inn_val == 2
+                        and i1_runs is not None
+                        and (int(i1_runs) - int(runs or 0)) >= 120
+                        and int(wkts or 0) >= 4
+                        and (
+                            (bat_team == db_m.get("team_b_id") and float(db_m.get("p_team_a") or 50.0) < 35.0)
+                            or (bat_team == db_m.get("team_a_id") and float(db_m.get("p_team_b") or 50.0) < 35.0)
+                        )
+                    )
                     missing_live_stats = (
                         db_m.get("p_team_a") is None
                         or db_m.get("par_score_projected") is None
+                        or db_m.get("batting_tank_pct") is None
+                        or inverted_test_deficit
                         or int(db_m.get("par_score_projected") or 0) <= int(runs or 0)
                         or (
                             str(db_m.get("format") or fmt).upper() == "TEST"
@@ -1253,9 +1277,11 @@ class CricApiSquadProvider:
                             except Exception:
                                 pass
 
-                            t_a = c1
-                            t_b = c2
-                            team_a_batting = (bat_team == c1)
+                            # Always preserve canonical DB team_a / team_b ordering so CricAPI alphabetical/API
+                            # ordering (e.g. IND vs NZ when DB has NZ vs IND) never swaps p_team_a vs p_team_b.
+                            t_a = str(db_m.get("team_a_id") or c1)
+                            t_b = str(db_m.get("team_b_id") or c2)
+                            team_a_batting = (bat_team == t_a)
                             bat_code = t_a if team_a_batting else t_b
                             bowl_code = t_b if team_a_batting else t_a
 
@@ -1283,10 +1309,13 @@ class CricApiSquadProvider:
                             real_bowlers: List[Dict[str, Any]] = []
                             try:
                                 async with conn.execute("""
-                                    SELECT p.*, ms.team_id
+                                    SELECT p.*, ms.team_id, ms.is_confirmed_xi, ms.batting_order,
+                                           ms.is_out, ms.dismissal, ms.current_match_runs, ms.balls_faced,
+                                           ms.overs_bowled, ms.wickets_taken
                                     FROM match_squads ms
                                     JOIN players p ON ms.player_id = p.id
-                                    WHERE ms.match_id = ? AND ms.is_playing_xi = 1
+                                    WHERE ms.match_id = ? AND ms.is_confirmed_xi = 1
+                                    ORDER BY COALESCE(ms.batting_order, 99) ASC
                                 """, (mid,)) as sqcur:
                                     for sr in await sqcur.fetchall():
                                         sd = dict(sr)
@@ -1294,7 +1323,7 @@ class CricApiSquadProvider:
                                             real_dugout.append(sd)
                                         elif sd.get("team_id") == bowl_code:
                                             role_l = str(sd.get("role") or "").lower()
-                                            if "bowl" in role_l or "all" in role_l:
+                                            if "bowl" in role_l or "all" in role_l or float(sd.get("overs_bowled") or 0) > 0:
                                                 real_bowlers.append(sd)
                             except Exception:
                                 pass
@@ -1343,6 +1372,10 @@ class CricApiSquadProvider:
                             wkts_left = max(0, 10 - wkts)
                             ref_avg = 35.0 if match_format == "TEST" else (30.0 if match_format == "ODI" else 25.0)
                             eff_dugout = real_dugout if len(real_dugout) >= 4 else [{"t20_batting_avg": ref_avg, "batting_order": 10 - wkts_left + i + 1} for i in range(wkts_left)]
+                            active_dugout = [
+                                p for p in eff_dugout
+                                if not int(p.get("is_out") or 0) and not str(p.get("dismissal") or "").strip()
+                            ] or eff_dugout
                             eff_bowlers = real_bowlers if len(real_bowlers) >= 3 else [{"t20_economy": 7.5, "bowl_score": 55.0}] * 4
 
                             prev_b_prov = int(db_m.get("current_balls") or 0)
@@ -1356,11 +1389,11 @@ class CricApiSquadProvider:
                                 overs=ovs,
                                 balls=balls,
                                 target=tgt_runs if match_format != "TEST" else None,
-                                striker=eff_dugout[0] if eff_dugout else {"balls_faced": 10, "batting_hand": "right"},
-                                non_striker=eff_dugout[1] if len(eff_dugout) > 1 else {"balls_faced": 5, "batting_hand": "right"},
+                                striker=active_dugout[0] if active_dugout else {"balls_faced": 10, "batting_hand": "right"},
+                                non_striker=active_dugout[1] if len(active_dugout) > 1 else {"balls_faced": 5, "batting_hand": "right"},
                                 bowler=eff_bowlers[0] if eff_bowlers else {"bowling_style": "RF"},
                                 team_a_batting=team_a_batting,
-                                p0_pre_match=float(db_m.get("p0_pre_match") or init_pa if newly_created else (db_m.get("p0_pre_match") or 50.0)),
+                                p0_pre_match=float(db_m.get("p0_pre_match") or 50.0),
                                 previous_p_team_a=float(db_m.get("p_team_a") or 50.0),
                                 dugout_players=eff_dugout,
                                 bowlers_list=eff_bowlers,
@@ -1400,10 +1433,12 @@ class CricApiSquadProvider:
                                 new_p_a = stage4_res.get("p_team_a", float(db_m.get("p_team_a") or 50.0))
                                 new_p_b = stage4_res.get("p_team_b", float(db_m.get("p_team_b") or 50.0))
                                 new_p_draw = stage4_res.get("p_draw", 0.0) if match_format == "TEST" else 0.0
-                                new_wpa = 0.0 if is_stumps else stage4_res.get("wpa", 0.0)
+                                new_wpa = 0.0 if (is_stumps or (innings_changed and runs == 0 and wkts == 0)) else stage4_res.get("wpa", 0.0)
                             new_par = stage4_res.get("par_score_projected", stage4_res.get("projected_score", float(db_m.get("par_score_projected") or 0)))
                             new_par_min = stage4_res.get("par_score_min", db_m.get("par_score_min"))
                             new_par_max = stage4_res.get("par_score_max", db_m.get("par_score_max"))
+                            new_bat_tank = stage4_res.get("batting_tank_pct")
+                            new_bowl_tank = stage4_res.get("bowling_tank_pct")
 
                             is_wicket_flag = 1 if wicket_fell else 0
                             try:
@@ -1416,9 +1451,11 @@ class CricApiSquadProvider:
                                         par_score_projected = ?,
                                         par_score_min = COALESCE(?, par_score_min),
                                         par_score_max = COALESCE(?, par_score_max),
+                                        batting_tank_pct = COALESCE(?, batting_tank_pct),
+                                        bowling_tank_pct = COALESCE(?, bowling_tank_pct),
                                         live_pitch_state_json = COALESCE(?, live_pitch_state_json)
                                     WHERE id = ?
-                                """, (new_p_a, new_p_b, new_p_draw, new_wpa, new_par, new_par_min, new_par_max, prov_pitch_state_str, mid))
+                                """, (new_p_a, new_p_b, new_p_draw, new_wpa, new_par, new_par_min, new_par_max, new_bat_tank, new_bowl_tank, prov_pitch_state_str, mid))
                             except Exception:
                                 await conn.execute("""
                                     UPDATE matches SET

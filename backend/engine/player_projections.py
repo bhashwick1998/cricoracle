@@ -3388,9 +3388,9 @@ def compute_match_scenario_score_projections(
                 deficit = s1 - curr_score
                 lead_str = f"Trail by {deficit} runs" if deficit > 0 else f"Lead by {abs(deficit)} runs"
 
-                # Follow-on rules (ICC Law 14: 200 runs threshold for 5-day Test)
-                follow_on_threshold = 200
-                follow_on_target = s1 - follow_on_threshold
+                # Follow-on rules (ICC Law 14.1.1: 200+ lead enforces follow-on -> trail <= 199 avoids it)
+                follow_on_threshold = 199
+                follow_on_target = max(0, s1 - follow_on_threshold)
                 follow_on_deficit = max(0, follow_on_target - curr_score)
                 follow_on_avoided = (curr_score >= follow_on_target)
                 follow_on_status_label = f"Follow-on avoided ({curr_score} >= {follow_on_target})" if follow_on_avoided else f"{team_2nd_bat} needs {follow_on_deficit} runs to avoid follow-on (Target: {follow_on_target})"

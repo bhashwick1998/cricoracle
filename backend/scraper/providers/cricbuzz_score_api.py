@@ -507,8 +507,18 @@ class CricbuzzScoreApi:
 
                     i = 0
                     in_bowling_section = False
+                    current_innings_hdr = ""
                     while i < len(lines):
                         line = lines[i]
+                        if line == "Batter" and i + 1 < len(lines) and lines[i+1] == "R":
+                            in_bowling_section = False
+                            for back in range(1, min(6, i + 1)):
+                                cand = lines[i - back]
+                                if any(k in cand.lower() for k in ("1st inn", "2nd inn", "innings")):
+                                    current_innings_hdr = cand
+                                    break
+                            i += 1
+                            continue
                         if line == "Bowler" and i + 1 < len(lines) and lines[i+1] == "O":
                             in_bowling_section = True
                             i += 1
@@ -546,7 +556,8 @@ class CricbuzzScoreApi:
                                             "balls": int(tokens[1]),
                                             "fours": int(tokens[2]),
                                             "sixes": int(tokens[3]),
-                                            "sr": float(tokens[4])
+                                            "sr": float(tokens[4]),
+                                            "innings_header": current_innings_hdr,
                                         })
                                     except Exception:
                                         pass

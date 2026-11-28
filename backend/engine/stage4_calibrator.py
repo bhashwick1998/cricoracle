@@ -664,7 +664,14 @@ def extract_innings2_chase_features(
     eff_inn1 = float(inn1_score) if inn1_score > 0 else max(1.0, eff_target - 1.0)
     runs_needed = max(0.0, eff_target - float(score))
     ov_rem = max(0.1, std_max_ov - overs_f)
-    crr = float(score) / max(0.5, float(overs_f))
+    raw_crr = float(score) / max(0.5, float(overs_f))
+    ramp_full_ov = min(3.5, std_max_ov * 0.175) if f == "T20I" else min(8.5, std_max_ov * 0.17)
+    if overs_f < ramp_full_ov:
+        expected_rr = max(2.5, float(s3_par_chase) / max(1.0, std_max_ov))
+        pseudo_ov = (ramp_full_ov - overs_f) * 0.65
+        crr = (float(score) + pseudo_ov * expected_rr) / max(0.5, float(overs_f) + pseudo_ov)
+    else:
+        crr = raw_crr
     rrr = runs_needed / ov_rem
 
     # Compute Stern DLS live chase par (interpolated across overs)
@@ -996,6 +1003,11 @@ def predict_innings2_chase_calibrated(
         fade_weight = 0.0
     else:
         fade_weight = 0.88 * ((balls_rem - 2.0) / 10.0)
+    ramp_start = 1.0
+    ramp_full = min(3.5, std_max_ov * 0.175) if f == "T20I" else min(8.5, std_max_ov * 0.17)
+    if overs_f < ramp_full:
+        early_ramp = max(0.0, min(1.0, (overs_f - ramp_start) / max(0.5, ramp_full - ramp_start)))
+        fade_weight *= (early_ramp ** 1.15)
 
     return {
         "p_chase_win": p_chase_win,

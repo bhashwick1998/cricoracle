@@ -543,6 +543,103 @@ class TestStage4StabilityAndStage3P0(unittest.TestCase):
         self.assertEqual(sp["live_test_innings_progression"]["innings_1"]["live_projected_total"], 324)
         self.assertEqual(sp["current_playing_team_projection"]["projected_final_score"], 324)
 
+    def test_innings_transition_continuity_across_formats(self):
+        from backend.engine.stage4_live import calculate_stage4_live
+
+        # 1. TEST: Inn 1 end (356/10) -> Inn 2 (0/0, 1.0, 5.0, 34.3 107/5)
+        r_test_1 = calculate_stage4_live(
+            innings=1, score=356, wickets=10, overs=100, balls=0, target=None,
+            striker={"name": "A"}, non_striker={"name": "B"}, bowler={"name": "C"},
+            team_a_batting=True, p0_pre_match=48.0, previous_p_team_a=53.0,
+            dugout_players=[], bowlers_list=[], match_format="TEST", live_pitch_type="balanced",
+            innings_1_score=356, match_day=2, is_progress_step=True,
+            previous_p_draw=3.0, venue_name="Hagley Oval, Christchurch",
+        )
+        pa_t, pd_t = r_test_1["p_team_a"], r_test_1["p_draw"]
+        r_test_2_start = calculate_stage4_live(
+            innings=2, score=0, wickets=0, overs=0, balls=0, target=None,
+            striker={"name": "Jaiswal"}, non_striker={"name": "Rahul"}, bowler={"name": "Southee"},
+            team_a_batting=False, p0_pre_match=48.0, previous_p_team_a=pa_t, previous_p_draw=pd_t,
+            dugout_players=[], bowlers_list=[], match_format="TEST", live_pitch_type="balanced",
+            innings_1_score=356, innings_2_score=0, match_day=2,
+            prev_innings=1, prev_score=356, prev_wickets=10, prev_overs=100, prev_balls=0,
+            is_progress_step=True, venue_name="Hagley Oval, Christchurch",
+        )
+        self.assertEqual(r_test_2_start["wpa"], 0.0)
+        self.assertLess(abs(r_test_2_start["p_team_a"] - pa_t), 3.0)
+
+        r_test_collapse = calculate_stage4_live(
+            innings=2, score=107, wickets=5, overs=34, balls=3, target=None,
+            striker={"name": "Sundar"}, non_striker={"name": "Jurel"}, bowler={"name": "Southee"},
+            team_a_batting=False, p0_pre_match=48.0, previous_p_team_a=r_test_2_start["p_team_a"],
+            previous_p_draw=r_test_2_start["p_draw"], dugout_players=[], bowlers_list=[],
+            match_format="TEST", live_pitch_type="balanced", innings_1_score=356, innings_2_score=107,
+            match_day=2, is_progress_step=True, venue_name="Hagley Oval, Christchurch",
+        )
+        self.assertGreater(r_test_collapse["p_team_a"], 70.0)
+
+        # 2. ODI & T20I: No Over 1.0 cliff when chasing normal 1st-innings totals
+        for fmt, inn1, tgt, checkpoints in (
+            ("ODI", 280, 281, [(0, 0, 0), (8, 0, 1), (18, 0, 2), (32, 0, 5)]),
+            ("T20I", 180, 181, [(0, 0, 0), (8, 0, 1), (18, 0, 2)]),
+        ):
+            r_i1 = calculate_stage4_live(
+                innings=1, score=inn1, wickets=6, overs=(50 if fmt == "ODI" else 20), balls=0, target=None,
+                striker={"name": "A"}, non_striker={"name": "B"}, bowler={"name": "C"},
+                team_a_batting=True, p0_pre_match=48.0, previous_p_team_a=55.0,
+                dugout_players=[], bowlers_list=[], match_format=fmt, live_pitch_type="balanced",
+                innings_1_score=inn1, is_progress_step=True,
+            )
+            prev_p = r_i1["p_team_a"]
+            for idx, (sc, wk, ov) in enumerate(checkpoints):
+                r_step = calculate_stage4_live(
+                    innings=2, score=sc, wickets=wk, overs=ov, balls=0, target=tgt,
+                    striker={"name": "A"}, non_striker={"name": "B"}, bowler={"name": "C"},
+                    team_a_batting=False, p0_pre_match=48.0, previous_p_team_a=prev_p,
+                    dugout_players=[], bowlers_list=[], match_format=fmt, live_pitch_type="balanced",
+                    innings_1_score=inn1,
+                    prev_innings=(1 if idx == 0 else 2),
+                    prev_score=(inn1 if idx == 0 else checkpoints[idx - 1][0]),
+                    prev_wickets=(6 if idx == 0 else 0),
+                    prev_overs=((50 if fmt == "ODI" else 20) if idx == 0 else checkpoints[idx - 1][2]),
+                    prev_balls=0, is_progress_step=True,
+                )
+                if idx == 0:
+                    self.assertEqual(r_step["wpa"], 0.0)
+                self.assertLess(abs(r_step["p_team_a"] - prev_p), 15.0, f"{fmt} jump too large at ov {ov}")
+                prev_p = r_step["p_team_a"]
+
+    def test_quality_tank_excludes_dismissed_batters_with_shifted_orders_and_bench(self):
+        from backend.engine.stage4_live import evaluate_quality_resource_tanks
+
+        squad = [
+            # Multi-innings Cricbuzz batting orders 12..16 already dismissed
+            {"id": "p1", "name": "Y Jaiswal", "role": "top_order_batter", "is_confirmed_xi": 1, "batting_order": 12, "is_out": 1, "dismissal": "b Henry", "t20_batting_avg": 36.5, "balls_faced": 6},
+            {"id": "p2", "name": "KL Rahul", "role": "wicket_keeper", "is_confirmed_xi": 1, "batting_order": 13, "is_out": 1, "dismissal": "c Conway b Duffy", "t20_batting_avg": 49.5, "balls_faced": 80},
+            {"id": "p3", "name": "D Padikkal", "role": "top_order_batter", "is_confirmed_xi": 1, "batting_order": 14, "is_out": 1, "dismissal": "c Blundell b Jamieson", "t20_batting_avg": 28.0, "balls_faced": 20},
+            {"id": "p4", "name": "Shubman Gill", "role": "top_order_batter", "is_confirmed_xi": 1, "batting_order": 15, "is_out": 1, "dismissal": "c Latham b Jamieson", "t20_batting_avg": 58.2, "balls_faced": 29},
+            {"id": "p5", "name": "RR Pant", "role": "top_order_batter", "is_confirmed_xi": 1, "batting_order": 16, "is_out": 1, "dismissal": "c Jamieson b Duffy", "t20_batting_avg": 28.0, "balls_faced": 39},
+            # Active crease batters (#6 & #7)
+            {"id": "p6", "name": "W Sundar", "role": "all_rounder", "is_confirmed_xi": 1, "batting_order": 17, "is_out": 0, "dismissal": "batting", "t20_batting_avg": 28.0, "balls_faced": 54, "current_match_runs": 10},
+            {"id": "p7", "name": "D Jurel", "role": "top_order_batter", "is_confirmed_xi": 1, "batting_order": 18, "is_out": 0, "dismissal": "batting", "t20_batting_avg": 28.0, "balls_faced": 45, "current_match_runs": 7},
+            # Lower-order bowlers yet to bat (#8..#11) with 'Yet to Bat' and schema default 28.0
+            {"id": "p8", "name": "Akash Deep", "role": "all_rounder", "is_confirmed_xi": 1, "batting_order": 8, "is_out": 0, "dismissal": "Yet to Bat", "t20_batting_avg": 28.0},
+            {"id": "p9", "name": "A Kamboj", "role": "frontline_pacer", "is_confirmed_xi": 1, "batting_order": 9, "is_out": 0, "dismissal": "Yet to Bat", "t20_batting_avg": 28.0},
+            {"id": "p10", "name": "J Bumrah", "role": "frontline_pacer", "is_confirmed_xi": 1, "batting_order": 9, "is_out": 0, "dismissal": "Yet to Bat", "t20_batting_avg": 7.5},
+            {"id": "p11", "name": "G Brar", "role": "frontline_pacer", "is_confirmed_xi": 1, "batting_order": 10, "is_out": 0, "dismissal": "Yet to Bat", "t20_batting_avg": 28.0},
+            # Bench reserves must be excluded
+            {"id": "b1", "name": "Rinku Singh", "role": "finisher", "is_confirmed_xi": 0, "batting_order": 99, "is_out": 0, "dismissal": "Yet to Bat", "t20_batting_avg": 58.0},
+            {"id": "b2", "name": "H Pandya", "role": "all_rounder", "is_confirmed_xi": 0, "batting_order": 99, "is_out": 0, "dismissal": "Yet to Bat", "t20_batting_avg": 33.8},
+        ]
+        res = evaluate_quality_resource_tanks(
+            wickets=5, dugout_players=squad, bowlers=[], overs_bowled=34.3,
+            match_format="TEST", live_pitch_type="balanced", current_innings=2,
+        )
+        self.assertEqual(res["recognized_batters_left"], 2)
+        self.assertEqual(res["tailenders_remaining"], 3)
+        self.assertLess(res["batting_tank_pct"], 35.0)
+        self.assertGreater(res["batting_tank_pct"], 5.0)
+
 
 if __name__ == "__main__":
     unittest.main()

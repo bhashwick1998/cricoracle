@@ -17,6 +17,23 @@ import numpy as np
 from typing import Dict, Any, List, Tuple, Optional, Union
 
 
+def _is_mirror_swapped_probs(
+    prev_a: Optional[float],
+    prev_b: Optional[float],
+    model_a: float,
+    model_b: float,
+) -> bool:
+    """Detects legacy CricAPI team-order inversions where Team A & Team B probabilities were swapped."""
+    if prev_a is None or prev_b is None:
+        return False
+    return (
+        abs(model_a - model_b) >= 20.0
+        and (prev_a - 50.0) * (model_a - 50.0) < 0.0
+        and abs(prev_a - model_b) <= 8.0
+        and abs(prev_b - model_a) <= 8.0
+    )
+
+
 def resolve_break_frozen_probs(
     match_row: Dict[str, Any],
     stage4_res: Dict[str, Any],
@@ -25,9 +42,13 @@ def resolve_break_frozen_probs(
     """Preserves valid stored live probabilities during breaks/idle polls, else uses Stage 4 output.
 
     Prevents falsy `p_draw == 0.0` fallbacks from stacking draw equity onto an already 100%-summed
-    `(p_team_a, p_team_b)` pair.
+    `(p_team_a, p_team_b)` pair, and refuses to freeze probabilities that are mirror-swapped vs the model.
     """
     fmt = str(match_format or "T20I").upper()
+    res_a = round(float(stage4_res.get("raw_p_team_a", stage4_res.get("p_team_a", 50.0))), 1)
+    res_d = round(float(stage4_res.get("raw_p_draw", stage4_res.get("p_draw", 0.0))), 1) if fmt == "TEST" else 0.0
+    res_b = round(float(stage4_res.get("raw_p_team_b", max(0.0, 100.0 - res_d - res_a))), 1)
+
     old_a = match_row.get("p_team_a")
     old_b = match_row.get("p_team_b")
     old_d = match_row.get("p_draw")
@@ -35,18 +56,16 @@ def resolve_break_frozen_probs(
         a_f = round(float(old_a), 1)
         b_f = round(float(old_b), 1)
         d_f = round(float(old_d), 1) if (fmt == "TEST" and old_d is not None) else 0.0
-        if fmt != "TEST":
-            if 99.5 <= (a_f + b_f) <= 100.5 and a_f >= 0.0 and b_f >= 0.0:
-                return a_f, round(100.0 - a_f, 1), 0.0
-        else:
-            # In an active TEST match (e.g. score > 0 and draw == 0.0 pre-hydration), don't freeze a 0%-draw stub
-            cur_score_row = float(match_row.get("current_score") or 0)
-            is_unhydrated_zero_draw = cur_score_row > 0 and d_f <= 0.0 and float(stage4_res.get("p_draw", 0.0)) > 0.0
-            if (not is_unhydrated_zero_draw) and 99.5 <= (a_f + b_f + d_f) <= 100.5 and a_f >= 0.0 and b_f >= 0.0 and d_f >= 0.0:
-                return a_f, b_f, d_f
-    res_a = round(float(stage4_res.get("p_team_a", 50.0)), 1)
-    res_d = round(float(stage4_res.get("p_draw", 0.0)), 1) if fmt == "TEST" else 0.0
-    res_b = round(max(0.0, 100.0 - res_d - res_a), 1)
+        if not _is_mirror_swapped_probs(a_f, b_f, res_a, res_b):
+            if fmt != "TEST":
+                if 99.5 <= (a_f + b_f) <= 100.5 and a_f >= 0.0 and b_f >= 0.0:
+                    return a_f, round(100.0 - a_f, 1), 0.0
+            else:
+                # In an active TEST match (e.g. score > 0 and draw == 0.0 pre-hydration), don't freeze a 0%-draw stub
+                cur_score_row = float(match_row.get("current_score") or 0)
+                is_unhydrated_zero_draw = cur_score_row > 0 and d_f <= 0.0 and res_d > 0.0
+                if (not is_unhydrated_zero_draw) and 99.5 <= (a_f + b_f + d_f) <= 100.5 and a_f >= 0.0 and b_f >= 0.0 and d_f >= 0.0:
+                    return a_f, b_f, d_f
     return res_a, res_b, res_d
 
 
@@ -396,6 +415,104 @@ def predict_next_ball_multinomial(
     }
     return probs
 
+_NOT_DISMISSED_STRINGS = frozenset({
+    "", "none", "null", "batting", "not out", "yet to bat",
+    "did not bat", "dnb", "retired hurt", "retired not out", "absent hurt",
+})
+
+
+def _is_batter_dismissed(player: Dict[str, Any]) -> bool:
+    if int(player.get("is_out") or 0) == 1:
+        return True
+    dismissal = str(player.get("dismissal") or "").strip().lower()
+    return dismissal not in _NOT_DISMISSED_STRINGS
+
+
+def _resolve_batter_avg(player: Dict[str, Any], order: int, ref_avg: float) -> float:
+    role_l = str(player.get("role") or "").lower()
+    is_pure_bowler = ("bowl" in role_l and "all" not in role_l)
+    is_all_rounder = ("all" in role_l)
+
+    raw_ov = player.get("overall_avg")
+    if raw_ov is not None and float(raw_ov) > 0.0:
+        return float(raw_ov)
+
+    raw_t20 = player.get("t20_batting_avg")
+    # SQL schema seeds unpopulated players with t20_batting_avg = 28.0 and bat_score = None;
+    # treat that sentinel as unpopulated so role/order priors govern instead of giving #10 pacers 28.0.
+    is_schema_default = (raw_t20 is not None and abs(float(raw_t20) - 28.0) < 1e-6 and player.get("bat_score") is None)
+    if raw_t20 is not None and float(raw_t20) > 0.0 and not is_schema_default:
+        return float(raw_t20)
+
+    if is_pure_bowler or (order >= 8 and "bat" not in role_l and "keep" not in role_l and "wk" not in role_l):
+        return max(9.0, ref_avg * (0.55 if (is_all_rounder and order == 8) else (0.42 if order == 8 else 0.28)))
+    if is_all_rounder or order == 7:
+        return max(14.0, ref_avg * 0.88)
+    return float(ref_avg)
+
+
+def _prepare_batting_xi(dugout_players: List[Dict[str, Any]]) -> Tuple[List[Tuple[Dict[str, Any], int]], bool]:
+    """Deduplicate squad, keep confirmed XI when present, and normalize batting slots 1..11."""
+    dedup_map: Dict[str, Dict[str, Any]] = {}
+    for idx, p in enumerate(dugout_players):
+        key = str(p.get("id") or p.get("player_id") or p.get("name") or f"_idx_{idx}").strip().lower()
+        prev = dedup_map.get(key)
+        if prev is None or int(p.get("is_confirmed_xi") or 0) > int(prev.get("is_confirmed_xi") or 0) or (_is_batter_dismissed(p) and not _is_batter_dismissed(prev)):
+            dedup_map[key] = p
+    deduped = list(dedup_map.values())
+
+    confirmed_cnt = sum(
+        1 for p in deduped
+        if int(p.get("is_confirmed_xi") or 0) == 1 or str(p.get("sub_status") or "").upper() == "CONFIRMED_XI"
+    )
+    if confirmed_cnt >= 6:
+        pool = [
+            p for p in deduped
+            if int(p.get("is_confirmed_xi") or 0) == 1
+            or str(p.get("sub_status") or "").upper() == "CONFIRMED_XI"
+            or _is_batter_dismissed(p)
+            or int(p.get("balls_faced") or 0) > 0
+            or int(p.get("current_match_runs") or 0) > 0
+        ]
+    else:
+        pool = deduped
+
+    def _role_priority(p: Dict[str, Any]) -> int:
+        role_l = str(p.get("role") or "").lower()
+        if "bat" in role_l or "keep" in role_l or "wk" in role_l:
+            return 0
+        if "all" in role_l:
+            return 1
+        if "bowl" in role_l:
+            return 3
+        return 2
+
+    def _has_scorecard_activity(p: Dict[str, Any]) -> bool:
+        d_low = str(p.get("dismissal") or "").strip().lower()
+        return _is_batter_dismissed(p) or int(p.get("balls_faced") or 0) > 0 or int(p.get("current_match_runs") or 0) > 0 or d_low in ("batting", "not out")
+
+    active_b = [p for p in pool if _has_scorecard_activity(p)]
+    has_dismissals = any(_is_batter_dismissed(p) for p in pool)
+    raw_orders = [int(p.get("batting_order") or 99) for p in pool]
+    needs_reindex = bool(active_b) or (max(raw_orders, default=0) > 11)
+
+    if needs_reindex and active_b:
+        active_sorted = sorted(active_b, key=lambda p: (int(p.get("batting_order") or 99), 0 if _is_batter_dismissed(p) else 1))
+        active_keys = {id(p) for p in active_sorted}
+        unbatted = sorted(
+            [p for p in pool if id(p) not in active_keys],
+            key=lambda p: (_role_priority(p), int(p.get("batting_order") or 99), -float(p.get("bat_score") or p.get("overall_avg") or p.get("t20_batting_avg") or 0.0)),
+        )
+        ordered_raw = active_sorted + unbatted
+        return [(p, min(11, i + 1)) for i, p in enumerate(ordered_raw)], has_dismissals
+
+    ordered_raw = sorted(pool, key=lambda p: (int(p.get("batting_order") or 99), _role_priority(p)))
+    return [
+        (p, (min(11, i + 1) if (max(raw_orders, default=0) > 11) else int(p.get("batting_order") or min(11, i + 1))))
+        for i, p in enumerate(ordered_raw)
+    ], has_dismissals
+
+
 def compute_unified_batter_weight(
     player: Dict[str, Any],
     order: int,
@@ -438,7 +555,7 @@ def compute_unified_batter_weight(
     if raw_bat_score is not None:
         bat_score = float(raw_bat_score)
     else:
-        avg = float(player.get("overall_avg") or player.get("t20_batting_avg") or ref_avg)
+        avg = _resolve_batter_avg(player, order, ref_avg)
         bat_score = max(20.0, min(85.0, (avg / ref_avg) * 50.0))
 
     skill_factor = (bat_score / 50.0) ** gamma
@@ -563,89 +680,77 @@ def evaluate_quality_resource_tanks(
     ref_avg = 35.0 if fmt == "TEST" else (30.0 if fmt == "ODI" else 25.0)
 
     # 1. Batting Dugout Quality (Unified 4-Layer Architecture with Rain Adaptation)
-    recognized_batters = 0
-    tailenders = 0
-    total_quality_points = 0.0
-    finisher_count = 0
+    def _score_batting_slots(slot_pairs: List[Tuple[Dict[str, Any], int]], eval_overs: float) -> Tuple[float, int, int, int]:
+        pts = 0.0
+        rec_c = 0
+        tail_c = 0
+        fin_c = 0
+        for p, order in slot_pairs:
+            w_layer, is_rec, is_fin = compute_unified_batter_weight(
+                player=p,
+                order=order,
+                current_overs=eval_overs,
+                fmt=fmt,
+                pitch_type=live_pitch_type,
+                ref_avg=ref_avg,
+                scheduled_overs=max_overs,
+                pitch_sweat_index=pitch_sweat_index,
+            )
+            if is_rec:
+                rec_c += 1
+            else:
+                tail_c += 1
+            if is_fin:
+                fin_c += 1
+            pts += ref_avg * (w_layer * (0.75 + 0.25 * (_resolve_batter_avg(p, order, ref_avg) / max(1.0, ref_avg))))
+        return pts, rec_c, tail_c, fin_c
 
     if dugout_players:
-        all_dugout = sorted(dugout_players, key=lambda x: int(x.get("batting_order") or 99))
-        if len(all_dugout) > wickets_left:
-            start_idx = min(wickets, max(0, len(all_dugout) - wickets_left))
-            remaining_batters = all_dugout[start_idx : start_idx + wickets_left]
+        xi_slots, has_dismissals = _prepare_batting_xi(dugout_players)
+        if has_dismissals:
+            dismissed_cnt = sum(1 for p, _ in xi_slots if _is_batter_dismissed(p))
+            surviving = [(p, o) for p, o in xi_slots if not _is_batter_dismissed(p)]
+            unflagged_wkts = max(0, int(wickets) - dismissed_cnt)
+            if unflagged_wkts > 0 and len(surviving) > wickets_left:
+                crease_ids = {
+                    id(p) for p, _ in surviving
+                    if int(p.get("balls_faced") or 0) > 0
+                    or int(p.get("current_match_runs") or 0) > 0
+                    or str(p.get("dismissal") or "").strip().lower() in ("batting", "not out")
+                }
+                kept: List[Tuple[Dict[str, Any], int]] = []
+                dropped = 0
+                for pair in surviving:
+                    if dropped < unflagged_wkts and id(pair[0]) not in crease_ids:
+                        dropped += 1
+                        continue
+                    kept.append(pair)
+                surviving = kept
+            remaining_slots = surviving[:wickets_left]
+        elif len(xi_slots) > wickets_left:
+            start_idx = min(wickets, max(0, len(xi_slots) - wickets_left))
+            remaining_slots = xi_slots[start_idx : start_idx + wickets_left]
         else:
-            remaining_batters = all_dugout[:wickets_left]
+            remaining_slots = xi_slots[:wickets_left]
 
-        for p in remaining_batters:
-            order = int(p.get("batting_order") or 8)
-            w_layer, is_rec, is_fin = compute_unified_batter_weight(
-                player=p,
-                order=order,
-                current_overs=float(overs_bowled),
-                fmt=fmt,
-                pitch_type=live_pitch_type,
-                ref_avg=ref_avg,
-                scheduled_overs=max_overs,
-                pitch_sweat_index=pitch_sweat_index
-            )
-            if is_rec: recognized_batters += 1
-            else: tailenders += 1
-            if is_fin: finisher_count += 1
+        if len(remaining_slots) < wickets_left:
+            next_ord = (remaining_slots[-1][1] + 1) if remaining_slots else ((10 - wickets_left) + 1)
+            while len(remaining_slots) < wickets_left:
+                ord_pad = min(11, max(1, next_ord))
+                remaining_slots.append(({"role": "bowler", "batting_order": ord_pad}, ord_pad))
+                next_ord += 1
 
-            avg = float(p.get("overall_avg") or p.get("t20_batting_avg") or ref_avg)
-            total_quality_points += avg * w_layer
+        total_quality_points, recognized_batters, tailenders, finisher_count = _score_batting_slots(remaining_slots, float(overs_bowled))
+        baseline_slots = xi_slots[:10] if len(xi_slots) >= 10 else [
+            ({"bat_score": 50.0, "overall_avg": ref_avg}, idx + 1) for idx in range(10)
+        ]
     else:
-        for idx in range(wickets_left):
-            order = (10 - wickets_left) + idx + 1
-            pseudo_player = {"bat_score": 50.0, "overall_avg": ref_avg}
-            w_layer, is_rec, is_fin = compute_unified_batter_weight(
-                player=pseudo_player,
-                order=order,
-                current_overs=float(overs_bowled),
-                fmt=fmt,
-                pitch_type=live_pitch_type,
-                ref_avg=ref_avg,
-                scheduled_overs=max_overs,
-                pitch_sweat_index=pitch_sweat_index
-            )
-            if is_rec: recognized_batters += 1
-            else: tailenders += 1
-            if is_fin: finisher_count += 1
-            total_quality_points += ref_avg * w_layer
+        pseudo_rem = [({"bat_score": 50.0, "overall_avg": ref_avg}, (10 - wickets_left) + idx + 1) for idx in range(wickets_left)]
+        total_quality_points, recognized_batters, tailenders, finisher_count = _score_batting_slots(pseudo_rem, float(overs_bowled))
+        baseline_slots = [({"bat_score": 50.0, "overall_avg": ref_avg}, idx + 1) for idx in range(10)]
 
     # Full starting baseline quality across all 10 batting wickets (Initial Capital)
-    baseline_team_quality = 0.0
-    if dugout_players and len(dugout_players) >= 10:
-        all_sorted = sorted(dugout_players, key=lambda x: int(x.get("batting_order") or 99))
-        for p in all_sorted[:10]:
-            order = int(p.get("batting_order") or 8)
-            w_layer, _, _ = compute_unified_batter_weight(
-                player=p,
-                order=order,
-                current_overs=0.0,
-                fmt=fmt,
-                pitch_type=live_pitch_type,
-                ref_avg=ref_avg,
-                scheduled_overs=max_overs,
-                pitch_sweat_index=pitch_sweat_index
-            )
-            avg = float(p.get("overall_avg") or p.get("t20_batting_avg") or ref_avg)
-            baseline_team_quality += avg * w_layer
-    else:
-        for idx in range(10):
-            order = idx + 1
-            pseudo_player = {"bat_score": 50.0, "overall_avg": ref_avg}
-            w_layer, _, _ = compute_unified_batter_weight(
-                player=pseudo_player,
-                order=order,
-                current_overs=0.0,
-                fmt=fmt,
-                pitch_type=live_pitch_type,
-                ref_avg=ref_avg,
-                scheduled_overs=max_overs,
-                pitch_sweat_index=pitch_sweat_index
-            )
-            baseline_team_quality += ref_avg * w_layer
+    baseline_team_quality, _, _, _ = _score_batting_slots(baseline_slots, 0.0)
 
     if baseline_team_quality <= 1.0:
         baseline_team_quality = ref_avg * 5.5
@@ -661,7 +766,7 @@ def evaluate_quality_resource_tanks(
     batting_quality_mult = round(max(0.40, min(1.60, 0.40 + 0.60 * (batting_tank_pct / 100.0))), 2)
 
     # 2. Bowling Tank Evaluation (Optimized Format-Specific Quota Tank)
-    strike_bowler_quality = 70.0
+    strike_bowler_quality = 75.0
     death_bowlers_exhausted = False
     death_quota_left = 999.0
     death_deficit = 0.0
@@ -725,7 +830,7 @@ def evaluate_quality_resource_tanks(
                 part_timers.append(b_copy)
 
         total_strike_quota_left = sum(b["quota_remaining"] for b in strike_bowlers)
-        strike_coverage = min(1.0, total_strike_quota_left / max(0.1, overs_left)) if overs_left > 0 else 1.0
+        strike_coverage = min(1.0, total_strike_quota_left / max(0.1, overs_left)) if (overs_left > 0 and strike_bowlers) else 1.0
 
         active_bowlers = [b for b in strike_bowlers if b["quota_remaining"] > 0] or bowlers or []
         if active_bowlers:
@@ -1273,24 +1378,87 @@ def run_live_vectorized_monte_carlo(
             return round(p_team_a, 1), round(p_team_b, 1), p_draw_val
 
         elif innings == 2:
-            s1 = innings_1_score or target_runs or 400
+            s1 = float(innings_1_score or target_runs or par_benchmark)
+            curr_ov_f = float(current_overs) + float(current_balls) / 6.0
             expected_overs_needed = (wickets_remaining * active_opw) + (10.0 * base_overs_per_wicket)
             overs_deficit = expected_overs_needed - total_overs_remaining
             draw_base = 1.0 / (1.0 + math.exp(-overs_deficit / 35.0))
             p_draw_val = round(max(2.0, min(98.0, draw_base * 100.0)), 1)
+            if previous_p_draw is not None and curr_ov_f < 15.0 and current_wickets == 0:
+                draw_anchor_w = max(0.0, (1.0 - curr_ov_f / 15.0) * 0.75)
+                p_draw_val = round(max(2.0, min(95.0, (1.0 - draw_anchor_w) * p_draw_val + draw_anchor_w * float(previous_p_draw))), 1)
             decisive_pool = 100.0 - p_draw_val
 
-            sim_inn2_runs = current_score + np.maximum(0, rng.normal(loc=wickets_remaining * (run_scale * 0.90), scale=25.0, size=n_sims))
-            sim_inn3_runs = np.maximum(40, rng.normal(loc=par_benchmark * pitch_deterioration_mult * 0.95, scale=32.0, size=n_sims))
-            sim_target_4 = np.maximum(50, (s1 - sim_inn2_runs) + sim_inn3_runs + 1)
-            chase_exp = par_benchmark * pitch_deterioration_mult * 0.88 + (batting_pitch_edge * 0.5)
+            from .player_projections import predict_live_innings_score_monte_carlo
+            bat_t = team_a if team_a_batting else team_b
+            bowl_t = team_b if team_a_batting else team_a
+            bat_c = normalize_team_code(bat_t)
+            bowl_c = normalize_team_code(bowl_t)
+            eff_par_2 = get_country_pitch_phase_rates(bat_c, "TEST", pitch_type, opponent_code=bowl_c)["par"]
+            eff_par_1 = get_country_pitch_phase_rates(bowl_c, "TEST", pitch_type, opponent_code=bat_c)["par"]
+            ref_par_2 = 0.50 * eff_par_2 + 0.50 * par_benchmark
+            if resolved_v_par > 0:
+                ref_par_2 = 0.65 * ref_par_2 + 0.35 * resolved_v_par
+            observed_pitch_s1 = min(540.0, max(185.0, s1))
+            base_inn2_par = 0.60 * ref_par_2 + 0.40 * observed_pitch_s1
 
-            p_inn2_team_win = float(np.mean(1.0 / (1.0 + np.exp((sim_target_4 - chase_exp) / 52.0))))
+            mc_test_2 = predict_live_innings_score_monte_carlo(
+                fmt="TEST",
+                curr_score=current_score,
+                curr_wkts=current_wickets,
+                curr_overs=float(current_overs),
+                curr_balls=current_balls,
+                batting_squad=list(batting_squad or []),
+                bowling_squad=list(bowling_squad or []),
+                ground_arch=pitch_type,
+                match_data={
+                    "id": f"{team_a}_{team_b}_TEST_I2",
+                    "batting_team": bat_t,
+                    "bowling_team": bowl_t,
+                    "team_a": team_a,
+                    "team_b": team_b,
+                    "historical_venue_par": base_inn2_par,
+                    "venue": venue_name,
+                    "current_innings": 2,
+                },
+                n_sims=400,
+            )
+            bq_test_2 = max(0.84, min(1.10, 0.72 + 0.28 * batting_quality_mult)) if current_wickets >= 3 else max(0.92, min(1.08, batting_quality_mult))
+            inn2_mc_weight = min(1.0, 0.45 + 0.55 * min(1.0, curr_ov_f / 25.0) + 0.12 * current_wickets)
+            mc_proj_2 = float(mc_test_2["proj_final"]) * bq_test_2
+            # At 0 wickets in early overs of Inn 2, prevent conservative default scorer from under-shooting team/pitch par
+            if current_wickets == 0 and curr_ov_f < 10.0:
+                mc_proj_2 = max(mc_proj_2, base_inn2_par * 0.95)
+            proj_inn2_mean = max(
+                float(current_score),
+                (1.0 - inn2_mc_weight) * base_inn2_par + inn2_mc_weight * mc_proj_2,
+            )
+            sd_2nd_test = max(40.0, min(105.0, (96.0 if pitch_type == "flat" else 82.0) * (1.0 - min(0.62, curr_ov_f / 105.0))))
+            sim_inn2_runs = np.maximum(float(current_score), rng.normal(loc=proj_inn2_mean, scale=sd_2nd_test, size=n_sims))
+
+            inn3_mean = (0.55 * eff_par_1 + 0.45 * observed_pitch_s1) * (0.94 if pitch_deterioration_mult < 0.80 else 0.96)
+            sim_inn3_runs = np.maximum(45.0, rng.normal(loc=inn3_mean, scale=55.0, size=n_sims))
+            sim_target_4 = (s1 - sim_inn2_runs) + sim_inn3_runs + 1.0
+            chase_exp = (0.55 * eff_par_2 + 0.45 * observed_pitch_s1) * (0.86 if pitch_deterioration_mult < 0.80 else 0.90) + (batting_pitch_edge * 0.5)
+
+            p_inn2_live = float(np.mean(1.0 / (1.0 + np.exp(np.clip((sim_target_4 - chase_exp) / 72.0, -8.0, 8.0)))))
+            p_inn2_live = max(0.03, min(0.97, p_inn2_live))
+
+            draw_p0_pool = float(previous_p_draw) if (previous_p_draw is not None and float(previous_p_draw) > 0 and float(p0_pre_match) + float(previous_p_draw) <= 101.0) else 0.0
+            p0_a_dec = (float(p0_pre_match) / max(15.0, 100.0 - draw_p0_pool)) if draw_p0_pool > 0 else (float(p0_pre_match) / 100.0)
+            p0_batting = max(0.03, min(0.97, p0_a_dec if team_a_batting else (1.0 - p0_a_dec)))
+            test_progress_2 = min(1.0, (90.0 + curr_ov_f) / 420.0)
+            shock_boost_2 = 0.22 if current_wickets >= 4 else (0.10 if current_wickets <= 1 and current_score >= 90 else 0.0)
+            info_w_2 = min(0.90, 0.40 + 0.50 * (test_progress_2 ** 0.80) + shock_boost_2)
+            logit_0 = math.log(p0_batting / (1.0 - p0_batting))
+            logit_live = math.log(p_inn2_live / (1.0 - p_inn2_live))
+            logit_comb = (1.0 - info_w_2) * logit_0 + info_w_2 * logit_live
+            p_inn2_team_win = 1.0 / (1.0 + math.exp(-max(-5.0, min(5.0, logit_comb))))
             p_inn1_team_win = 1.0 - p_inn2_team_win
 
             p_team_a_share = p_inn2_team_win if team_a_batting else p_inn1_team_win
-            p_team_a = round(decisive_pool * p_team_a_share, 1)
-            p_team_b = round(decisive_pool - p_team_a, 1)
+            p_team_a = round(max(1.0, min(decisive_pool - 1.0, decisive_pool * p_team_a_share)), 1)
+            p_team_b = round(max(0.0, decisive_pool - p_team_a), 1)
             return round(p_team_a, 1), round(p_team_b, 1), p_draw_val
 
         elif innings == 3:
@@ -1713,12 +1881,25 @@ def run_live_vectorized_monte_carlo(
         p_batting_final = max(0.5, min(99.5, p_comb * 100.0))
     else:
         # In 2nd innings chase:
+        # Early chase overs (<20%) retain mild P0 + par prior so noisy early 5-over MC rollouts don't dip sharply
+        # before the calibrated Innings-2 ensemble takes over. Zero effect at >= 20% checkpoints.
+        p0_batting = max(0.02, min(0.98, (p0_pre_match / 100.0) if team_a_batting else (1.0 - (p0_pre_match / 100.0))))
+        early_cut = 54.0 if fmt == "ODI" else 20.0
+        if balls_bowled < early_cut:
+            rem_ratio = (early_cut - float(balls_bowled)) / early_cut
+            p0_prior_w = (0.42 if fmt == "ODI" else 0.30) * (rem_ratio ** 1.1) * math.exp(-0.35 * max(0, int(current_wickets)))
+            p_sim_c = max(0.02, min(0.98, float(p_batting_wins)))
+            l_0 = math.log(p0_batting / (1.0 - p0_batting))
+            l_mc = math.log(p_sim_c / (1.0 - p_sim_c))
+            p_batting_raw = (1.0 / (1.0 + math.exp(-max(-5.5, min(5.5, (1.0 - p0_prior_w) * l_mc + p0_prior_w * l_0))))) * 100.0
+        else:
+            p_batting_raw = p_batting_wins * 100.0
+
         # At start of 2nd innings, anchor smoothly to previous_p_team_a (end of innings 1) over first 12 balls (2 overs)
-        # to ensure perfect continuity between 19.6 of Innings 1 and 0.1 of Innings 2!
-        p_batting_raw = p_batting_wins * 100.0
         if previous_p_team_a is not None and balls_bowled <= 12:
             prev_bat_p = (previous_p_team_a if team_a_batting else (100.0 - previous_p_team_a))
-            anchor_weight = max(0.0, (13.0 - float(balls_bowled)) / 12.0 * 0.92)
+            wkt_decay = math.exp(-0.45 * max(0, int(current_wickets)))
+            anchor_weight = max(0.0, (13.0 - float(balls_bowled)) / 12.0 * 0.92 * wkt_decay)
             p_batting_final = max(0.5, min(99.5, p_batting_raw * (1.0 - anchor_weight) + prev_bat_p * anchor_weight))
         else:
             p_batting_final = max(0.5, min(99.5, p_batting_raw))
@@ -2087,6 +2268,37 @@ def calculate_stage4_live(
     cal_live_res = _eval_cal_for_state(score, wickets, overs, balls)
     p_team_a_live, p_team_b_live, p_draw_live = _blend_calibrated_probs(p_team_a_live, p_draw_live, cal_live_res)
 
+    # Smooth early innings-transition continuity anchor across TEST / ODI / T20I:
+    # Eliminates discontinuities between Innings N end and early Innings N+1 (0.0 -> 3.0 / 8.0 / 15.0 ov)
+    # while vanishing completely (anchor_w == 0) before the 20% OOS calibrated checkpoints.
+    balls_into_innings = int(overs) * 6 + int(balls)
+    transition_window_balls = 18.0 if fmt == "T20I" else (48.0 if fmt == "ODI" else 90.0)
+    if (
+        innings >= 2
+        and previous_p_team_a is not None
+        and float(previous_p_team_a) > 0.0
+        and balls_into_innings < transition_window_balls
+    ):
+        wkt_decay = math.exp(-0.45 * max(0, int(wickets)))
+        max_anchor = 0.94 if (balls_into_innings == 0 and int(wickets) == 0) else 0.88
+        anchor_w = max_anchor * ((1.0 - balls_into_innings / transition_window_balls) ** 1.35) * wkt_decay
+        if fmt == "TEST":
+            if previous_p_draw is not None and float(previous_p_draw) > 0.0 and balls_into_innings <= 30 and int(wickets) == 0:
+                p_draw_live = round(max(1.0, min(95.0, (1.0 - anchor_w * 0.75) * p_draw_live + (anchor_w * 0.75) * float(previous_p_draw))), 1)
+            dec_pool_t = max(5.0, 100.0 - float(p_draw_live))
+            prev_a_clamped = max(1.0, min(dec_pool_t - 1.0, float(previous_p_team_a)))
+            p_team_a_live = round(max(1.0, min(dec_pool_t - 1.0, (1.0 - anchor_w) * float(p_team_a_live) + anchor_w * prev_a_clamped)), 1)
+            p_team_b_live = round(max(0.0, dec_pool_t - p_team_a_live), 1)
+        else:
+            prev_a_clamped = max(0.5, min(99.5, float(previous_p_team_a)))
+            p_team_a_live = round(max(0.5, min(99.5, (1.0 - anchor_w) * float(p_team_a_live) + anchor_w * prev_a_clamped)), 1)
+            p_team_b_live = round(max(0.0, 100.0 - p_team_a_live), 1)
+
+    raw_model_pa = float(p_team_a_live)
+    raw_model_pb = float(p_team_b_live)
+    raw_model_pd = float(p_draw_live)
+    is_innings_boundary = (prev_innings is not None and int(prev_innings) != int(innings) and int(score) == 0 and int(wickets) == 0)
+
     # Counterfactual Pitch-Held, Deterministic CRN Delivery WPA & Progress/Stumps Gating:
     # Eliminates non-attributed WPA swings from pitch flips, model switches, Stumps breaks, or idle polls.
     state_unchanged = (
@@ -2100,25 +2312,29 @@ def calculate_stage4_live(
         and int(prev_overs) == int(overs)
         and int(prev_balls) == int(balls)
     )
-    if (not is_progress_step) or bool(is_stumps) or state_unchanged:
+    if is_innings_boundary:
+        wpa = 0.0
+    elif (not is_progress_step) or bool(is_stumps) or state_unchanged:
         if previous_p_team_a is not None and float(previous_p_team_a) > 0:
             prev_a_f = round(float(previous_p_team_a), 1)
-            if fmt == "TEST":
-                prev_d_f = round(float(previous_p_draw if previous_p_draw is not None else p_draw_live), 1)
-                prev_d_f = max(0.0, min(95.0, prev_d_f))
-                if prev_a_f + prev_d_f <= 100.0:
-                    p_draw_live = prev_d_f
-                    p_team_a_live = prev_a_f
-                    p_team_b_live = round(max(0.0, 100.0 - p_draw_live - p_team_a_live), 1)
+            prev_d_est = round(float(previous_p_draw if previous_p_draw is not None else p_draw_live), 1) if fmt == "TEST" else 0.0
+            prev_b_est = round(max(0.0, 100.0 - prev_d_est - prev_a_f), 1)
+            if not _is_mirror_swapped_probs(prev_a_f, prev_b_est, raw_model_pa, raw_model_pb):
+                if fmt == "TEST":
+                    prev_d_f = max(0.0, min(95.0, prev_d_est))
+                    if prev_a_f + prev_d_f <= 100.0:
+                        p_draw_live = prev_d_f
+                        p_team_a_live = prev_a_f
+                        p_team_b_live = round(max(0.0, 100.0 - p_draw_live - p_team_a_live), 1)
+                    else:
+                        decisive_pool = max(0.0, 100.0 - prev_d_f)
+                        p_draw_live = prev_d_f
+                        p_team_a_live = round(min(decisive_pool, prev_a_f * (decisive_pool / 100.0)), 1)
+                        p_team_b_live = round(max(0.0, 100.0 - p_draw_live - p_team_a_live), 1)
                 else:
-                    decisive_pool = max(0.0, 100.0 - prev_d_f)
-                    p_draw_live = prev_d_f
-                    p_team_a_live = round(min(decisive_pool, prev_a_f * (decisive_pool / 100.0)), 1)
-                    p_team_b_live = round(max(0.0, 100.0 - p_draw_live - p_team_a_live), 1)
-            else:
-                p_draw_live = 0.0
-                p_team_a_live = round(max(0.0, min(100.0, prev_a_f)), 1)
-                p_team_b_live = round(max(0.0, 100.0 - p_team_a_live), 1)
+                    p_draw_live = 0.0
+                    p_team_a_live = round(max(0.0, min(100.0, prev_a_f)), 1)
+                    p_team_b_live = round(max(0.0, 100.0 - p_team_a_live), 1)
         wpa = 0.0
     elif (
         prev_score is not None
@@ -2334,6 +2550,9 @@ def calculate_stage4_live(
         "p_team_a": p_team_a_live,
         "p_team_b": p_team_b_live,
         "p_draw": p_draw_live,
+        "raw_p_team_a": round(raw_model_pa, 1),
+        "raw_p_team_b": round(raw_model_pb, 1),
+        "raw_p_draw": round(raw_model_pd, 1),
         "wpa": wpa,
         "live_pitch_type": canon_pitch,
         "active_pitch_type": canon_pitch,

@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import TeamFlag from "./TeamFlag";
 import { getTeamMeta, formatKickoffCountdown, formatDateTime } from "@/lib/teamUtils";
 import {
   Activity,
@@ -343,7 +344,7 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
               </span>
             )}
 
-            {((match as any).dew_intelligence?.active_dew_advantage || ((match as any).is_day_night && (match.dew_factor || 0) >= 0.30 && match.format !== 'TEST')) && (
+            {Boolean((match as any).dew_intelligence?.active_dew_advantage || ((match as any).is_day_night && (match.dew_factor || 0) >= 0.30 && match.format !== 'TEST')) && (
               <span
                 className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md uppercase flex items-center gap-1 border bg-blue-950/90 text-blue-300 border-blue-600/80 shadow-[0_0_8px_rgba(59,130,246,0.3)]"
                 title={(match as any).dew_intelligence?.tactical_assessment || `Live Dew Impact: +${(((match as any).dew_intelligence?.chase_equity_boost_pct || (match.dew_factor || 0.30) * 8.5)).toFixed(1)}% Chasing Advantage under lights`}
@@ -380,9 +381,9 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
             {/* Team A */}
             <div className="flex items-center gap-2 sm:gap-2.5">
               <div
-                className={`w-9 h-9 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-lg sm:text-xl shadow-md border ${metaA.borderGlow} bg-gradient-to-br ${metaA.gradient} shrink-0`}
+                className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-md border ${metaA.borderGlow} bg-gradient-to-br ${metaA.gradient} shrink-0`}
               >
-                {metaA.flag}
+                <TeamFlag code={metaA.short} size="md" />
               </div>
               <div className="overflow-hidden">
                 <div className="text-xs sm:text-sm font-black text-white truncate leading-tight">
@@ -405,9 +406,9 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                 </div>
               </div>
               <div
-                className={`w-9 h-9 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-lg sm:text-xl shadow-md border ${metaB.borderGlow} bg-gradient-to-br ${metaB.gradient} shrink-0`}
+                className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-md border ${metaB.borderGlow} bg-gradient-to-br ${metaB.gradient} shrink-0`}
               >
-                {metaB.flag}
+                <TeamFlag code={metaB.short} size="md" />
               </div>
             </div>
           </div>
@@ -447,105 +448,105 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
         </div>
 
         {/* Stage 3 (XI & Toss Locked P₀) and Stage 4 (Live In-Play / Final Result) Probabilities Only */}
-        <div className="grid grid-cols-2 gap-2 p-2 rounded-xl bg-slate-950/70 border border-slate-800/80 mb-3 text-center font-mono-numbers">
+        <div className="grid grid-cols-2 gap-2.5 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 mb-3 font-mono-numbers">
           {/* Stage 3 (XI & Toss Locked P₀) */}
-          <div className="p-2 sm:p-2.5 rounded-lg bg-slate-900/80 border border-emerald-900/40 min-w-0 flex flex-col justify-between overflow-hidden relative" title="Stage 3: XI & Toss Locked Pre-Match Anchor (P₀)">
-            <div className="flex items-center justify-center gap-1 w-full min-w-0 mb-1">
-              <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider truncate">
-                Stage 3 Locked (P₀)
+          <div className="p-2.5 rounded-lg bg-slate-900/80 border border-emerald-900/40 min-w-0 flex flex-col justify-between" title="Stage 3: XI & Toss Locked Pre-Match Anchor (P₀)">
+            <div className="flex items-center justify-between gap-1 mb-1.5">
+              <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider whitespace-nowrap">
+                Stage 3 • Prior P₀
               </span>
-            </div>
-            <div className="w-full min-w-0 flex flex-col items-center justify-center my-auto py-0.5">
-              <div className="flex items-center justify-center gap-1 text-[10px] sm:text-[11px] font-black text-white w-full min-w-0 px-0.5">
-                <span className="text-cyan-400 font-bold truncate shrink-1">
-                  {metaA.short} {match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a}%
-                </span>
-                <span className="text-[8px] text-slate-500 font-normal shrink-0">vs</span>
-                <span className="text-amber-400 font-bold truncate shrink-1">
-                  {Math.round((100 - (match.p0_pre_match != null ? match.p0_pre_match : match.p_team_a)) * 10) / 10}% {metaB.short}
-                </span>
-              </div>
-              {match.format === "TEST" && (match.p_draw || 0) > 0 && (
-                <div className="flex items-center justify-center gap-1 text-[9px] font-bold text-slate-400 mt-0.5">
-                  <span className="text-[8px] text-slate-500 uppercase font-semibold">Prior</span>
-                  <span className="text-slate-300 font-mono-numbers bg-slate-950/80 px-1 py-0.2 rounded border border-slate-800 leading-none">
-                    Anchor P₀
-                  </span>
-                </div>
+              {match.format === "TEST" && Number(match.p_draw || 0) > 0 && (
+                <span className="text-[8px] text-slate-400 font-semibold uppercase whitespace-nowrap">Anchor</span>
               )}
             </div>
-            <div className="w-full min-w-0 mt-1 pt-0.5 border-t border-slate-800/60">
-              <span className="text-[8.5px] sm:text-[9px] text-slate-400 block truncate text-center leading-tight">
-                Toss Shift: {match.delta_toss_shift ? (match.delta_toss_shift > 0 ? `+${match.delta_toss_shift}%` : `${match.delta_toss_shift}%`) : "0%"}
-              </span>
+            {(() => {
+              const p0a = match.p0_pre_match != null ? Number(match.p0_pre_match) : Number(match.p_team_a);
+              const p0b = Math.round((100 - p0a) * 10) / 10;
+              return (
+                <div className="grid grid-cols-2 gap-1.5 text-[11px] font-black">
+                  <div className="bg-slate-950/70 rounded px-1.5 py-1 flex items-center justify-between border border-slate-800/70">
+                    <span className="text-slate-300 font-sans text-[10px] font-bold">{metaA.short}</span>
+                    <span className="text-cyan-400">{p0a}%</span>
+                  </div>
+                  <div className="bg-slate-950/70 rounded px-1.5 py-1 flex items-center justify-between border border-slate-800/70">
+                    <span className="text-slate-300 font-sans text-[10px] font-bold">{metaB.short}</span>
+                    <span className="text-amber-400">{p0b}%</span>
+                  </div>
+                </div>
+              );
+            })()}
+            <div className="mt-1.5 pt-1 border-t border-slate-800/60 flex items-center justify-between text-[9px] text-slate-400">
+              <span>Toss Shift</span>
+              <span className="font-bold text-slate-200">{match.delta_toss_shift ? (match.delta_toss_shift > 0 ? `+${match.delta_toss_shift}%` : `${match.delta_toss_shift}%`) : "0%"}</span>
             </div>
           </div>
 
           {/* Stage 4 (Live In-Play / Final Result) */}
-          <div className={`p-2 sm:p-2.5 rounded-lg border min-w-0 flex flex-col justify-between overflow-hidden relative ${
+          <div className={`p-2.5 rounded-lg border min-w-0 flex flex-col justify-between ${
             match.state === "LIVE_BALL_BY_BALL"
-              ? "bg-rose-950/40 border-rose-800/80 shadow-inner ring-1 ring-rose-500/20"
+              ? "bg-rose-950/35 border-rose-800/70 shadow-inner ring-1 ring-rose-500/20"
               : match.state === "COMPLETED"
               ? "bg-emerald-950/30 border-emerald-800/60"
               : "bg-slate-900/80 border-slate-800/60"
           }`} title="Stage 4: Live Ball-by-Ball Dynamic Win Probability">
-            <div className="flex items-center justify-center gap-1 w-full min-w-0 mb-1">
-              {match.state === "LIVE_BALL_BY_BALL" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping shrink-0" />
+            <div className="flex items-center justify-between gap-1 mb-1.5">
+              <div className="flex items-center gap-1 min-w-0">
+                {match.state === "LIVE_BALL_BY_BALL" && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping shrink-0" />
+                )}
+                <span className={`text-[9px] font-bold uppercase tracking-wider whitespace-nowrap ${
+                  match.state === "LIVE_BALL_BY_BALL" ? "text-rose-400" : match.state === "COMPLETED" ? "text-emerald-400" : "text-cyan-400"
+                }`}>
+                  {match.state === "COMPLETED" ? "Stage 4 • Final" : match.state === "LIVE_BALL_BY_BALL" ? "Stage 4 • Live" : "Stage 4 • Standby"}
+                </span>
+              </div>
+              {match.format === "TEST" && Number(match.p_draw || 0) > 0 && !(match.state === "COMPLETED" && Number(match.p_draw || 0) >= 99.0) && (
+                <span className="text-[9px] text-slate-200 bg-slate-950/90 px-1.5 py-0.5 rounded border border-slate-700/70 font-bold whitespace-nowrap">
+                  Draw {match.p_draw}%
+                </span>
               )}
-              <span className={`text-[9px] font-bold uppercase tracking-wider truncate ${
-                match.state === "LIVE_BALL_BY_BALL" ? "text-rose-400" : match.state === "COMPLETED" ? "text-emerald-400" : "text-cyan-400"
-              }`}>
-                {match.state === "COMPLETED" ? "Stage 4 Result" : match.state === "LIVE_BALL_BY_BALL" ? "Stage 4 Live" : "Stage 4 In-Play"}
-              </span>
             </div>
-            <div className="w-full min-w-0 flex flex-col items-center justify-center my-auto py-0.5">
-              {match.state === "COMPLETED" && (match.p_draw || 0) >= 99.0 ? (
-                <div className="flex flex-col items-center justify-center text-center">
-                  <span className="text-[11px] font-black text-emerald-400 uppercase tracking-wide">Match Drawn</span>
-                  <span className="text-[9px] text-slate-300 font-mono-numbers font-bold">Draw 100%</span>
+            {match.state === "COMPLETED" && Number(match.p_draw || 0) >= 99.0 ? (
+              <div className="flex items-center justify-between bg-slate-950/70 rounded px-2 py-1 border border-emerald-800/50">
+                <span className="text-[10px] font-black text-emerald-400 uppercase font-sans">Match Drawn</span>
+                <span className="text-[10px] text-slate-200 font-bold">100%</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-1.5 text-[11px] font-black">
+                <div className="bg-slate-950/70 rounded px-1.5 py-1 flex items-center justify-between border border-slate-800/70">
+                  <span className="text-slate-300 font-sans text-[10px] font-bold">{metaA.short}</span>
+                  <span className="text-cyan-400">{match.p_team_a}%</span>
                 </div>
-              ) : (
-                <>
-                  <div className="flex items-center justify-center gap-1 text-[10px] sm:text-[11px] font-black text-white w-full min-w-0 px-0.5">
-                    <span className="text-cyan-400 font-bold truncate shrink-1">{metaA.short} {match.p_team_a}%</span>
-                    <span className="text-[8px] text-slate-500 font-normal shrink-0">vs</span>
-                    <span className="text-amber-400 font-bold truncate shrink-1">{match.p_team_b}% {metaB.short}</span>
-                  </div>
-                  {match.format === "TEST" && (match.p_draw || 0) > 0 && (
-                    <div className="flex items-center justify-center gap-1 text-[9px] font-bold text-slate-300 mt-0.5">
-                      <span className="text-[8px] text-slate-400 uppercase font-semibold">Draw</span>
-                      <span className="text-slate-100 font-mono-numbers bg-slate-900/90 px-1 py-0.2 rounded border border-slate-700/60 leading-none">
-                        {match.p_draw}%
-                      </span>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-            <div className="w-full min-w-0 mt-1 pt-0.5 border-t border-rose-900/30">
-              <span className="text-[8.5px] sm:text-[9px] text-slate-400 block truncate text-center leading-tight">
-                {match.state === "COMPLETED" ? ((match.p_draw || 0) >= 99.0 ? "Official Result: Draw" : "Match Finalized") : match.state === "LIVE_BALL_BY_BALL" ? "Telemetry In-Play" : "Pre-Match Standby"}
+                <div className="bg-slate-950/70 rounded px-1.5 py-1 flex items-center justify-between border border-slate-800/70">
+                  <span className="text-slate-300 font-sans text-[10px] font-bold">{metaB.short}</span>
+                  <span className="text-amber-400">{match.p_team_b}%</span>
+                </div>
+              </div>
+            )}
+            <div className="mt-1.5 pt-1 border-t border-rose-900/30 flex items-center justify-between text-[9px] text-slate-400">
+              <span>Status</span>
+              <span className="font-semibold text-slate-300 truncate">
+                {match.state === "COMPLETED" ? ((match.p_draw || 0) >= 99.0 ? "Draw" : "Finalized") : match.state === "LIVE_BALL_BY_BALL" ? "In-Play Engine" : "Standby"}
               </span>
             </div>
           </div>
         </div>
 
         {/* Country Pitch Adaptability Strip */}
-        {match.team_a_country_pitch_adaptability && match.team_b_country_pitch_adaptability && (
-          <div className="flex items-center justify-between text-[11px] text-slate-300 px-3 py-1.5 mb-3 bg-slate-950/60 rounded-xl border border-slate-800 font-mono-numbers">
-            <span className="text-cyan-400 font-bold">{metaA.short} Adapt: {match.team_a_country_pitch_adaptability}%</span>
-            <span className="text-[9px] text-slate-400 uppercase font-sans flex items-center gap-1">
+        {Boolean(match.team_a_country_pitch_adaptability && match.team_b_country_pitch_adaptability) && (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300 px-3 py-2 mb-3 bg-slate-950/60 rounded-xl border border-slate-800 font-mono-numbers">
+            <span className="text-cyan-400 font-bold whitespace-nowrap">{metaA.short} Adapt: {match.team_a_country_pitch_adaptability}%</span>
+            <span className="text-[9px] text-slate-400 uppercase font-sans flex items-center gap-1.5 whitespace-nowrap">
               Deck: <span className={`${(match as any).is_pitch_override ? "text-emerald-300 font-black" : "text-amber-300 font-bold"}`}>{match.ground_pitch_archetype || "Flat"}</span>
               {(match as any).is_pitch_override ? (
-                <span className="text-[8px] px-1 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/80 font-mono font-bold" title={(match as any).pitch_override_reason}>
-                  REAL NLP DECK
+                <span className="text-[8px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/80 font-mono font-bold whitespace-nowrap" title={(match as any).pitch_override_reason}>
+                  NLP Pitch
                 </span>
               ) : (
-                <span className="text-[8px] px-1 py-0.2 rounded bg-slate-800 text-cyan-300 font-mono">65% 1-Yr</span>
+                <span className="text-[8px] px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono whitespace-nowrap">65% 1-Yr</span>
               )}
             </span>
-            <span className="text-amber-400 font-bold">{metaB.short} Adapt: {match.team_b_country_pitch_adaptability}%</span>
+            <span className="text-amber-400 font-bold whitespace-nowrap">{metaB.short} Adapt: {match.team_b_country_pitch_adaptability}%</span>
           </div>
         )}
 
@@ -679,7 +680,7 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                 ) : hasInn1 && match.current_innings >= 2 ? (
                   <div className="space-y-0.5 mt-1">
                     <div className="text-xs font-semibold text-slate-300 font-mono-numbers flex items-center gap-1.5 flex-wrap">
-                      <span>{inn1Team.flag}</span>
+                      <TeamFlag code={inn1Team.short} size="xs" />
                       <span className="text-slate-400 font-bold">{inn1Team.name}{match.format === "TEST" ? " (1st Inn):" : ":"}</span>
                       <span className="text-white font-bold">
                         {(match as any).innings_1_score}{(match as any).innings_1_wickets != null ? `/${(() => {
@@ -701,7 +702,7 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                       const inn2Team = inn1Team === metaA ? metaB : metaA;
                       return (
                         <div className="text-xs font-semibold text-slate-300 font-mono-numbers flex items-center gap-1.5 flex-wrap">
-                          <span>{inn2Team.flag}</span>
+                          <TeamFlag code={inn2Team.short} size="xs" />
                           <span className="text-slate-400 font-bold">{inn2Team.name}{match.format === "TEST" ? " (1st Inn):" : ":"}</span>
                           <span className="text-white font-bold">
                             {(match as any).innings_2_score}{(match as any).innings_2_wickets != null ? `/${(match as any).innings_2_wickets}` : ""}
@@ -715,8 +716,8 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                         </div>
                       );
                     })()}
-                    <div className="text-lg font-black text-white font-mono-numbers flex items-center gap-1.5 flex-wrap">
-                      <span>{battingTeam.flag}</span>
+                    <div className="text-base sm:text-lg font-black text-white font-mono-numbers flex items-center gap-1.5 flex-wrap">
+                      <TeamFlag code={battingTeam.short} size="xs" />
                       <span className="text-cyan-300 font-bold">
                         {battingTeam.name}
                         {match.format === "TEST"
@@ -725,15 +726,15 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                             : " (2nd Inn):"
                           : ":"}
                       </span>
-                      <span className="text-white">{match.current_score}/{match.current_wickets}</span>
-                      <span className="text-xs text-slate-400 font-normal">
+                      <span className="text-white whitespace-nowrap">{match.current_score}/{match.current_wickets}</span>
+                      <span className="text-xs text-slate-400 font-normal whitespace-nowrap">
                         ({match.current_overs}.{match.current_balls} ov)
                       </span>
                     </div>
-                    {match.format === "TEST" && match.current_innings === 2 && (match as any).follow_on_threshold && (
-                      <div className="text-[10px] text-amber-300 font-mono flex items-center gap-1">
-                        <span>🛡️ Target to avoid follow-on: <strong>{(match as any).follow_on_threshold}</strong></span>
-                        <span className="text-slate-400">• Need {Math.max(0, Number((match as any).follow_on_threshold) - Number(match.current_score))} to avoid</span>
+                    {match.format === "TEST" && match.current_innings === 2 && Boolean((match as any).follow_on_threshold) && (
+                      <div className="text-[10px] text-amber-300 font-mono flex items-center gap-1 flex-wrap">
+                        <span>🛡️ Avoid Follow-on: <strong>{(match as any).follow_on_threshold}</strong></span>
+                        <span className="text-slate-400">• Need {Math.max(0, Number((match as any).follow_on_threshold) - Number(match.current_score))}</span>
                       </div>
                     )}
                     {match.format === "TEST" && ((match as any).min_overs_remaining !== undefined || (match as any).overs_left_today !== undefined || (match as any).total_match_overs_remaining !== undefined) && (
@@ -744,17 +745,17 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                         ) : null}
                       </div>
                     )}
-                    <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                    <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5">
                       <span>vs</span>
-                      <span>{bowlingTeam.flag}</span>
+                      <TeamFlag code={bowlingTeam.short} size="xs" />
                       <span className="text-slate-300 font-semibold">{bowlingTeam.name}</span>
                       <span>Bowling</span>
                     </div>
                   </div>
                 ) : (
                   <>
-                    <div className="text-lg font-black text-white font-mono-numbers mt-0.5 flex items-center gap-1.5 flex-wrap">
-                      <span>{battingTeam.flag}</span>
+                    <div className="text-base sm:text-lg font-black text-white font-mono-numbers mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <TeamFlag code={battingTeam.short} size="xs" />
                       <span className="text-cyan-300 font-bold">
                         {battingTeam.name}
                         {match.format === "TEST"
@@ -763,14 +764,14 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                             : " (1st Inn):"
                           : ":"}
                       </span>
-                      <span className="text-white">{match.current_score}/{match.current_wickets}</span>
-                      <span className="text-xs text-slate-400 font-normal">
+                      <span className="text-white whitespace-nowrap">{match.current_score}/{match.current_wickets}</span>
+                      <span className="text-xs text-slate-400 font-normal whitespace-nowrap">
                         ({match.current_overs}.{match.current_balls} ov)
                       </span>
                     </div>
-                    <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1.5">
                       <span>vs</span>
-                      <span>{bowlingTeam.flag}</span>
+                      <TeamFlag code={bowlingTeam.short} size="xs" />
                       <span className="text-slate-300 font-semibold">{bowlingTeam.name}</span>
                       <span>Bowling</span>
                     </div>
@@ -1230,7 +1231,7 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                       </div>
                     </div>
                   </div>
-                  {(match.powerplay_breakdown || match.is_curtailed || (match.pitch_sweat_index && match.pitch_sweat_index > 0)) && (
+                  {Boolean(match.powerplay_breakdown || match.is_curtailed || Number(match.pitch_sweat_index || 0) > 0) && (
                     <div className="pt-1.5 border-t border-slate-800/60 space-y-1 mt-1">
                       {match.powerplay_breakdown?.summary && (
                         <div className="flex items-center justify-between text-[9px] font-mono text-slate-400">
@@ -1238,7 +1239,7 @@ export default function MatchCard({ match, onStateChange, onStepDelivery, sandbo
                           <span className="text-slate-300 font-semibold">{match.powerplay_breakdown.summary}</span>
                         </div>
                       )}
-                      {(match.is_curtailed || (match.pitch_sweat_index && match.pitch_sweat_index > 0)) && (
+                      {Boolean(match.is_curtailed || Number(match.pitch_sweat_index || 0) > 0) && (
                         <div className="flex items-center justify-between text-[9px] font-mono text-slate-400">
                           <span className="text-slate-500">🌧️ Physics:</span>
                           <span className="flex items-center gap-1.5 text-cyan-300">
